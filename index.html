@@ -50,6 +50,8 @@
             <option value="sale">Sale (Revenue)</option>
             <option value="purchase">Purchase (Expense / Inventory)</option>
             <option value="payroll">Payroll (Salary)</option>
+            <option value="receipt">Receipt (Cash In)</option>
+            <option value="payment">Payment (Cash Out)</option>
           </select>
         </label>
 
@@ -105,6 +107,69 @@
           <label>Pay From Account
             <select id="payFromAccount"></select>
           </label>
+        </div>
+
+        <div id="receiptFields" style="display:none;">
+          <label>Payer / Customer <input type="text" id="receiptPayer" placeholder="Payer name" /></label>
+          <label>Amount Received ₦
+            <input type="number" id="receiptAmount" value="0" min="0" step="0.01" />
+          </label>
+          <label>Receive To Account
+            <select id="receiptToAccount"></select>
+          </label>
+          <label>Apply Receipt As
+            <select id="receiptApplyOption" onchange="handleReceiptApplyChange()">
+              <option value="invoice">Apply to AR Invoice</option>
+              <option value="cashsale">Treat as Cash Sale</option>
+            </select>
+          </label>
+          <div id="receiptInvoiceBlock">
+            <label>Select Invoice
+              <select id="receiptInvoiceSelect"></select>
+            </label>
+          </div>
+          <div id="receiptCashSaleBlock" style="display:none;">
+            <label>Include VAT?
+              <select id="receiptHasVAT">
+                <option value="no">No — VAT-exempt</option>
+                <option value="yes">Yes — VAT at 7.5%</option>
+              </select>
+            </label>
+          </div>
+          <label>Reference <input type="text" id="receiptReference" placeholder="Optional reference" /></label>
+        </div>
+
+        <div id="paymentFields" style="display:none;">
+          <label>Payee / Supplier <input type="text" id="paymentPayee" placeholder="Payee name" /></label>
+          <label>Amount Paid ₦
+            <input type="number" id="paymentAmount" value="0" min="0" step="0.01" />
+          </label>
+          <label>Pay From Account
+            <select id="paymentFromAccount"></select>
+          </label>
+          <label>Apply Payment As
+            <select id="paymentApplyOption" onchange="handlePaymentApplyChange()">
+              <option value="invoice">Apply to AP Invoice</option>
+              <option value="expense">Treat as Direct Expense</option>
+            </select>
+          </label>
+          <div id="paymentInvoiceBlock">
+            <label>Select Invoice
+              <select id="paymentInvoiceSelect"></select>
+            </label>
+          </div>
+          <div id="paymentExpenseBlock" style="display:none;">
+            <label>Expense Account
+              <select id="paymentExpenseAccount"></select>
+            </label>
+            <label>Include VAT?
+              <select id="paymentHasVAT">
+                <option value="no">No — VAT-exempt</option>
+                <option value="yes">Yes — VAT at 7.5%</option>
+              </select>
+            </label>
+          </div>
+          <label>Reference <input type="text" id="paymentReference" placeholder="Optional reference" /></label>
         </div>
 
         <button onclick="addTransaction()">Record Transaction</button>
@@ -199,6 +264,96 @@
     function money(v) { return Number(v || 0); }
     function fmt(v) { return Number(v).toLocaleString(undefined, {maximumFractionDigits:2}); }
 
+    // Compute open invoices (AR for Sales, AP for Purchases)
+    function computeOpenInvoices() {
+      const openInvoices = { ar: [], ap: [] };
+      
+      // First, collect all Sale and Purchase invoices
+      const invoices = {};
+      state.transactions.forEach(tx => {
+        if (tx.type === 'Sale') {
+          const total = tx.meta ? tx.meta.total : 0;
+          invoices[tx.id] = {
+            id: tx.id,
+            type: 'AR',
+            date: tx.date,
+            party: tx.meta ? tx.meta.party : '',
+            total: total,
+            remaining: total
+          };
+        } else if (tx.type === 'Purchase') {
+          const total = tx.meta ? tx.meta.total : 0;
+          invoices[tx.id] = {
+            id: tx.id,
+            type: 'AP',
+            date: tx.date,
+            party: tx.meta ? tx.meta.party : '',
+            total: total,
+            remaining: total
+          };
+        }
+      });
+
+      // Now, reduce remaining balance for receipts/payments applied to invoices
+      state.transactions.forEach(tx => {
+        if ((tx.type === 'Receipt' || tx.type === 'Payment') && tx.meta && tx.meta.appliedTo) {
+          const invoiceId = tx.meta.appliedTo;
+          const amountApplied = tx.meta.amountApplied || 0;
+          if (invoices[invoiceId]) {
+            invoices[invoiceId].remaining -= amountApplied;
+          }
+        }
+      });
+
+      // Filter to only open invoices (remaining > 0.01 to handle rounding)
+      Object.values(invoices).forEach(inv => {
+        if (inv.remaining > 0.01) {
+          if (inv.type === 'AR') {
+            openInvoices.ar.push(inv);
+          } else if (inv.type === 'AP') {
+            openInvoices.ap.push(inv);
+          }
+        }
+      });
+
+      return openInvoices;
+    }
+
+    // Render invoice selectors for receipts and payments
+    function renderInvoiceSelectors() {
+      const openInvoices = computeOpenInvoices();
+      
+      // AR invoices for receipts
+      const receiptSelect = document.getElementById('receiptInvoiceSelect');
+      receiptSelect.innerHTML = '<option value="">-- Select an invoice --</option>';
+      openInvoices.ar.forEach(inv => {
+        const opt = `<option value="${inv.id}">${inv.id} — ${inv.date} — ${inv.party} — Remaining: ₦${fmt(inv.remaining)}</option>`;
+        receiptSelect.insertAdjacentHTML('beforeend', opt);
+      });
+
+      // AP invoices for payments
+      const paymentSelect = document.getElementById('paymentInvoiceSelect');
+      paymentSelect.innerHTML = '<option value="">-- Select an invoice --</option>';
+      openInvoices.ap.forEach(inv => {
+        const opt = `<option value="${inv.id}">${inv.id} — ${inv.date} — ${inv.party} — Remaining: ₦${fmt(inv.remaining)}</option>`;
+        paymentSelect.insertAdjacentHTML('beforeend', opt);
+      });
+    }
+
+    // Handle receipt apply option change
+    function handleReceiptApplyChange() {
+      const option = document.getElementById('receiptApplyOption').value;
+      document.getElementById('receiptInvoiceBlock').style.display = option === 'invoice' ? 'block' : 'none';
+      document.getElementById('receiptCashSaleBlock').style.display = option === 'cashsale' ? 'block' : 'none';
+    }
+
+    // Handle payment apply option change
+    function handlePaymentApplyChange() {
+      const option = document.getElementById('paymentApplyOption').value;
+      document.getElementById('paymentInvoiceBlock').style.display = option === 'invoice' ? 'block' : 'none';
+      document.getElementById('paymentExpenseBlock').style.display = option === 'expense' ? 'block' : 'none';
+    }
+
     // Render COA view and select lists
     function renderCOA() {
       const el = document.getElementById('coaView');
@@ -207,13 +362,20 @@
       const saleAccount = document.getElementById('saleAccount');
       const purchaseAccount = document.getElementById('purchaseAccount');
       const payFrom = document.getElementById('payFromAccount');
-      [saleAccount, purchaseAccount, payFrom].forEach(s => { s.innerHTML = ''; });
+      const receiptToAccount = document.getElementById('receiptToAccount');
+      const paymentFromAccount = document.getElementById('paymentFromAccount');
+      const paymentExpenseAccount = document.getElementById('paymentExpenseAccount');
+      [saleAccount, purchaseAccount, payFrom, receiptToAccount, paymentFromAccount, paymentExpenseAccount].forEach(s => { s.innerHTML = ''; });
       state.coa.forEach(a => {
         const opt = `<option value="${a.code}">${a.code} — ${a.name}</option>`;
         saleAccount.insertAdjacentHTML('beforeend', opt);
         purchaseAccount.insertAdjacentHTML('beforeend', opt);
         payFrom.insertAdjacentHTML('beforeend', opt);
+        receiptToAccount.insertAdjacentHTML('beforeend', opt);
+        paymentFromAccount.insertAdjacentHTML('beforeend', opt);
+        paymentExpenseAccount.insertAdjacentHTML('beforeend', opt);
       });
+      renderInvoiceSelectors();
     }
 
     // Reset COA to default
@@ -268,7 +430,7 @@
         // Debit Accounts Receivable (total) or Cash & Bank if you want immediate cash
         // Credit Revenue (amount)
         // Credit Output VAT (vat)
-        const arCode = findAccountByType('Asset') || '1100';
+        const arCode = findAccountByName('Accounts Receivable') || '1100';
         const outputVAT = findAccountByName('Output VAT') || '7000';
 
         const entries = [
@@ -301,7 +463,7 @@
         // Debit Input VAT (vat)
         // Credit Accounts Payable (total)
         const inputVAT = findAccountByName('Input VAT') || '1300';
-        const ap = findAccountByType('Liability') || '2000';
+        const ap = findAccountByName('Accounts Payable') || '2000';
 
         const entries = [
           { account: expenseAcc, debit: amount, credit: 0 },
@@ -362,6 +524,154 @@
         state.transactions.push(txn);
         saveState();
         showMessage(`Payroll recorded. PAYE (monthly): ₦${monthlyPAYE.toFixed(2)}; Net pay: ₦${netPay.toFixed(2)}`, 'success');
+
+      } else if(type === 'receipt') {
+        const payer = document.getElementById('receiptPayer').value || '';
+        const amount = money(document.getElementById('receiptAmount').value);
+        const toAccount = document.getElementById('receiptToAccount').value || '1000';
+        const applyOption = document.getElementById('receiptApplyOption').value;
+        const reference = document.getElementById('receiptReference').value || '';
+
+        if (applyOption === 'invoice') {
+          // Apply to AR invoice
+          const invoiceId = document.getElementById('receiptInvoiceSelect').value;
+          if (!invoiceId) {
+            showMessage('Please select an invoice to apply the receipt', 'danger');
+            return;
+          }
+
+          // Find the invoice and check remaining balance
+          const openInvoices = computeOpenInvoices();
+          const invoice = openInvoices.ar.find(inv => inv.id === invoiceId);
+          if (!invoice) {
+            showMessage('Invoice not found or already paid', 'danger');
+            return;
+          }
+
+          if (amount > invoice.remaining) {
+            showMessage(`Amount exceeds invoice remaining balance (₦${fmt(invoice.remaining)})`, 'danger');
+            return;
+          }
+
+          // Journal: Debit Cash/Bank, Credit AR
+          const arCode = findAccountByName('Accounts Receivable') || '1100';
+          const entries = [
+            { account: toAccount, debit: amount, credit: 0 },
+            { account: arCode, debit: 0, credit: amount }
+          ];
+
+          const txn = {
+            id: 'TX' + Date.now(),
+            type: 'Receipt',
+            date, desc: desc || `Receipt from ${payer} for invoice ${invoiceId}`,
+            meta: { payer, amount, reference, appliedTo: invoiceId, amountApplied: amount },
+            entries
+          };
+          state.transactions.push(txn);
+          saveState();
+          showMessage('Receipt applied to invoice', 'success');
+
+        } else if (applyOption === 'cashsale') {
+          // Treat as cash sale
+          const hasVAT = document.getElementById('receiptHasVAT').value === 'yes';
+          const vat = hasVAT ? +(amount * vatRate) : 0;
+          const total = +(amount + vat);
+
+          // Journal: Debit Cash/Bank (total), Credit Revenue (amount), Credit Output VAT (vat)
+          const salesAcc = findAccountByName('Revenue / Sales') || '4000';
+          const outputVAT = findAccountByName('Output VAT') || '7000';
+
+          const entries = [
+            { account: toAccount, debit: total, credit: 0 },
+            { account: salesAcc, debit: 0, credit: amount }
+          ];
+          if (vat > 0) entries.push({ account: outputVAT, debit: 0, credit: +vat });
+
+          const txn = {
+            id: 'TX' + Date.now(),
+            type: 'Receipt',
+            date, desc: desc || `Cash sale from ${payer}`,
+            meta: { payer, amount, vat, total, reference, isCashSale: true },
+            entries
+          };
+          state.transactions.push(txn);
+          saveState();
+          showMessage('Cash sale receipt recorded', 'success');
+        }
+
+      } else if(type === 'payment') {
+        const payee = document.getElementById('paymentPayee').value || '';
+        const amount = money(document.getElementById('paymentAmount').value);
+        const fromAccount = document.getElementById('paymentFromAccount').value || '1000';
+        const applyOption = document.getElementById('paymentApplyOption').value;
+        const reference = document.getElementById('paymentReference').value || '';
+
+        if (applyOption === 'invoice') {
+          // Apply to AP invoice
+          const invoiceId = document.getElementById('paymentInvoiceSelect').value;
+          if (!invoiceId) {
+            showMessage('Please select an invoice to apply the payment', 'danger');
+            return;
+          }
+
+          // Find the invoice and check remaining balance
+          const openInvoices = computeOpenInvoices();
+          const invoice = openInvoices.ap.find(inv => inv.id === invoiceId);
+          if (!invoice) {
+            showMessage('Invoice not found or already paid', 'danger');
+            return;
+          }
+
+          if (amount > invoice.remaining) {
+            showMessage(`Amount exceeds invoice remaining balance (₦${fmt(invoice.remaining)})`, 'danger');
+            return;
+          }
+
+          // Journal: Debit AP, Credit Cash/Bank
+          const apCode = findAccountByName('Accounts Payable') || '2000';
+          const entries = [
+            { account: apCode, debit: amount, credit: 0 },
+            { account: fromAccount, debit: 0, credit: amount }
+          ];
+
+          const txn = {
+            id: 'TX' + Date.now(),
+            type: 'Payment',
+            date, desc: desc || `Payment to ${payee} for invoice ${invoiceId}`,
+            meta: { payee, amount, reference, appliedTo: invoiceId, amountApplied: amount },
+            entries
+          };
+          state.transactions.push(txn);
+          saveState();
+          showMessage('Payment applied to invoice', 'success');
+
+        } else if (applyOption === 'expense') {
+          // Treat as direct expense
+          const expenseAccount = document.getElementById('paymentExpenseAccount').value || '6000';
+          const hasVAT = document.getElementById('paymentHasVAT').value === 'yes';
+          const vat = hasVAT ? +(amount * vatRate) : 0;
+          const total = +(amount + vat);
+
+          // Journal: Debit Expense (amount), Debit Input VAT (vat), Credit Cash/Bank (total)
+          const inputVAT = findAccountByName('Input VAT') || '1300';
+
+          const entries = [
+            { account: expenseAccount, debit: amount, credit: 0 }
+          ];
+          if (vat > 0) entries.push({ account: inputVAT, debit: +vat, credit: 0 });
+          entries.push({ account: fromAccount, debit: 0, credit: total });
+
+          const txn = {
+            id: 'TX' + Date.now(),
+            type: 'Payment',
+            date, desc: desc || `Direct payment to ${payee}`,
+            meta: { payee, amount, vat, total, reference, isDirectExpense: true },
+            entries
+          };
+          state.transactions.push(txn);
+          saveState();
+          showMessage('Direct expense payment recorded', 'success');
+        }
 
       } else {
         showMessage('Unknown transaction type', 'danger');
@@ -526,6 +836,13 @@
       document.getElementById('saleFields').style.display = v==='sale' ? 'block' : 'none';
       document.getElementById('purchaseFields').style.display = v==='purchase' ? 'block' : 'none';
       document.getElementById('payrollFields').style.display = v==='payroll' ? 'block' : 'none';
+      document.getElementById('receiptFields').style.display = v==='receipt' ? 'block' : 'none';
+      document.getElementById('paymentFields').style.display = v==='payment' ? 'block' : 'none';
+      
+      // Refresh invoice selectors when switching to receipt/payment
+      if (v === 'receipt' || v === 'payment') {
+        renderInvoiceSelectors();
+      }
     });
 
     // Initial render
