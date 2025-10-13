@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Nigeria Simple Accounting & Tax Software (2026)</title>
+  <title>Nigeria Simple Accounting & Tax Software with VAT (2026)</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h2 { margin-bottom: 10px; }
@@ -12,7 +12,7 @@
     .ledger-table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
     .ledger-table th, .ledger-table td { border: 1px solid #bbb; padding: 6px; text-align: left; }
     .ledger-table th { background: #f8f8f8; }
-    .totals, .tax-summary { background: #f0f0f0; padding: 10px; margin-bottom: 10px; }
+    .totals, .tax-summary, .vat-summary { background: #f0f0f0; padding: 10px; margin-bottom: 10px; }
     .remove-btn { color: #b00; cursor: pointer; border: none; background: none; font-size: 1em; }
     .edit-btn { color: #0077cc; cursor: pointer; border: none; background: none; font-size: 1em; }
     .form-inline input, .form-inline select { margin-bottom: 6px; }
@@ -24,14 +24,14 @@
   </style>
 </head>
 <body>
-  <h2>Nigeria Simple Accounting & Tax Software (2026)</h2>
+  <h2>Nigeria Simple Accounting & Tax Software with VAT (2026)</h2>
   <div class="section">
     <div class="form-inline">
       <label>Date: <input type="date" id="txnDate" /></label>
       <label>Type:
         <select id="txnType">
-          <option value="Income">Income</option>
-          <option value="Expense">Expense</option>
+          <option value="Income">Income (Sales)</option>
+          <option value="Expense">Expense (Purchase)</option>
           <option value="Deduction">Deduction</option>
         </select>
       </label>
@@ -66,6 +66,7 @@
           <th>Category</th>
           <th>Description</th>
           <th>Amount (₦)</th>
+          <th>VAT (₦)</th>
           <th>Action</th>
         </tr>
       </thead>
@@ -73,6 +74,7 @@
     </table>
   </div>
 
+  <div class="vat-summary" id="vatSummary"></div>
   <div class="totals" id="totalsSummary"></div>
   <div class="tax-summary" id="taxSummary"></div>
 
@@ -83,8 +85,8 @@
     <label>Date: <input type="date" id="editTxnDate" /></label><br>
     <label>Type:
       <select id="editTxnType">
-        <option value="Income">Income</option>
-        <option value="Expense">Expense</option>
+        <option value="Income">Income (Sales)</option>
+        <option value="Expense">Expense (Purchase)</option>
         <option value="Deduction">Deduction</option>
       </select>
     </label><br>
@@ -112,6 +114,7 @@
   <script>
     let transactions = [];
     let editIndex = null;
+    const VAT_RATE = 0.075;
 
     function addTransaction() {
       const date = document.getElementById('txnDate').value;
@@ -143,13 +146,17 @@
       const tbody = document.getElementById('ledgerTable').getElementsByTagName('tbody')[0];
       tbody.innerHTML = "";
       transactions.forEach((txn, idx) => {
-        const tr = document.createElement('tr');
+        let vat = 0;
+        if (txn.type === "Income") vat = txn.amount * VAT_RATE;
+        else if (txn.type === "Expense") vat = txn.amount * VAT_RATE;
+        tr = document.createElement('tr');
         tr.innerHTML =
           `<td>${txn.date}</td>
            <td>${txn.type}</td>
            <td>${txn.category}</td>
            <td>${txn.desc}</td>
            <td>₦${txn.amount.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+           <td>₦${vat ? vat.toLocaleString(undefined, {maximumFractionDigits:2}) : ""}</td>
            <td>
              <button class="edit-btn" onclick="openEditModal(${idx})">Edit</button>
              <button class="remove-btn" onclick="removeTransaction(${idx})">Delete</button>
@@ -202,17 +209,22 @@
     function calculateSummary() {
       // Totals
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
+      let vatOutputTotal = 0, vatInputTotal = 0;
       transactions.forEach(txn => {
-        if (txn.type === "Income") incomeTotal += txn.amount;
+        if (txn.type === "Income") {
+          incomeTotal += txn.amount;
+          vatOutputTotal += txn.amount * VAT_RATE;
+        }
         else if (txn.type === "Expense") {
           expenseTotal += txn.amount;
-          // Special: Rent as expense, also used for rent relief
+          vatInputTotal += txn.amount * VAT_RATE;
           if (txn.category === "Rent") rentTotal += txn.amount;
         }
         else if (txn.type === "Deduction") deductionTotal += txn.amount;
       });
 
       let netBalance = incomeTotal - expenseTotal;
+      let vatPayable = vatOutputTotal - vatInputTotal;
       let rentRelief = rentTotal * 0.20;
       if (rentRelief > 500000) rentRelief = 500000;
 
@@ -248,6 +260,12 @@
       }
 
       let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
+
+      document.getElementById('vatSummary').innerHTML =
+        `<strong>VAT Summary (7.5%):</strong><br>
+         VAT Output (Sales): ₦${vatOutputTotal.toLocaleString(undefined, {maximumFractionDigits:2})}<br>
+         VAT Input (Purchases): ₦${vatInputTotal.toLocaleString(undefined, {maximumFractionDigits:2})}<br>
+         <strong>VAT Payable:</strong> ₦${vatPayable.toLocaleString(undefined, {maximumFractionDigits:2})}`;
 
       document.getElementById('totalsSummary').innerHTML =
         `<strong>Income:</strong> ₦${incomeTotal.toLocaleString(undefined, {maximumFractionDigits:2})} | 
