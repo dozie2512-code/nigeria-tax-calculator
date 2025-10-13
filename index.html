@@ -1,102 +1,581 @@
-      <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Nigeria New PIT Calculator (2026)</title>
+  <meta charset="utf-8" />
+  <title>Nigeria Accounting + PAYE & VAT (SPA)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    label { display: block; margin-top: 10px; }
-    input { width: 200px; padding: 5px; }
-    #result { margin-top: 20px; padding: 10px; background-color: #f0f0f0; }
+    body { font-family: Arial, sans-serif; margin: 16px; color:#222; }
+    h1,h2,h3 { margin: 8px 0; }
+    .container { display:flex; gap:16px; flex-wrap:wrap; }
+    .panel { background:#fff; border:1px solid #ddd; padding:12px; border-radius:6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); flex:1 1 420px; min-width:300px; }
+    label { display:block; margin-top:8px; }
+    input, select, textarea { width:100%; padding:6px; box-sizing:border-box; margin-top:4px; }
+    button { margin-top:10px; padding:8px 12px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+    th,td { border:1px solid #eee; padding:6px; text-align:left; }
+    .small { font-size:12px; color:#666; }
+    .muted { color:#666; font-size:13px; }
+    .right { text-align:right; }
+    .success { color:green; }
+    .danger { color:crimson; }
+    .flex-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .coafile { height:200px; font-family:monospace; white-space:pre; overflow:auto; background:#f8f8f8; padding:8px; border-radius:4px; border:1px solid #eee; }
+    .summary { background:#fafafa; padding:8px; border-radius:6px; margin-top:8px; }
+    .controls { display:flex; gap:8px; align-items:center; margin-top:8px; }
   </style>
 </head>
 <body>
-  <h2>Nigeria New Personal Income Tax Calculator (from Jan 2026)</h2>
-  <label>
-    Gross Annual Income (₦):
-    <input type="number" id="grossIncome" />
-  </label>
-  <label>
-    Other Deductions (pension, NHF, insurance etc) (₦):
-    <input type="number" id="otherDeductions" value="0" />
-  </label>
-  <label>
-    Annual Rent Paid (₦):
-    <input type="number" id="rentPaid" value="0" />
-  </label>
-  <button onclick="calculateTax()">Calculate Tax</button>
-  <div id="result"></div>
+  <h1>Nigeria Accounting — VAT 7.5% & PAYE (PITA 2026)</h1>
+  <p class="muted">Single-file SPA. Data is stored in your browser localStorage. Export CSV if you need a backup.</p>
+
+  <div class="container">
+
+    <div class="panel">
+      <h2>Chart of Accounts (default)</h2>
+      <div class="muted">You can edit the COA array in code if you want custom accounts.</div>
+      <div id="coaView" class="coafile"></div>
+      <div class="controls">
+        <button onclick="resetCOA()">Reset default COA</button>
+        <button onclick="exportCOA()">Export COA CSV</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Add Transaction</h2>
+
+      <div>
+        <label>Transaction Type
+          <select id="txType">
+            <option value="sale">Sale (Revenue)</option>
+            <option value="purchase">Purchase (Expense / Inventory)</option>
+            <option value="payroll">Payroll (Salary)</option>
+          </select>
+        </label>
+
+        <div id="commonFields">
+          <label>Date <input type="date" id="txDate" /></label>
+          <label>Description <input type="text" id="txDesc" placeholder="Brief description" /></label>
+        </div>
+
+        <div id="saleFields">
+          <label>Customer / Counterparty <input type="text" id="saleParty" placeholder="Customer name" /></label>
+          <label>Sales Account
+            <select id="saleAccount"></select>
+          </label>
+          <label>Amount (exclusive of VAT) ₦
+            <input type="number" id="saleAmount" value="0" min="0" step="0.01" />
+          </label>
+          <div class="flex-row">
+            <label style="flex:1">Include VAT? 
+              <select id="saleHasVAT">
+                <option value="yes">Yes — VAT applies at 7.5%</option>
+                <option value="no">No — VAT-exempt</option>
+              </select>
+            </label>
+            <label style="width:140px">Tax code (optional)
+              <input type="text" id="saleTaxCode" placeholder="e.g. VAT" />
+            </label>
+          </div>
+        </div>
+
+        <div id="purchaseFields" style="display:none;">
+          <label>Supplier <input type="text" id="purchaseParty" placeholder="Supplier name" /></label>
+          <label>Expense / Inventory Account
+            <select id="purchaseAccount"></select>
+          </label>
+          <label>Amount (exclusive of VAT) ₦
+            <input type="number" id="purchaseAmount" value="0" min="0" step="0.01" />
+          </label>
+          <div class="flex-row">
+            <label style="flex:1">Include VAT?
+              <select id="purchaseHasVAT">
+                <option value="yes">Yes — VAT at 7.5%</option>
+                <option value="no">No — VAT-exempt</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div id="payrollFields" style="display:none;">
+          <label>Employee Name <input type="text" id="empName" placeholder="Employee name" /></label>
+          <label>Gross Monthly Salary ₦ <input type="number" id="grossMonthly" value="0" min="0" step="0.01" /></label>
+          <label>Employee Pension % (pre-tax) <input type="number" id="empPensionPct" value="8" min="0" step="0.1" /></label>
+          <label>Other Deductions ₦ <input type="number" id="otherDeduction" value="0" min="0" step="0.01" /></label>
+          <label>Pay From Account
+            <select id="payFromAccount"></select>
+          </label>
+        </div>
+
+        <button onclick="addTransaction()">Record Transaction</button>
+        <div id="txMessage" class="muted small"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Quick Settings & Reports</h2>
+      <div>
+        <label>VAT Rate (%) <input type="number" id="vatRate" value="7.5" step="0.01" /></label>
+        <label>PITA Bands: (Using 2026 bands; tax computed on annualized income then /12)</label>
+        <pre class="muted small" id="pitaView"></pre>
+
+        <div style="margin-top:8px;">
+          <button onclick="showLedger()">Refresh Ledger / Trial Balance</button>
+          <button onclick="showVATSummary()">VAT Summary</button>
+          <button onclick="showPAYESummary()">PAYE Summary</button>
+          <button onclick="exportTransactionsCSV()">Export Transactions CSV</button>
+          <button onclick="clearAllData()" style="color:crimson">Clear all stored data</button>
+        </div>
+
+        <div id="reports" class="summary"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <h2>Journal Transactions</h2>
+    <div class="muted small">Each recorded transaction creates journal entries. You can export transactions as CSV.</div>
+    <table id="txTable">
+      <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Journal Entries (debit → credit)</th><th class="right">Total Debit</th><th class="right">Total Credit</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <script>
-    function calculateTax() {
-      let gross = parseFloat(document.getElementById('grossIncome').value) || 0;
-      let other = parseFloat(document.getElementById('otherDeductions').value) || 0;
-      let rent = parseFloat(document.getElementById('rentPaid').value) || 0;
+    // GitHub Copilot Chat Assistant — updated index.html implementing accounting features
 
-      // Rent relief: 20% of rent, capped at 500,000
-      let rentRelief = rent * 0.20;
-      if (rentRelief > 500000) rentRelief = 500000;
+    // ---------- Default Chart of Accounts ----------
+    const defaultCOA = [
+      { code: '1000', name: 'Cash & Bank', type: 'Asset' },
+      { code: '1100', name: 'Accounts Receivable', type: 'Asset' },
+      { code: '1200', name: 'Inventory', type: 'Asset' },
+      { code: '1300', name: 'Input VAT', type: 'Asset' }, // VAT on purchases (recoverable)
+      { code: '2000', name: 'Accounts Payable', type: 'Liability' },
+      { code: '3000', name: 'Shareholders Equity', type: 'Equity' },
+      { code: '4000', name: 'Revenue / Sales', type: 'Revenue' },
+      { code: '5000', name: 'Cost of Sales', type: 'Expense' },
+      { code: '6000', name: 'Operating Expenses', type: 'Expense' },
+      { code: '6100', name: 'Salaries Expense', type: 'Expense' },
+      { code: '6200', name: 'Rent Expense', type: 'Expense' },
+      { code: '6300', name: 'Utilities Expense', type: 'Expense' },
+      { code: '7000', name: 'Output VAT', type: 'Liability' }, // VAT on sales (collected)
+      { code: '8000', name: 'PAYE Payable', type: 'Liability' },
+      { code: '9000', name: 'Pension Payable (employer)', type: 'Liability' }
+    ];
 
-      // Adjusted income after deductions
-      let adj = gross - other - rentRelief;
-      if (adj < 0) adj = 0;
+    // ---------- PITA bands (annual) from your file; we'll compute tax on annualized taxable income then divide by 12 ----------
+    const pitaBands = [
+      { upTo: 800000, rate: 0.00 },
+      { upTo: 3000000, rate: 0.15 },
+      { upTo: 12000000, rate: 0.18 },
+      { upTo: 25000000, rate: 0.21 },
+      { upTo: 50000000, rate: 0.23 },
+      { upTo: Infinity, rate: 0.25 }
+    ];
 
-      // If adj ≤ 800,000 → no tax
-      if (adj <= 800000) {
-        document.getElementById('result').innerHTML =
-          `<strong>No tax payable</strong> (taxable income ₦${adj.toLocaleString()}).`;
+    // ---------- Storage keys ----------
+    const LS_ACCOUNTS = 'acct_coa_v1';
+    const LS_TRANSACTIONS = 'acct_txns_v1';
+    const LS_VATRATE = 'acct_vatrate_v1';
+
+    // ---------- Init ----------
+    const state = {
+      coa: loadJSON(LS_ACCOUNTS) || defaultCOA.slice(),
+      transactions: loadJSON(LS_TRANSACTIONS) || [],
+      vatRate: parseFloat(localStorage.getItem(LS_VATRATE) || '7.5')
+    };
+
+    // Utilities
+    function saveState() {
+      localStorage.setItem(LS_ACCOUNTS, JSON.stringify(state.coa));
+      localStorage.setItem(LS_TRANSACTIONS, JSON.stringify(state.transactions));
+      localStorage.setItem(LS_VATRATE, state.vatRate.toString());
+      renderAll();
+    }
+    function loadJSON(k) {
+      try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; }
+    }
+    function money(v) { return Number(v || 0); }
+    function fmt(v) { return Number(v).toLocaleString(undefined, {maximumFractionDigits:2}); }
+
+    // Render COA view and select lists
+    function renderCOA() {
+      const el = document.getElementById('coaView');
+      el.textContent = state.coa.map(a => `${a.code}  ${a.name}  (${a.type})`).join('\n');
+      // fill selects
+      const saleAccount = document.getElementById('saleAccount');
+      const purchaseAccount = document.getElementById('purchaseAccount');
+      const payFrom = document.getElementById('payFromAccount');
+      [saleAccount, purchaseAccount, payFrom].forEach(s => { s.innerHTML = ''; });
+      state.coa.forEach(a => {
+        const opt = `<option value="${a.code}">${a.code} — ${a.name}</option>`;
+        saleAccount.insertAdjacentHTML('beforeend', opt);
+        purchaseAccount.insertAdjacentHTML('beforeend', opt);
+        payFrom.insertAdjacentHTML('beforeend', opt);
+      });
+    }
+
+    // Reset COA to default
+    function resetCOA() {
+      if(!confirm('Reset Chart of Accounts to defaults? This will overwrite current COA (transactions remain).')) return;
+      state.coa = defaultCOA.slice();
+      saveState();
+    }
+
+    // Export COA CSV
+    function exportCOA() {
+      const rows = ['code,name,type', ...state.coa.map(a => `${a.code},"${a.name}",${a.type}`)];
+      downloadText(rows.join('\n'), 'coa.csv');
+    }
+
+    // CSV download helper
+    function downloadText(text, filename) {
+      const blob = new Blob([text], {type: 'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500);
+    }
+
+    // Render PITA view
+    function renderPITA() {
+      const el = document.getElementById('pitaView');
+      el.textContent = pitaBands.map((b,i) => {
+        const up = b.upTo===Infinity ? 'above' : `up to ₦${b.upTo.toLocaleString()}`;
+        return `Band ${i+1}: ${up} — ${Math.round(b.rate*100)}%`;
+      }).join('\n');
+    }
+
+    // Add transaction handler
+    function addTransaction() {
+      const type = document.getElementById('txType').value;
+      const date = document.getElementById('txDate').value || new Date().toISOString().slice(0,10);
+      const desc = document.getElementById('txDesc').value || '';
+      const vatRate = parseFloat(document.getElementById('vatRate').value || '7.5') / 100;
+      state.vatRate = parseFloat(document.getElementById('vatRate').value || state.vatRate);
+      document.getElementById('vatRate').value = state.vatRate;
+
+      if(type === 'sale') {
+        const amount = money(document.getElementById('saleAmount').value);
+        const hasVAT = document.getElementById('saleHasVAT').value === 'yes';
+        const salesAcc = document.getElementById('saleAccount').value || '4000';
+        const party = document.getElementById('saleParty').value || '';
+        const vat = hasVAT ? +(amount * vatRate) : 0;
+        const total = +(amount + vat);
+
+        // Journal:
+        // Debit Accounts Receivable (total) or Cash & Bank if you want immediate cash
+        // Credit Revenue (amount)
+        // Credit Output VAT (vat)
+        const arCode = findAccountByType('Asset') || '1100';
+        const outputVAT = findAccountByName('Output VAT') || '7000';
+
+        const entries = [
+          { account: arCode, debit: total, credit: 0 },
+          { account: salesAcc, debit: 0, credit: amount },
+        ];
+        if(vat>0) entries.push({ account: outputVAT, debit: 0, credit: +vat });
+
+        const txn = {
+          id: 'TX' + Date.now(),
+          type: 'Sale',
+          date, desc: desc || `Sale to ${party}`,
+          meta: { party, amount, vat, total },
+          entries
+        };
+        state.transactions.push(txn);
+        saveState();
+        showMessage('Sale recorded', 'success');
+
+      } else if(type === 'purchase') {
+        const amount = money(document.getElementById('purchaseAmount').value);
+        const hasVAT = document.getElementById('purchaseHasVAT').value === 'yes';
+        const expenseAcc = document.getElementById('purchaseAccount').value || '6000';
+        const party = document.getElementById('purchaseParty').value || '';
+        const vat = hasVAT ? +(amount * vatRate) : 0;
+        const total = +(amount + vat);
+
+        // Journal:
+        // Debit Expense / Inventory (amount)
+        // Debit Input VAT (vat)
+        // Credit Accounts Payable (total)
+        const inputVAT = findAccountByName('Input VAT') || '1300';
+        const ap = findAccountByType('Liability') || '2000';
+
+        const entries = [
+          { account: expenseAcc, debit: amount, credit: 0 },
+        ];
+        if(vat>0) entries.push({ account: inputVAT, debit: +vat, credit: 0 });
+        entries.push({ account: ap, debit: 0, credit: total });
+
+        const txn = {
+          id: 'TX' + Date.now(),
+          type: 'Purchase',
+          date, desc: desc || `Purchase from ${party}`,
+          meta: { party, amount, vat, total },
+          entries
+        };
+        state.transactions.push(txn);
+        saveState();
+        showMessage('Purchase recorded', 'success');
+
+      } else if(type === 'payroll') {
+        const name = document.getElementById('empName').value || 'Employee';
+        const grossMonthly = money(document.getElementById('grossMonthly').value);
+        const empPensionPct = money(document.getElementById('empPensionPct').value) / 100;
+        const otherDed = money(document.getElementById('otherDeduction').value);
+        const payFrom = document.getElementById('payFromAccount').value || '1000';
+
+        // Calculate pension (employee) — pre-tax; employer pension not recorded here except as payable
+        const empPension = grossMonthly * empPensionPct;
+        const taxableMonthly = Math.max(0, grossMonthly - empPension - otherDed);
+        // Annualize taxable
+        const taxableAnnual = taxableMonthly * 12;
+        const annualTax = computeAnnualTax(taxableAnnual); // using PITA bands
+        const monthlyPAYE = annualTax / 12;
+        const netPay = grossMonthly - empPension - otherDed - monthlyPAYE;
+
+        // Journal:
+        // Debit Salaries Expense (gross)
+        // Credit Pension Payable (employee portion) — liability
+        // Credit PAYE Payable (withholding)
+        // Credit Cash/Bank (net pay) — payFrom account credit reduces asset
+        const salExp = findAccountByName('Salaries Expense') || '6100';
+        const pensionPayable = findAccountByName('Pension Payable (employer)') || '9000';
+        const payePayable = findAccountByName('PAYE Payable') || '8000';
+
+        const entries = [
+          { account: salExp, debit: grossMonthly, credit: 0 },
+          { account: pensionPayable, debit: 0, credit: +(+empPension) },
+          { account: payePayable, debit: 0, credit: +(+monthlyPAYE) },
+          { account: payFrom, debit: 0, credit: +(+netPay) }
+        ];
+
+        const txn = {
+          id: 'TX' + Date.now(),
+          type: 'Payroll',
+          date, desc: desc || `Payroll for ${name}`,
+          meta: { name, grossMonthly, empPension, otherDed, monthlyPAYE, netPay },
+          entries
+        };
+        state.transactions.push(txn);
+        saveState();
+        showMessage(`Payroll recorded. PAYE (monthly): ₦${monthlyPAYE.toFixed(2)}; Net pay: ₦${netPay.toFixed(2)}`, 'success');
+
+      } else {
+        showMessage('Unknown transaction type', 'danger');
         return;
       }
 
-      // Apply tax bands
-      let taxable = adj;
-      let tax = 0;
-
-      // Helper function: tax a slice
-      function taxSlice(amount, rate) {
-        return amount * rate;
-      }
-
-      // Band 1: 0% up to 800,000 → 0 tax on that portion
-      let remaining = taxable - 800000;
-
-      // Band 2: 800,001 – 3,000,000 @ 15%
-      if (remaining > 0) {
-        let slice = Math.min(remaining, 3000000 - 800000);
-        tax += taxSlice(slice, 0.15);
-        remaining -= slice;
-      }
-      // Band 3: 3,000,001 – 12,000,000 @ 18%
-      if (remaining > 0) {
-        let slice = Math.min(remaining, 12000000 - 3000000);
-        tax += taxSlice(slice, 0.18);
-        remaining -= slice;
-      }
-      // Band 4: 12,000,001 – 25,000,000 @ 21%
-      if (remaining > 0) {
-        let slice = Math.min(remaining, 25000000 - 12000000);
-        tax += taxSlice(slice, 0.21);
-        remaining -= slice;
-      }
-      // Band 5: 25,000,001 – 50,000,000 @ 23%
-      if (remaining > 0) {
-        let slice = Math.min(remaining, 50000000 - 25000000);
-        tax += taxSlice(slice, 0.23);
-        remaining -= slice;
-      }
-      // Band 6: above 50,000,000 @ 25%
-      if (remaining > 0) {
-        tax += taxSlice(remaining, 0.25);
-      }
-
-      // Effective tax rate (on gross income)
-      let effRate = (tax / gross) * 100;
-
-      document.getElementById('result').innerHTML =
-        `<p>Taxable income after deductions: ₦${adj.toLocaleString()}</p>` +
-        `<p><strong>Tax payable:</strong> ₦${tax.toLocaleString(undefined, {maximumFractionDigits:0})}</p>` +
-        `<p>Effective tax rate on gross income: ${effRate.toFixed(2)}%</p>`;
+      renderTransactions();
     }
+
+    // Find a default account by name
+    function findAccountByName(name) {
+      const a = state.coa.find(c => c.name.toLowerCase() === name.toLowerCase());
+      return a ? a.code : null;
+    }
+    function findAccountByType(type) {
+      const a = state.coa.find(c => c.type === type);
+      return a ? a.code : null;
+    }
+
+    // Compute annual tax using PITA bands
+    function computeAnnualTax(taxableAnnual) {
+      let remaining = taxableAnnual;
+      let tax = 0;
+      let lower = 0;
+      for(let i=0;i<pitaBands.length;i++){
+        const band = pitaBands[i];
+        const top = band.upTo;
+        const slice = Math.max(0, Math.min(remaining, (top - lower)));
+        if(slice>0) {
+          tax += slice * band.rate;
+          remaining -= slice;
+        }
+        lower = top;
+        if(remaining <= 0) break;
+      }
+      return tax;
+    }
+
+    // Render transactions table
+    function renderTransactions() {
+      const tbody = document.querySelector('#txTable tbody');
+      tbody.innerHTML = '';
+      state.transactions.slice().reverse().forEach(tx => {
+        const totalDebit = tx.entries.reduce((s,e)=>s + (e.debit||0), 0);
+        const totalCredit = tx.entries.reduce((s,e)=>s + (e.credit||0), 0);
+        const entriesHtml = tx.entries.map(e => {
+          const acc = state.coa.find(a => a.code === e.account);
+          const an = acc ? `${acc.code} ${acc.name}` : e.account;
+          return `<div>${an}: ₦${fmt(e.debit||0)} ⇢ ₦${fmt(e.credit||0)}</div>`;
+        }).join('');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${tx.date}</td><td>${tx.type}</td><td>${escapeHtml(tx.desc)}</td><td>${entriesHtml}</td><td class="right">${fmt(totalDebit)}</td><td class="right">${fmt(totalCredit)}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function escapeHtml(s){ return (''+s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+    // Show simple ledger / trial balance
+    function showLedger() {
+      // Sum balances
+      const balances = {}; // code => { debit, credit }
+      state.coa.forEach(a => balances[a.code] = { code: a.code, name: a.name, type: a.type, debit:0, credit:0 });
+      state.transactions.forEach(tx => {
+        tx.entries.forEach(e => {
+          if(!balances[e.account]) {
+            balances[e.account] = { code: e.account, name: e.account, type: 'Unknown', debit:0, credit:0 };
+          }
+          balances[e.account].debit += (e.debit||0);
+          balances[e.account].credit += (e.credit||0);
+        });
+      });
+      const rows = Object.values(balances);
+      const totalDebit = rows.reduce((s,r)=>s + r.debit,0);
+      const totalCredit = rows.reduce((s,r)=>s + r.credit,0);
+
+      let html = '<h3>Trial Balance</h3>';
+      html += `<div class="small muted">Total Debit: ₦${fmt(totalDebit)} — Total Credit: ₦${fmt(totalCredit)}</div>`;
+      html += '<table><thead><tr><th>Account</th><th>Type</th><th class="right">Debit</th><th class="right">Credit</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        html += `<tr><td>${r.code} ${r.name}</td><td>${r.type}</td><td class="right">${fmt(r.debit)}</td><td class="right">${fmt(r.credit)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('reports').innerHTML = html;
+    }
+
+    // VAT Summary (output - input) optionally by date range
+    function showVATSummary() {
+      const vatRate = state.vatRate / 100;
+      let totalOutput = 0, totalInput = 0;
+      state.transactions.forEach(tx => {
+        if(tx.type === 'Sale' && tx.meta) totalOutput += (tx.meta.vat || 0);
+        if(tx.type === 'Purchase' && tx.meta) totalInput += (tx.meta.vat || 0);
+      });
+      const payable = totalOutput - totalInput;
+      let html = '<h3>VAT Summary</h3>';
+      html += `<div class="small">VAT Rate used: ${state.vatRate}%</div>`;
+      html += `<div class="muted">Total Output VAT (collected): ₦${fmt(totalOutput)}</div>`;
+      html += `<div class="muted">Total Input VAT (recoverable): ₦${fmt(totalInput)}</div>`;
+      html += `<div style="margin-top:8px"><strong>VAT Payable (Output - Input): ₦${fmt(payable)}</strong></div>`;
+      html += '<div class="small" style="margin-top:8px">Journal entries for VAT are created on each sale/purchase. Use trial balance to inspect account totals.</div>';
+      document.getElementById('reports').innerHTML = html;
+    }
+
+    // PAYE Summary — show withholding recorded (PAYE Payable) and list payroll transactions
+    function showPAYESummary() {
+      const payeAcc = findAccountByName('PAYE Payable') || '8000';
+      let totalWithheld = 0;
+      const payrolls = [];
+      state.transactions.forEach(tx => {
+        if(tx.type === 'Payroll' && tx.meta) {
+          totalWithheld += tx.meta.monthlyPAYE || 0;
+          payrolls.push(tx);
+        }
+      });
+      let html = '<h3>PAYE Summary</h3>';
+      html += `<div class="muted">Total PAYE withheld (sum of payroll transactions): ₦${fmt(totalWithheld)}</div>`;
+      html += '<table><thead><tr><th>Date</th><th>Payroll</th><th class="right">PAYE (₦)</th><th class="right">Net Pay (₦)</th></tr></thead><tbody>';
+      payrolls.forEach(p => {
+        html += `<tr><td>${p.date}</td><td>${escapeHtml(p.meta.name || p.desc)}</td><td class="right">${fmt(p.meta.monthlyPAYE)}</td><td class="right">${fmt(p.meta.netPay)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      html += `<div class="small" style="margin-top:8px">PAYE is calculated by annualizing monthly taxable pay, applying PITA 2026 bands, then dividing tax by 12.</div>`;
+      document.getElementById('reports').innerHTML = html;
+    }
+
+    // Export transactions CSV
+    function exportTransactionsCSV() {
+      const rows = [['id','date','type','description','account','debit','credit','meta_json']];
+      state.transactions.forEach(tx => {
+        tx.entries.forEach(e => {
+          rows.push([tx.id, tx.date, tx.type, `"${tx.desc.replace(/"/g,'""')}"`, e.account, e.debit||0, e.credit||0, `"${JSON.stringify(tx.meta).replace(/"/g,'""')}"`]);
+        });
+      });
+      downloadText(rows.map(r => r.join(',')).join('\n'), 'transactions.csv');
+    }
+
+    // Clear all stored data
+    function clearAllData() {
+      if(!confirm('Delete all transactions and reset data? This cannot be undone.')) return;
+      state.coa = defaultCOA.slice();
+      state.transactions = [];
+      state.vatRate = 7.5;
+      localStorage.removeItem(LS_ACCOUNTS);
+      localStorage.removeItem(LS_TRANSACTIONS);
+      localStorage.removeItem(LS_VATRATE);
+      saveState();
+      showMessage('All data cleared', 'success');
+    }
+
+    // Show small message
+    function showMessage(txt, type) {
+      const el = document.getElementById('txMessage');
+      el.textContent = txt;
+      el.className = (type==='success' ? 'success' : (type==='danger' ? 'danger' : 'muted')) + ' small';
+      setTimeout(()=>{ el.textContent=''; el.className='muted small'; }, 5000);
+    }
+
+    // Update UI when txType changes
+    document.getElementById('txType').addEventListener('change', e => {
+      const v = e.target.value;
+      document.getElementById('saleFields').style.display = v==='sale' ? 'block' : 'none';
+      document.getElementById('purchaseFields').style.display = v==='purchase' ? 'block' : 'none';
+      document.getElementById('payrollFields').style.display = v==='payroll' ? 'block' : 'none';
+    });
+
+    // Initial render
+    function renderAll() {
+      renderCOA();
+      renderPITA();
+      renderTransactions();
+      document.getElementById('vatRate').value = state.vatRate;
+    }
+
+    // Boot
+    renderAll();
+
+    // For convenience: quickly add sample data (uncomment to seed)
+    // seedSample();
+
+    function seedSample() {
+      // small seed: a sale, a purchase, payroll
+      state.transactions.push({
+        id: 'TX' + (Date.now()+1),
+        type: 'Sale',
+        date: new Date().toISOString().slice(0,10),
+        desc: 'Sample sale',
+        meta: { party: 'Customer A', amount: 100000, vat: 100000 * (state.vatRate/100), total: 100000 * (1 + state.vatRate/100) },
+        entries: [
+          { account: '1100', debit: 100000*(1+state.vatRate/100), credit: 0 },
+          { account: '4000', debit: 0, credit: 100000 },
+          { account: '7000', debit: 0, credit: 100000 * (state.vatRate/100) }
+        ]
+      });
+      state.transactions.push({
+        id: 'TX' + (Date.now()+2),
+        type: 'Purchase',
+        date: new Date().toISOString().slice(0,10),
+        desc: 'Sample purchase',
+        meta: { party: 'Supplier B', amount: 50000, vat: 50000*(state.vatRate/100), total: 50000*(1+state.vatRate/100) },
+        entries: [
+          { account: '6000', debit: 50000, credit: 0 },
+          { account: '1300', debit: 50000*(state.vatRate/100), credit: 0 },
+          { account: '2000', debit: 0, credit: 50000*(1+state.vatRate/100) }
+        ]
+      });
+      saveState();
+    }
+
+    // Export COA and transactions on page unload (no-op but kept)
+    window.addEventListener('beforeunload', () => {
+      // saveState(); // already saved
+    });
+
   </script>
 </body>
 </html>
