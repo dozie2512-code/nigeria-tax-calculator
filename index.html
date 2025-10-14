@@ -50,6 +50,8 @@
             <option value="sale">Sale (Revenue)</option>
             <option value="purchase">Purchase (Expense / Inventory)</option>
             <option value="payroll">Payroll (Salary)</option>
+            <option value="income">Income (General)</option>
+            <option value="expense">Expense (General)</option>
           </select>
         </label>
 
@@ -101,9 +103,48 @@
           <label>Employee Name <input type="text" id="empName" placeholder="Employee name" /></label>
           <label>Gross Monthly Salary ₦ <input type="number" id="grossMonthly" value="0" min="0" step="0.01" /></label>
           <label>Employee Pension % (pre-tax) <input type="number" id="empPensionPct" value="8" min="0" step="0.1" /></label>
+          <label>Employer Pension % <input type="number" id="emplPensionPct" value="10" min="0" step="0.1" /></label>
           <label>Other Deductions ₦ <input type="number" id="otherDeduction" value="0" min="0" step="0.01" /></label>
           <label>Pay From Account
             <select id="payFromAccount"></select>
+          </label>
+        </div>
+
+        <div id="incomeFields" style="display:none;">
+          <label>Description <input type="text" id="incomeDesc" placeholder="Income description" /></label>
+          <label>Amount ₦ <input type="number" id="incomeAmount" value="0" min="0" step="0.01" /></label>
+          <label>Category / Tag <input type="text" id="incomeCategory" placeholder="e.g., Consulting, Interest" /></label>
+          <label>Payment Method
+            <select id="incomePaymentMethod">
+              <option value="Cash">Cash</option>
+              <option value="Bank">Bank</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" id="incomeHasVAT" /> VAT Applicable (7.5% will be added)
+          </label>
+          <label>Revenue Account
+            <select id="incomeAccount"></select>
+          </label>
+        </div>
+
+        <div id="expenseFields" style="display:none;">
+          <label>Description <input type="text" id="expenseDesc" placeholder="Expense description" /></label>
+          <label>Amount ₦ <input type="number" id="expenseAmount" value="0" min="0" step="0.01" /></label>
+          <label>Category / Tag <input type="text" id="expenseCategory" placeholder="e.g., Rent, Utilities" /></label>
+          <label>Payment Method
+            <select id="expensePaymentMethod">
+              <option value="Cash">Cash</option>
+              <option value="Bank">Bank</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" id="expenseHasVAT" /> VAT Applicable (7.5% input VAT will be recorded)
+          </label>
+          <label>Expense Account
+            <select id="expenseAccount"></select>
           </label>
         </div>
 
@@ -123,7 +164,10 @@
           <button onclick="showLedger()">Refresh Ledger / Trial Balance</button>
           <button onclick="showVATSummary()">VAT Summary</button>
           <button onclick="showPAYESummary()">PAYE Summary</button>
+          <button onclick="showMonthlySummary()">Monthly/Annual Summary</button>
           <button onclick="exportTransactionsCSV()">Export Transactions CSV</button>
+          <button onclick="exportSummaryCSV()">Export Summary CSV</button>
+          <button onclick="toggleSeedButton()">Seed Sample Data</button>
           <button onclick="clearAllData()" style="color:crimson">Clear all stored data</button>
         </div>
 
@@ -136,8 +180,26 @@
   <div class="panel" style="margin-top:16px;">
     <h2>Journal Transactions</h2>
     <div class="muted small">Each recorded transaction creates journal entries. You can export transactions as CSV.</div>
+    
+    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+      <label style="flex: 1; min-width:150px;">Filter by Date Range
+        <div style="display:flex; gap:4px;">
+          <input type="date" id="filterDateFrom" style="flex:1" placeholder="From" />
+          <input type="date" id="filterDateTo" style="flex:1" placeholder="To" />
+        </div>
+      </label>
+      <label style="flex: 1; min-width:150px;">Filter by Category
+        <input type="text" id="filterCategory" placeholder="Enter category or tag" />
+      </label>
+      <button onclick="applyFilters()" style="margin-top:0;">Apply Filters</button>
+      <button onclick="clearFilters()" style="margin-top:0;">Clear Filters</button>
+      <label style="margin-top:0;">
+        <input type="checkbox" id="toggleSeedData" onchange="renderTransactions()" /> Show seed data
+      </label>
+    </div>
+    
     <table id="txTable">
-      <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Journal Entries (debit → credit)</th><th class="right">Total Debit</th><th class="right">Total Credit</th></tr></thead>
+      <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Journal Entries (debit → credit)</th><th class="right">Total Debit</th><th class="right">Total Credit</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -183,7 +245,8 @@
     const state = {
       coa: loadJSON(LS_ACCOUNTS) || defaultCOA.slice(),
       transactions: loadJSON(LS_TRANSACTIONS) || [],
-      vatRate: parseFloat(localStorage.getItem(LS_VATRATE) || '7.5')
+      vatRate: parseFloat(localStorage.getItem(LS_VATRATE) || '7.5'),
+      filters: { dateFrom: '', dateTo: '', category: '' }
     };
 
     // Utilities
@@ -207,12 +270,16 @@
       const saleAccount = document.getElementById('saleAccount');
       const purchaseAccount = document.getElementById('purchaseAccount');
       const payFrom = document.getElementById('payFromAccount');
-      [saleAccount, purchaseAccount, payFrom].forEach(s => { s.innerHTML = ''; });
+      const incomeAccount = document.getElementById('incomeAccount');
+      const expenseAccount = document.getElementById('expenseAccount');
+      [saleAccount, purchaseAccount, payFrom, incomeAccount, expenseAccount].forEach(s => { s.innerHTML = ''; });
       state.coa.forEach(a => {
         const opt = `<option value="${a.code}">${a.code} — ${a.name}</option>`;
         saleAccount.insertAdjacentHTML('beforeend', opt);
         purchaseAccount.insertAdjacentHTML('beforeend', opt);
         payFrom.insertAdjacentHTML('beforeend', opt);
+        incomeAccount.insertAdjacentHTML('beforeend', opt);
+        expenseAccount.insertAdjacentHTML('beforeend', opt);
       });
     }
 
@@ -258,6 +325,7 @@
 
       if(type === 'sale') {
         const amount = money(document.getElementById('saleAmount').value);
+        if(amount <= 0) { showMessage('Amount must be greater than 0', 'danger'); return; }
         const hasVAT = document.getElementById('saleHasVAT').value === 'yes';
         const salesAcc = document.getElementById('saleAccount').value || '4000';
         const party = document.getElementById('saleParty').value || '';
@@ -290,6 +358,7 @@
 
       } else if(type === 'purchase') {
         const amount = money(document.getElementById('purchaseAmount').value);
+        if(amount <= 0) { showMessage('Amount must be greater than 0', 'danger'); return; }
         const hasVAT = document.getElementById('purchaseHasVAT').value === 'yes';
         const expenseAcc = document.getElementById('purchaseAccount').value || '6000';
         const party = document.getElementById('purchaseParty').value || '';
@@ -323,12 +392,15 @@
       } else if(type === 'payroll') {
         const name = document.getElementById('empName').value || 'Employee';
         const grossMonthly = money(document.getElementById('grossMonthly').value);
+        if(grossMonthly <= 0) { showMessage('Gross salary must be greater than 0', 'danger'); return; }
         const empPensionPct = money(document.getElementById('empPensionPct').value) / 100;
+        const emplPensionPct = money(document.getElementById('emplPensionPct').value) / 100;
         const otherDed = money(document.getElementById('otherDeduction').value);
         const payFrom = document.getElementById('payFromAccount').value || '1000';
 
-        // Calculate pension (employee) — pre-tax; employer pension not recorded here except as payable
+        // Calculate pension (employee) — pre-tax; employer pension as separate expense
         const empPension = grossMonthly * empPensionPct;
+        const emplPension = grossMonthly * emplPensionPct; // employer contribution
         const taxableMonthly = Math.max(0, grossMonthly - empPension - otherDed);
         // Annualize taxable
         const taxableAnnual = taxableMonthly * 12;
@@ -338,7 +410,9 @@
 
         // Journal:
         // Debit Salaries Expense (gross)
+        // Debit Employer Pension Expense (employer portion)
         // Credit Pension Payable (employee portion) — liability
+        // Credit Pension Payable (employer portion) — liability
         // Credit PAYE Payable (withholding)
         // Credit Cash/Bank (net pay) — payFrom account credit reduces asset
         const salExp = findAccountByName('Salaries Expense') || '6100';
@@ -347,21 +421,100 @@
 
         const entries = [
           { account: salExp, debit: grossMonthly, credit: 0 },
-          { account: pensionPayable, debit: 0, credit: +(+empPension) },
-          { account: payePayable, debit: 0, credit: +(+monthlyPAYE) },
-          { account: payFrom, debit: 0, credit: +(+netPay) }
         ];
+        // Employer pension as expense
+        if(emplPension > 0) {
+          entries.push({ account: salExp, debit: emplPension, credit: 0 });
+        }
+        // Liabilities
+        entries.push({ account: pensionPayable, debit: 0, credit: +(+empPension + +emplPension) });
+        entries.push({ account: payePayable, debit: 0, credit: +(+monthlyPAYE) });
+        entries.push({ account: payFrom, debit: 0, credit: +(+netPay) });
 
         const txn = {
           id: 'TX' + Date.now(),
           type: 'Payroll',
           date, desc: desc || `Payroll for ${name}`,
-          meta: { name, grossMonthly, empPension, otherDed, monthlyPAYE, netPay },
+          meta: { name, grossMonthly, empPension, emplPension, otherDed, monthlyPAYE, netPay },
           entries
         };
         state.transactions.push(txn);
         saveState();
         showMessage(`Payroll recorded. PAYE (monthly): ₦${monthlyPAYE.toFixed(2)}; Net pay: ₦${netPay.toFixed(2)}`, 'success');
+
+      } else if(type === 'income') {
+        const amount = money(document.getElementById('incomeAmount').value);
+        if(amount <= 0) { showMessage('Amount must be greater than 0', 'danger'); return; }
+        const category = document.getElementById('incomeCategory').value || '';
+        const paymentMethod = document.getElementById('incomePaymentMethod').value || 'Cash';
+        const hasVAT = document.getElementById('incomeHasVAT').checked;
+        const revenueAcc = document.getElementById('incomeAccount').value || '4000';
+        const description = document.getElementById('incomeDesc').value || 'General Income';
+        
+        const vat = hasVAT ? +(amount * vatRate) : 0;
+        const total = +(amount + vat);
+
+        // Journal:
+        // Debit Cash & Bank (or AR based on payment method)
+        // Credit Revenue
+        // Credit Output VAT if applicable
+        const cashAcc = findAccountByName('Cash & Bank') || '1000';
+        const outputVAT = findAccountByName('Output VAT') || '7000';
+
+        const entries = [
+          { account: cashAcc, debit: total, credit: 0 },
+          { account: revenueAcc, debit: 0, credit: amount },
+        ];
+        if(vat > 0) entries.push({ account: outputVAT, debit: 0, credit: +vat });
+
+        const txn = {
+          id: 'TX' + Date.now(),
+          type: 'Income',
+          date, 
+          desc: description,
+          meta: { category, paymentMethod, amount, vat, total, hasVAT },
+          entries
+        };
+        state.transactions.push(txn);
+        saveState();
+        showMessage('Income recorded', 'success');
+
+      } else if(type === 'expense') {
+        const amount = money(document.getElementById('expenseAmount').value);
+        if(amount <= 0) { showMessage('Amount must be greater than 0', 'danger'); return; }
+        const category = document.getElementById('expenseCategory').value || '';
+        const paymentMethod = document.getElementById('expensePaymentMethod').value || 'Cash';
+        const hasVAT = document.getElementById('expenseHasVAT').checked;
+        const expenseAcc = document.getElementById('expenseAccount').value || '6000';
+        const description = document.getElementById('expenseDesc').value || 'General Expense';
+        
+        const vat = hasVAT ? +(amount * vatRate) : 0;
+        const total = +(amount + vat);
+
+        // Journal:
+        // Debit Expense
+        // Debit Input VAT if applicable
+        // Credit Cash & Bank (or AP based on payment method)
+        const cashAcc = findAccountByName('Cash & Bank') || '1000';
+        const inputVAT = findAccountByName('Input VAT') || '1300';
+
+        const entries = [
+          { account: expenseAcc, debit: amount, credit: 0 },
+        ];
+        if(vat > 0) entries.push({ account: inputVAT, debit: +vat, credit: 0 });
+        entries.push({ account: cashAcc, debit: 0, credit: total });
+
+        const txn = {
+          id: 'TX' + Date.now(),
+          type: 'Expense',
+          date, 
+          desc: description,
+          meta: { category, paymentMethod, amount, vat, total, hasVAT },
+          entries
+        };
+        state.transactions.push(txn);
+        saveState();
+        showMessage('Expense recorded', 'success');
 
       } else {
         showMessage('Unknown transaction type', 'danger');
@@ -404,7 +557,31 @@
     function renderTransactions() {
       const tbody = document.querySelector('#txTable tbody');
       tbody.innerHTML = '';
-      state.transactions.slice().reverse().forEach(tx => {
+      const showSeedData = document.getElementById('toggleSeedData')?.checked || false;
+      
+      let filteredTxns = state.transactions.slice();
+      
+      // Apply filters
+      if(state.filters.dateFrom) {
+        filteredTxns = filteredTxns.filter(tx => tx.date >= state.filters.dateFrom);
+      }
+      if(state.filters.dateTo) {
+        filteredTxns = filteredTxns.filter(tx => tx.date <= state.filters.dateTo);
+      }
+      if(state.filters.category) {
+        const cat = state.filters.category.toLowerCase();
+        filteredTxns = filteredTxns.filter(tx => {
+          const category = (tx.meta?.category || '').toLowerCase();
+          return category.includes(cat);
+        });
+      }
+      
+      // Filter out seed data if toggle is off
+      if(!showSeedData) {
+        filteredTxns = filteredTxns.filter(tx => !tx.meta?.isSeed);
+      }
+      
+      filteredTxns.reverse().forEach(tx => {
         const totalDebit = tx.entries.reduce((s,e)=>s + (e.debit||0), 0);
         const totalCredit = tx.entries.reduce((s,e)=>s + (e.credit||0), 0);
         const entriesHtml = tx.entries.map(e => {
@@ -412,13 +589,31 @@
           const an = acc ? `${acc.code} ${acc.name}` : e.account;
           return `<div>${an}: ₦${fmt(e.debit||0)} ⇢ ₦${fmt(e.credit||0)}</div>`;
         }).join('');
+        const category = tx.meta?.category || '';
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${tx.date}</td><td>${tx.type}</td><td>${escapeHtml(tx.desc)}</td><td>${entriesHtml}</td><td class="right">${fmt(totalDebit)}</td><td class="right">${fmt(totalCredit)}</td>`;
+        tr.innerHTML = `<td>${tx.date}</td><td>${tx.type}</td><td>${escapeHtml(category)}</td><td>${escapeHtml(tx.desc)}</td><td>${entriesHtml}</td><td class="right">${fmt(totalDebit)}</td><td class="right">${fmt(totalCredit)}</td>`;
         tbody.appendChild(tr);
       });
     }
 
     function escapeHtml(s){ return (''+s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+    // Apply filters
+    function applyFilters() {
+      state.filters.dateFrom = document.getElementById('filterDateFrom').value || '';
+      state.filters.dateTo = document.getElementById('filterDateTo').value || '';
+      state.filters.category = document.getElementById('filterCategory').value || '';
+      renderTransactions();
+    }
+
+    // Clear filters
+    function clearFilters() {
+      state.filters = { dateFrom: '', dateTo: '', category: '' };
+      document.getElementById('filterDateFrom').value = '';
+      document.getElementById('filterDateTo').value = '';
+      document.getElementById('filterCategory').value = '';
+      renderTransactions();
+    }
 
     // Show simple ledger / trial balance
     function showLedger() {
@@ -450,14 +645,24 @@
 
     // VAT Summary (output - input) optionally by date range
     function showVATSummary() {
+      const dateFrom = prompt('Filter from date (YYYY-MM-DD) - leave empty for all:', '');
+      const dateTo = prompt('Filter to date (YYYY-MM-DD) - leave empty for all:', '');
+      
       const vatRate = state.vatRate / 100;
       let totalOutput = 0, totalInput = 0;
       state.transactions.forEach(tx => {
-        if(tx.type === 'Sale' && tx.meta) totalOutput += (tx.meta.vat || 0);
-        if(tx.type === 'Purchase' && tx.meta) totalInput += (tx.meta.vat || 0);
+        // Apply date filter
+        if(dateFrom && tx.date < dateFrom) return;
+        if(dateTo && tx.date > dateTo) return;
+        
+        if((tx.type === 'Sale' || tx.type === 'Income') && tx.meta) totalOutput += (tx.meta.vat || 0);
+        if((tx.type === 'Purchase' || tx.type === 'Expense') && tx.meta) totalInput += (tx.meta.vat || 0);
       });
       const payable = totalOutput - totalInput;
       let html = '<h3>VAT Summary</h3>';
+      if(dateFrom || dateTo) {
+        html += `<div class="small">Filtered: ${dateFrom || 'start'} to ${dateTo || 'end'}</div>`;
+      }
       html += `<div class="small">VAT Rate used: ${state.vatRate}%</div>`;
       html += `<div class="muted">Total Output VAT (collected): ₦${fmt(totalOutput)}</div>`;
       html += `<div class="muted">Total Input VAT (recoverable): ₦${fmt(totalInput)}</div>`;
@@ -479,6 +684,7 @@
       });
       let html = '<h3>PAYE Summary</h3>';
       html += `<div class="muted">Total PAYE withheld (sum of payroll transactions): ₦${fmt(totalWithheld)}</div>`;
+      html += `<div class="small">PAYE appears in Trial Balance under "PAYE Payable" as a liability.</div>`;
       html += '<table><thead><tr><th>Date</th><th>Payroll</th><th class="right">PAYE (₦)</th><th class="right">Net Pay (₦)</th></tr></thead><tbody>';
       payrolls.forEach(p => {
         html += `<tr><td>${p.date}</td><td>${escapeHtml(p.meta.name || p.desc)}</td><td class="right">${fmt(p.meta.monthlyPAYE)}</td><td class="right">${fmt(p.meta.netPay)}</td></tr>`;
@@ -488,15 +694,118 @@
       document.getElementById('reports').innerHTML = html;
     }
 
+    // Monthly & Annual Summary
+    function showMonthlySummary() {
+      const month = prompt('Enter month (YYYY-MM) or leave empty for all data:', '');
+      const dateFrom = month ? `${month}-01` : '';
+      const dateTo = month ? `${month}-31` : '';
+      
+      let totalIncome = 0, totalExpenses = 0;
+      const monthlyData = {};
+      
+      state.transactions.forEach(tx => {
+        // Apply date filter
+        if(dateFrom && tx.date < dateFrom) return;
+        if(dateTo && tx.date > dateTo) return;
+        
+        const monthKey = tx.date.slice(0, 7); // YYYY-MM
+        if(!monthlyData[monthKey]) {
+          monthlyData[monthKey] = { income: 0, expenses: 0 };
+        }
+        
+        // Calculate income and expenses from transaction types
+        if(tx.type === 'Sale' || tx.type === 'Income') {
+          const amount = tx.meta?.amount || 0;
+          totalIncome += amount;
+          monthlyData[monthKey].income += amount;
+        } else if(tx.type === 'Purchase' || tx.type === 'Expense') {
+          const amount = tx.meta?.amount || 0;
+          totalExpenses += amount;
+          monthlyData[monthKey].expenses += amount;
+        }
+      });
+      
+      const totalProfit = totalIncome - totalExpenses;
+      const months = Object.keys(monthlyData).sort();
+      const avgMonthlyProfit = months.length > 0 ? totalProfit / months.length : 0;
+      const annualizedProfit = avgMonthlyProfit * 12;
+      
+      let html = '<h3>Monthly & Annual Summary</h3>';
+      if(month) {
+        html += `<div class="small">Showing data for: ${month}</div>`;
+      } else {
+        html += `<div class="small">Showing all data</div>`;
+      }
+      html += `<div style="margin-top:8px">`;
+      html += `<div class="muted">Total Income: ₦${fmt(totalIncome)}</div>`;
+      html += `<div class="muted">Total Expenses: ₦${fmt(totalExpenses)}</div>`;
+      html += `<div><strong>Profit (Income - Expenses): ₦${fmt(totalProfit)}</strong></div>`;
+      html += `</div>`;
+      
+      if(months.length > 0) {
+        html += '<table style="margin-top:12px"><thead><tr><th>Month</th><th class="right">Income</th><th class="right">Expenses</th><th class="right">Profit</th></tr></thead><tbody>';
+        months.forEach(m => {
+          const data = monthlyData[m];
+          const profit = data.income - data.expenses;
+          html += `<tr><td>${m}</td><td class="right">₦${fmt(data.income)}</td><td class="right">₦${fmt(data.expenses)}</td><td class="right">₦${fmt(profit)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        html += `<div class="small" style="margin-top:8px">Average Monthly Profit: ₦${fmt(avgMonthlyProfit)}</div>`;
+        html += `<div class="small">Annualized Profit (avg × 12): ₦${fmt(annualizedProfit)}</div>`;
+      }
+      
+      document.getElementById('reports').innerHTML = html;
+    }
+
     // Export transactions CSV
     function exportTransactionsCSV() {
-      const rows = [['id','date','type','description','account','debit','credit','meta_json']];
+      const rows = [['id','date','type','description','category','payment_method','account','debit','credit','meta_json']];
       state.transactions.forEach(tx => {
+        const category = tx.meta?.category || '';
+        const paymentMethod = tx.meta?.paymentMethod || '';
         tx.entries.forEach(e => {
-          rows.push([tx.id, tx.date, tx.type, `"${tx.desc.replace(/"/g,'""')}"`, e.account, e.debit||0, e.credit||0, `"${JSON.stringify(tx.meta).replace(/"/g,'""')}"`]);
+          rows.push([
+            tx.id, 
+            tx.date, 
+            tx.type, 
+            `"${tx.desc.replace(/"/g,'""')}"`, 
+            `"${category.replace(/"/g,'""')}"`,
+            paymentMethod,
+            e.account, 
+            e.debit||0, 
+            e.credit||0, 
+            `"${JSON.stringify(tx.meta).replace(/"/g,'""')}"`
+          ]);
         });
       });
       downloadText(rows.map(r => r.join(',')).join('\n'), 'transactions.csv');
+    }
+
+    // Export summary CSV
+    function exportSummaryCSV() {
+      const monthlyData = {};
+      
+      state.transactions.forEach(tx => {
+        const monthKey = tx.date.slice(0, 7); // YYYY-MM
+        if(!monthlyData[monthKey]) {
+          monthlyData[monthKey] = { income: 0, expenses: 0 };
+        }
+        
+        if(tx.type === 'Sale' || tx.type === 'Income') {
+          monthlyData[monthKey].income += (tx.meta?.amount || 0);
+        } else if(tx.type === 'Purchase' || tx.type === 'Expense') {
+          monthlyData[monthKey].expenses += (tx.meta?.amount || 0);
+        }
+      });
+      
+      const rows = [['month','income','expenses','profit']];
+      Object.keys(monthlyData).sort().forEach(month => {
+        const data = monthlyData[month];
+        const profit = data.income - data.expenses;
+        rows.push([month, data.income, data.expenses, profit]);
+      });
+      
+      downloadText(rows.map(r => r.join(',')).join('\n'), 'summary.csv');
     }
 
     // Clear all stored data
@@ -526,6 +835,8 @@
       document.getElementById('saleFields').style.display = v==='sale' ? 'block' : 'none';
       document.getElementById('purchaseFields').style.display = v==='purchase' ? 'block' : 'none';
       document.getElementById('payrollFields').style.display = v==='payroll' ? 'block' : 'none';
+      document.getElementById('incomeFields').style.display = v==='income' ? 'block' : 'none';
+      document.getElementById('expenseFields').style.display = v==='expense' ? 'block' : 'none';
     });
 
     // Initial render
@@ -539,17 +850,24 @@
     // Boot
     renderAll();
 
+    // Toggle seed button visibility
+    function toggleSeedButton() {
+      if(confirm('Seed sample data for demonstration? This will add sample transactions (sale, purchase, payroll, income, expense).')) {
+        seedSample();
+      }
+    }
+
     // For convenience: quickly add sample data (uncomment to seed)
     // seedSample();
 
     function seedSample() {
-      // small seed: a sale, a purchase, payroll
+      // small seed: a sale, a purchase, payroll, income, expense
       state.transactions.push({
         id: 'TX' + (Date.now()+1),
         type: 'Sale',
         date: new Date().toISOString().slice(0,10),
         desc: 'Sample sale',
-        meta: { party: 'Customer A', amount: 100000, vat: 100000 * (state.vatRate/100), total: 100000 * (1 + state.vatRate/100) },
+        meta: { party: 'Customer A', amount: 100000, vat: 100000 * (state.vatRate/100), total: 100000 * (1 + state.vatRate/100), isSeed: true },
         entries: [
           { account: '1100', debit: 100000*(1+state.vatRate/100), credit: 0 },
           { account: '4000', debit: 0, credit: 100000 },
@@ -561,14 +879,38 @@
         type: 'Purchase',
         date: new Date().toISOString().slice(0,10),
         desc: 'Sample purchase',
-        meta: { party: 'Supplier B', amount: 50000, vat: 50000*(state.vatRate/100), total: 50000*(1+state.vatRate/100) },
+        meta: { party: 'Supplier B', amount: 50000, vat: 50000*(state.vatRate/100), total: 50000*(1+state.vatRate/100), isSeed: true },
         entries: [
           { account: '6000', debit: 50000, credit: 0 },
           { account: '1300', debit: 50000*(state.vatRate/100), credit: 0 },
           { account: '2000', debit: 0, credit: 50000*(1+state.vatRate/100) }
         ]
       });
+      state.transactions.push({
+        id: 'TX' + (Date.now()+3),
+        type: 'Income',
+        date: new Date().toISOString().slice(0,10),
+        desc: 'Sample consulting income',
+        meta: { category: 'Consulting', paymentMethod: 'Bank', amount: 75000, vat: 75000*(state.vatRate/100), total: 75000*(1+state.vatRate/100), hasVAT: true, isSeed: true },
+        entries: [
+          { account: '1000', debit: 75000*(1+state.vatRate/100), credit: 0 },
+          { account: '4000', debit: 0, credit: 75000 },
+          { account: '7000', debit: 0, credit: 75000 * (state.vatRate/100) }
+        ]
+      });
+      state.transactions.push({
+        id: 'TX' + (Date.now()+4),
+        type: 'Expense',
+        date: new Date().toISOString().slice(0,10),
+        desc: 'Sample office rent',
+        meta: { category: 'Rent', paymentMethod: 'Bank', amount: 30000, vat: 0, total: 30000, hasVAT: false, isSeed: true },
+        entries: [
+          { account: '6200', debit: 30000, credit: 0 },
+          { account: '1000', debit: 0, credit: 30000 }
+        ]
+      });
       saveState();
+      showMessage('Sample data seeded successfully!', 'success');
     }
 
     // Export COA and transactions on page unload (no-op but kept)
