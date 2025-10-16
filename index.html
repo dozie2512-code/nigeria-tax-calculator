@@ -1,5 +1,3 @@
-GitHub Copilot Chat Assistant — updated index.html below.
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,7 +26,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(520px,96vw); }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(680px,96vw); max-height:80vh; overflow:auto; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -37,6 +35,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
     .search-bar { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
     .pagination { display:flex; gap:8px; align-items:center; margin-top:8px; }
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
+    pre.small { font-size:0.85rem; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -99,7 +98,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Use the search & pagination controls below to filter and navigate transactions.</small>
+      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings).</small>
     </section>
 
     <section class="panel section">
@@ -111,7 +110,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
         <button id="btnClearSearch" class="small">Clear</button>
       </div>
 
-      <table class="ledger-table" id="ledgerTable">
+      <table class="ledger-table" id="ledgerTable" aria-live="polite">
         <thead>
           <tr>
             <th>Date</th>
@@ -137,6 +136,26 @@ GitHub Copilot Chat Assistant — updated index.html below.
       <div class="vat-summary" id="vatSummary"></div>
       <div class="totals" id="totalsSummary"></div>
       <div class="tax-summary" id="taxSummary"></div>
+    </section>
+
+    <section class="panel section" id="reportsPanel">
+      <h2 style="margin:0 0 8px 0;">Reports</h2>
+      <div class="form-inline" style="margin-bottom:8px;">
+        <label>Report Type:
+          <select id="reportType">
+            <option value="profit">Profit</option>
+            <option value="vat">VAT</option>
+            <option value="paye">PAYE</option>
+          </select>
+        </label>
+        <label>Date From: <input type="date" id="reportDateFrom" /></label>
+        <label>Date To: <input type="date" id="reportDateTo" /></label>
+        <button class="primary" id="btnGenerateReport">Generate Report</button>
+        <button id="btnExportHtml" class="small">Export HTML</button>
+        <button id="btnExportCsv" class="small">Export CSV</button>
+        <button id="btnExportJson" class="small">Export JSON</button>
+      </div>
+      <div id="reportOutput" style="margin-top:12px;"></div>
     </section>
   </main>
 
@@ -182,7 +201,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria 2026 slices unless overridden programmatically.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria slices unless overridden per business.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -223,11 +242,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
     // Data model in localStorage key 'ntc_data_v1'
     const STORAGE_KEY = 'ntc_data_v1';
 
-    // Default PIT slices (Nigeria 2026 used in original). Will be used by computeTax unless overridden.
     const DEFAULT_PIT = {
       threshold: 800000,
       slices: [
-        { upTo: 3000000, rate: 0.15 },  // slice from threshold up to 3,000,000
+        { upTo: 3000000, rate: 0.15 },
         { upTo: 12000000, rate: 0.18 },
         { upTo: 25000000, rate: 0.21 },
         { upTo: 50000000, rate: 0.23 },
@@ -236,37 +254,26 @@ GitHub Copilot Chat Assistant — updated index.html below.
     };
 
     // In-memory state
-    let data = {
-      users: [],
-      businesses: [],
-      transactions: {} // { userId: { businessId: [ txns ] } }
-    };
-
+    let data = { users: [], businesses: [], transactions: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
-
-    // Transaction edit state
     let editIndex = null;
 
     // Ledger UI state
     const PAGE_SIZE = 20;
     let currentPage = 1;
     let ledgerFilterText = '';
-    let ledgerFiltered = []; // filtered txns used for pagination and summaries
+    let ledgerFiltered = [];
 
-    // Utilities
     function uid(prefix='id') { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
 
-    function saveData() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    }
+    function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
     function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          // basic validation
           if (parsed && typeof parsed === 'object') {
             data = parsed;
             if (!data.users) data.users = [];
@@ -274,11 +281,9 @@ GitHub Copilot Chat Assistant — updated index.html below.
             if (!data.transactions) data.transactions = {};
             return;
           }
-        } catch(e) {
-          console.error('Invalid saved data', e);
-        }
+        } catch(e) { console.error('Invalid saved data', e); }
       }
-      // initialize with a demo user and business if empty
+      // default demo
       const userId = uid('user');
       const bizId = uid('biz');
       data = {
@@ -359,7 +364,16 @@ GitHub Copilot Chat Assistant — updated index.html below.
     const fileInput = document.getElementById('fileInput');
     const btnClearAll = document.getElementById('btnClearAll');
 
-    // State for modals: editing vs adding
+    // Reports UI
+    const reportType = document.getElementById('reportType');
+    const reportDateFrom = document.getElementById('reportDateFrom');
+    const reportDateTo = document.getElementById('reportDateTo');
+    const btnGenerateReport = document.getElementById('btnGenerateReport');
+    const btnExportHtml = document.getElementById('btnExportHtml');
+    const btnExportCsv = document.getElementById('btnExportCsv');
+    const btnExportJson = document.getElementById('btnExportJson');
+    const reportOutput = document.getElementById('reportOutput');
+
     let userEditingId = null;
     let bizEditingId = null;
 
@@ -371,9 +385,22 @@ GitHub Copilot Chat Assistant — updated index.html below.
     renderLedger();
     calculateSummary();
 
-    // --- User & Business management functions ---
+    // --- Helpers for modals ---
+    function openModal(modal) {
+      modalOverlay.style.display = 'block';
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden','false');
+    }
+    function closeModal(modal) {
+      modalOverlay.style.display = 'none';
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+      userEditingId = null;
+      bizEditingId = null;
+    }
+
+    // --- User & Business management ---
     function refreshUserBusinessSelectors() {
-      // Users
       userSelect.innerHTML = '';
       data.users.forEach(u => {
         const opt = document.createElement('option');
@@ -381,7 +408,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         opt.textContent = (u.display || u.username) + ' (' + u.username + ')';
         userSelect.appendChild(opt);
       });
-      // Businesses
       businessSelect.innerHTML = '';
       data.businesses.forEach(b => {
         const owner = findUser(b.ownerId);
@@ -394,7 +420,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${b.vatRate}% VAT)${status}`;
         businessSelect.appendChild(opt);
       });
-      // populate bizOwner select for business modal
       bizOwner.innerHTML = '';
       data.users.forEach(u => {
         const o = document.createElement('option');
@@ -403,7 +428,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         bizOwner.appendChild(o);
       });
 
-      // set selected values if still available, else pick first
       if (!data.users.find(u=>u.id===selectedUserId)) selectedUserId = data.users.length ? data.users[0].id : null;
       if (!data.businesses.find(b=>b.id===selectedBusinessId)) selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
 
@@ -418,21 +442,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
 
-    function openModal(modal) {
-      modalOverlay.style.display = 'block';
-      modal.style.display = 'block';
-      modal.setAttribute('aria-hidden','false');
-    }
-    function closeModal(modal) {
-      modalOverlay.style.display = 'none';
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden','true');
-      // clear editing state
-      userEditingId = null;
-      bizEditingId = null;
-    }
-
-    // --- Users ---
+    // Users
     btnAddUser.addEventListener('click', () => {
       userModalTitle.textContent = 'Add User';
       userName.value = '';
@@ -459,13 +469,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const u = findUser(selectedUserId);
       if (!u) return;
       if (!confirm(`Delete user "${u.display || u.username}" and all their businesses & transactions? This action cannot be undone.`)) return;
-      // Delete user's businesses and transactions
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
       delete data.transactions[u.id];
       data.users = data.users.filter(x => x.id !== u.id);
-      // if remaining businesses belonged to others but selectedBusinessId deleted, fix selection
       if (!data.users.length) {
-        // clear everything
         data = { users: [], businesses: [], transactions: {} };
       }
       saveData();
@@ -486,7 +493,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         u.display = (userDisplay.value||'').trim();
         u.notes = (userNotes.value||'').trim();
       } else {
-        // ensure unique username
         const exists = data.users.find(x => x.username === username);
         if (exists) { if (!confirm('Username already exists. Add anyway?')) return; }
         const id = uid('user');
@@ -502,7 +508,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
 
     userSelect.addEventListener('change', (e) => {
       selectedUserId = e.target.value;
-      // auto-select first business owned by user if possible
       const owned = data.businesses.find(b => b.ownerId === selectedUserId);
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
@@ -511,7 +516,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       calculateSummary();
     });
 
-    // --- Businesses ---
+    // Businesses
     btnAddBusiness.addEventListener('click', () => {
       businessModalTitle.textContent = 'Add Business';
       bizName.value = '';
@@ -548,9 +553,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const b = findBiz(selectedBusinessId);
       if (!b) return;
       if (!confirm(`Delete business "${b.name}" and all its transactions for all users? This action cannot be undone.`)) return;
-      // remove business from businesses
       data.businesses = data.businesses.filter(x => x.id !== b.id);
-      // remove transactions for this business across all users
       for (const uid of Object.keys(data.transactions)) {
         if (data.transactions[uid] && data.transactions[uid][b.id]) delete data.transactions[uid][b.id];
       }
@@ -613,7 +616,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       calculateSummary();
     });
 
-    // --- Transactions ---
+    // Transactions
     btnAddTxn.addEventListener('click', () => {
       const date = document.getElementById('txnDate').value;
       const type = document.getElementById('txnType').value;
@@ -635,7 +638,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
       data.transactions[selectedUserId][selectedBusinessId].push(txn);
       saveData();
       clearForm();
-      currentPage = Math.ceil(((ledgerFiltered.length || 0) + 1) / PAGE_SIZE); // jump to last page after adding (approx)
       renderLedger();
       calculateSummary();
     });
@@ -656,17 +658,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
         return;
       }
       const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
-      // apply search filter (case-insensitive)
       const q = (ledgerFilterText || '').trim().toLowerCase();
       ledgerFiltered = allTxns.filter(txn => {
         if (!q) return true;
-        const parts = [
-          txn.date || '',
-          txn.type || '',
-          txn.category || '',
-          txn.desc || '',
-          String(txn.amount || '')
-        ];
+        const parts = [ txn.date || '', txn.type || '', txn.category || '', txn.desc || '', String(txn.amount || '') ];
         return parts.join(' ').toLowerCase().includes(q);
       });
 
@@ -678,7 +673,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const start = (currentPage - 1) * PAGE_SIZE;
       const pageSlice = ledgerFiltered.slice(start, start + PAGE_SIZE);
 
-      pageSlice.forEach((txn, idx) => {
+      pageSlice.forEach((txn) => {
         let vat = 0;
         if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
         const tr = document.createElement('tr');
@@ -737,7 +732,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
       calculateSummary();
     });
 
-    // Expose functions needed by inline onclick attributes
     window.openEditModal = function(txnId) {
       if (!selectedUserId || !selectedBusinessId) return;
       const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
@@ -761,9 +755,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
       if (idx === -1) return;
       txns.splice(idx,1);
       saveData();
-      // keep page sane
-      const totalPages = Math.max(1, Math.ceil(((ledgerFiltered.length - 1) || 0) / PAGE_SIZE));
-      if (currentPage > totalPages) currentPage = totalPages;
       renderLedger();
       calculateSummary();
     };
@@ -792,103 +783,82 @@ GitHub Copilot Chat Assistant — updated index.html below.
     }
     window.saveEdit = saveEdit;
 
-    // --- Summaries and tax calculations ---
+    // Summaries and tax calculations
     function calculateSummary() {
-  const biz = findBiz(selectedBusinessId);
-  const currency = (biz && biz.currency) ? biz.currency : '₦';
-  const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-  const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+      const biz = findBiz(selectedBusinessId);
+      const currency = (biz && biz.currency) ? biz.currency : '₦';
+      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+      const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+      const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
+      const vatEnabled = biz ? !!biz.vatEnabled : false;
+      const txns = ledgerFiltered && ledgerFiltered.length ? ledgerFiltered : (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
 
-  // Determine if PIT is enabled (default true if undefined)
-  const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
-  const vatEnabled = biz ? !!biz.vatEnabled : false;
+      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
+      let vatOutputTotal = 0, vatInputTotal = 0;
+      txns.forEach(txn => {
+        if (txn.type === 'Income') {
+          incomeTotal += txn.amount;
+          if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
+        } else if (txn.type === 'Expense') {
+          expenseTotal += txn.amount;
+          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
+          if (txn.category === 'Rent') rentTotal += txn.amount;
+        } else if (txn.type === 'Deduction') {
+          deductionTotal += txn.amount;
+        }
+      });
 
-  // Use ledgerFiltered so summaries match the filtered view
-  const txns = ledgerFiltered || [];
+      let netBalance = incomeTotal - expenseTotal;
+      let vatPayable = (vatOutputTotal - vatInputTotal);
+      let rentRelief = rentTotal * 0.20;
+      if (rentRelief > 500000) rentRelief = 500000;
+      let adjIncome = incomeTotal - deductionTotal - rentRelief;
+      if (adjIncome < 0) adjIncome = 0;
+      let tax = 0;
+      if (pitEnabled) tax = computeTax(adjIncome, biz);
+      let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
 
-  let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
-  let vatOutputTotal = 0, vatInputTotal = 0;
-  txns.forEach(txn => {
-    if (txn.type === 'Income') {
-      incomeTotal += txn.amount;
-      if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
-    } else if (txn.type === 'Expense') {
-      expenseTotal += txn.amount;
-      if (vatEnabled) vatInputTotal += txn.amount * vatRate;
-      if (txn.category === 'Rent') rentTotal += txn.amount;
-    } else if (txn.type === 'Deduction') {
-      deductionTotal += txn.amount;
+      if (vatEnabled) {
+        vatSummaryDiv.style.display = '';
+        vatSummaryDiv.innerHTML =
+          `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
+           VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
+           VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
+           <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
+      } else {
+        vatSummaryDiv.style.display = 'none';
+        vatSummaryDiv.innerHTML = '';
+      }
+
+      totalsSummaryDiv.style.display = '';
+      totalsSummaryDiv.innerHTML =
+        `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
+         <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
+         <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
+         <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
+
+      if (pitEnabled) {
+        taxSummaryDiv.style.display = '';
+        taxSummaryDiv.innerHTML =
+          `<strong>Tax Calculation (PIT):</strong><br>
+           Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
+           Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
+           Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
+           <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
+           Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
+           ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
+      } else {
+        taxSummaryDiv.style.display = 'none';
+        taxSummaryDiv.innerHTML = '';
+      }
     }
-  });
-
-  let netBalance = incomeTotal - expenseTotal;
-  let vatPayable = (vatOutputTotal - vatInputTotal);
-  // rent relief: 20% of rent up to 500,000
-  let rentRelief = rentTotal * 0.20;
-  if (rentRelief > 500000) rentRelief = 500000;
-
-  // taxable income after deductions and relief
-  let adjIncome = incomeTotal - deductionTotal - rentRelief;
-  if (adjIncome < 0) adjIncome = 0;
-
-  // Tax calculation
-  let tax = 0;
-  if (pitEnabled) {
-    tax = computeTax(adjIncome, biz);
-  } else {
-    tax = 0;
-  }
-
-  let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
-
-  // VAT summary: show only when VAT enabled for the business
-  if (vatEnabled) {
-    vatSummaryDiv.style.display = '';
-    vatSummaryDiv.innerHTML =
-      `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
-       VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
-       VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
-       <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
-  } else {
-    vatSummaryDiv.style.display = 'none';
-    vatSummaryDiv.innerHTML = '';
-  }
-
-  totalsSummaryDiv.style.display = ''; // totals always shown
-  totalsSummaryDiv.innerHTML =
-    `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
-     <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
-     <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
-     <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
-
-  // PIT summary: show only when PIT enabled
-  if (pitEnabled) {
-    taxSummaryDiv.style.display = '';
-    taxSummaryDiv.innerHTML =
-      `<strong>Tax Calculation (PIT):</strong><br>
-       Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
-       Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
-       Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
-       <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
-       Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-       ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
-  } else {
-    taxSummaryDiv.style.display = 'none';
-    taxSummaryDiv.innerHTML = '';
-  }
-    }   
 
     function computeTax(adjIncome, biz) {
-      // biz may include custom PIT slices in biz.pit (not exposed in UI now).
-      // If PIT disabled on business, return 0
       if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) return 0;
       const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
-      // If adjIncome <= threshold => 0
       let tax = 0;
       if (adjIncome > (pit.threshold || DEFAULT_PIT.threshold)) {
-        let taxable = adjIncome;
-        let remaining = taxable - (pit.threshold || DEFAULT_PIT.threshold);
-        // iterate slices
+        let remaining = adjIncome - (pit.threshold || DEFAULT_PIT.threshold);
         let prevUpper = (pit.threshold || DEFAULT_PIT.threshold);
         for (let s of pit.slices) {
           const upper = s.upTo;
@@ -900,10 +870,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
           prevUpper = upper;
         }
       }
-      return Math.max(0, Math.round(tax)); // tax in whole Naira
+      return Math.max(0, Math.round(tax));
     }
 
-    // --- Export / Import / Clear ---
+    // Export / Import / Clear
     btnExport.addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -917,9 +887,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       URL.revokeObjectURL(url);
     });
 
-    btnImport.addEventListener('click', () => {
-      fileInput.click();
-    });
+    btnImport.addEventListener('click', () => fileInput.click());
 
     fileInput.addEventListener('change', (e) => {
       const f = e.target.files[0];
@@ -929,7 +897,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         try {
           const imported = JSON.parse(ev.target.result);
           if (!imported.users || !imported.businesses) throw new Error('Invalid format: missing users/businesses');
-          // optional merge or replace? ask user - for simplicity replace after confirmation
           if (!confirm('Import will replace current data. Continue?')) return;
           data = imported;
           if (!data.transactions) data.transactions = {};
@@ -945,7 +912,6 @@ GitHub Copilot Chat Assistant — updated index.html below.
         }
       };
       reader.readAsText(f);
-      // reset file input
       fileInput.value = '';
     });
 
@@ -961,7 +927,157 @@ GitHub Copilot Chat Assistant — updated index.html below.
       alert('All data cleared and reset to demo.');
     });
 
-    // --- Helpers ---
+    // Reports
+    btnGenerateReport.addEventListener('click', () => {
+      const type = reportType.value;
+      const dateFrom = reportDateFrom.value;
+      const dateTo = reportDateTo.value;
+      const result = generateReport(type, dateFrom, dateTo);
+      renderReportOutput(result, type);
+    });
+
+    btnExportHtml.addEventListener('click', () => exportReport('html'));
+    btnExportCsv.addEventListener('click', () => exportReport('csv'));
+    btnExportJson.addEventListener('click', () => exportReport('json'));
+
+    function filterTxnsByDate(txns, from, to) {
+      if (!from && !to) return txns;
+      return txns.filter(txn => {
+        const d = txn.date;
+        return (!from || d >= from) && (!to || d <= to);
+      });
+    }
+
+    function generateReport(type, from, to) {
+      if (!selectedUserId || !selectedBusinessId) return { error: "Select user and business first." };
+      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const txns = filterTxnsByDate(allTxns, from, to);
+      const biz = findBiz(selectedBusinessId);
+      const currency = (biz && biz.currency) ? biz.currency : '₦';
+      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+      const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
+      const vatEnabled = biz ? !!biz.vatEnabled : false;
+
+      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0, salaryTotal = 0;
+      let vatOutputTotal = 0, vatInputTotal = 0;
+      let salaryDetails = [];
+
+      txns.forEach(txn => {
+        if (txn.type === 'Income') {
+          incomeTotal += txn.amount;
+          if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
+        } else if (txn.type === 'Expense') {
+          expenseTotal += txn.amount;
+          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
+          if (txn.category === 'Rent') rentTotal += txn.amount;
+        } else if (txn.type === 'Deduction') {
+          deductionTotal += txn.amount;
+        }
+        if (txn.category === 'Salary' && txn.type === 'Expense') {
+          salaryTotal += txn.amount;
+          salaryDetails.push({ desc: txn.desc, amount: txn.amount, date: txn.date });
+        }
+      });
+
+      let netProfit = incomeTotal - expenseTotal;
+      let vatPayable = vatOutputTotal - vatInputTotal;
+      let rentRelief = Math.min(rentTotal * 0.20, 500000);
+      let adjIncome = incomeTotal - deductionTotal - rentRelief;
+      if (adjIncome < 0) adjIncome = 0;
+      let tax = pitEnabled ? computeTax(adjIncome, biz) : 0;
+      let payeTotal = pitEnabled ? computeTax(salaryTotal, biz) : 0;
+
+      if (type === "profit") {
+        return {
+          heading: "Profit Report",
+          items: [
+            { label: "Income", value: `${currency}${formatNumber(incomeTotal)}` },
+            { label: "Expenses", value: `${currency}${formatNumber(expenseTotal)}` },
+            { label: "Deductions", value: `${currency}${formatNumber(deductionTotal)}` },
+            { label: "Net Profit", value: `${currency}${formatNumber(netProfit)}` },
+          ],
+          raw: { incomeTotal, expenseTotal, deductionTotal, netProfit, from, to, business: biz ? biz.name : null }
+        };
+      } else if (type === "vat") {
+        return {
+          heading: "VAT Report",
+          items: [
+            { label: "VAT Output (Sales)", value: `${currency}${formatNumber(vatOutputTotal)}` },
+            { label: "VAT Input (Purchases)", value: `${currency}${formatNumber(vatInputTotal)}` },
+            { label: "VAT Payable", value: `${currency}${formatNumber(vatPayable)}` }
+          ],
+          raw: { vatOutputTotal, vatInputTotal, vatPayable, from, to, business: biz ? biz.name : null }
+        };
+      } else if (type === "paye") {
+        return {
+          heading: "PAYE Report",
+          items: [
+            { label: "Total Salary Expenses", value: `${currency}${formatNumber(salaryTotal)}` },
+            { label: "PAYE (using PIT rates)", value: `${currency}${formatNumber(payeTotal,0)}` },
+            { label: "Salary Details", value: salaryDetails.length ? salaryDetails.map(s => `${s.date}: ${s.desc} - ${currency}${formatNumber(s.amount)}`).join("<br>") : 'No salary transactions found' }
+          ],
+          raw: { salaryTotal, payeTotal, salaryDetails, from, to, business: biz ? biz.name : null }
+        };
+      } else {
+        return { error: "Unknown report type" };
+      }
+    }
+
+    function renderReportOutput(report, type) {
+      if (report.error) {
+        reportOutput.innerHTML = `<span style="color:red">${report.error}</span>`;
+        return;
+      }
+      let out = `<h3>${escapeHtml(report.heading)}</h3><ul>`;
+      report.items.forEach(item => {
+        out += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+      });
+      out += "</ul>";
+      reportOutput.innerHTML = out;
+      window._lastReport = { report, type };
+    }
+
+    function exportReport(format) {
+      if (!window._lastReport || !window._lastReport.report) {
+        alert("Generate a report first.");
+        return;
+      }
+      const { report, type } = window._lastReport;
+      let filename = `report_${type}_${new Date().toISOString().slice(0,10)}.${format}`;
+      if (format === "html") {
+        let html = `<html><head><meta charset="utf-8"><title>${report.heading}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px}h2{margin-top:0}ul{padding-left:18px}</style></head><body><h2>${escapeHtml(report.heading)}</h2><ul>`;
+        report.items.forEach(item => {
+          html += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+        });
+        html += "</ul></body></html>";
+        const blob = new Blob([html], { type: "text/html" });
+        downloadBlob(blob, filename);
+      } else if (format === "csv") {
+        let csv = "Label,Value\n";
+        report.items.forEach(item => {
+          const v = typeof item.value === 'string' ? item.value.replace(/"/g,'""') : String(item.value);
+          csv += `"${item.label.replace(/"/g,'""')}","${v}"\n`;
+        });
+        const blob = new Blob([csv], { type: "text/csv" });
+        downloadBlob(blob, filename.replace('.csv', '.csv'));
+      } else if (format === "json") {
+        const blob = new Blob([JSON.stringify(report.raw, null, 2)], { type: "application/json" });
+        downloadBlob(blob, filename.replace('.json', '.json'));
+      }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    // Helpers
     function formatNumber(n, fractionDigits=2) {
       if (typeof n !== 'number') n = Number(n) || 0;
       return n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits });
@@ -969,18 +1085,15 @@ GitHub Copilot Chat Assistant — updated index.html below.
 
     function escapeHtml(s) {
       if (!s) return '';
-      return s.replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+      return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     }
 
-    // close modal when overlay clicked
     modalOverlay.addEventListener('click', () => {
-      // close any open modal
       closeModal(userModal);
       closeModal(businessModal);
       closeModal(editModal);
     });
 
-    // Keyboard: Esc closes modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeModal(userModal);
@@ -989,17 +1102,13 @@ GitHub Copilot Chat Assistant — updated index.html below.
       }
     });
 
-    // Expose helper for debug (optional)
     window._ntc = { data, saveData, loadData, refreshUserBusinessSelectors, renderLedger, calculateSummary };
 
-    // Initial focus improvements
     setTimeout(()=>{ if (userSelect.options.length) userSelect.focus(); }, 300);
   </script>
 
   <footer>
-    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT per business when enabled.</div>
+    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT (Paye) using configurable slices.</div>
   </footer>
 </body>
-</html>
-
-If you want, I can open a pull request in the repository adding this updated index.html (or push it to a new branch). Would you like me to create the PR now?
+  </html>
