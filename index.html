@@ -1,3 +1,5 @@
+GitHub Copilot Chat Assistant — updated index.html below.
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,12 +28,14 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(520px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(520px,96vw); }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
     small.note { color:var(--muted); display:block; margin-top:6px; }
     footer { margin-top:20px; font-size:0.85rem; color:var(--muted); }
+    .search-bar { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .pagination { display:flex; gap:8px; align-items:center; margin-top:8px; }
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
   </style>
 </head>
@@ -95,11 +99,18 @@
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings).</small>
+      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Use the search & pagination controls below to filter and navigate transactions.</small>
     </section>
 
     <section class="panel section">
       <h2 style="margin:0 0 8px 0;">Transactions Ledger</h2>
+
+      <div class="search-bar">
+        <input type="text" id="ledgerSearch" placeholder="Search by date/type/category/description/amount" style="flex:1 1 320px; padding:6px; border:1px solid #cfcfcf; border-radius:4px;" />
+        <button id="btnSearch" class="small">Search</button>
+        <button id="btnClearSearch" class="small">Clear</button>
+      </div>
+
       <table class="ledger-table" id="ledgerTable">
         <thead>
           <tr>
@@ -114,6 +125,14 @@
         </thead>
         <tbody></tbody>
       </table>
+
+      <div class="pagination" id="paginationControls" style="display:flex;align-items:center;justify-content:flex-end;">
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <button id="btnPrevPage" class="small">Prev</button>
+          <span id="pageIndicator">Page 1 / 1</span>
+          <button id="btnNextPage" class="small">Next</button>
+        </div>
+      </div>
 
       <div class="vat-summary" id="vatSummary"></div>
       <div class="totals" id="totalsSummary"></div>
@@ -155,11 +174,15 @@
       <label>Tax-free threshold (₦): <input type="number" id="bizThreshold" min="0" step="1" /></label>
       <label>Notes: <input type="text" id="bizNotes" placeholder="Optional" /></label>
     </div>
+    <div class="row">
+      <label><input type="checkbox" id="bizVatEnabled" /> Enable VAT</label>
+      <label><input type="checkbox" id="bizPitEnabled" /> Enable PIT (tax)</label>
+    </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria 2026 slices unless overridden programmatically.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria 2026 slices unless overridden programmatically.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -225,6 +248,12 @@
     // Transaction edit state
     let editIndex = null;
 
+    // Ledger UI state
+    const PAGE_SIZE = 20;
+    let currentPage = 1;
+    let ledgerFilterText = '';
+    let ledgerFiltered = []; // filtered txns used for pagination and summaries
+
     // Utilities
     function uid(prefix='id') { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
 
@@ -254,10 +283,10 @@
       const bizId = uid('biz');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
-        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business' }],
+        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
         transactions: { [userId]: { [bizId]: [
-          { date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000 },
-          { date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000 }
+          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000 },
+          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000 }
         ] } }
       };
       saveData();
@@ -303,6 +332,8 @@
     const bizCurrency = document.getElementById('bizCurrency');
     const bizThreshold = document.getElementById('bizThreshold');
     const bizNotes = document.getElementById('bizNotes');
+    const bizVatEnabled = document.getElementById('bizVatEnabled');
+    const bizPitEnabled = document.getElementById('bizPitEnabled');
     const bizSave = document.getElementById('bizSave');
     const bizCancel = document.getElementById('bizCancel');
 
@@ -313,6 +344,14 @@
     const editTxnCategory = document.getElementById('editTxnCategory');
     const editTxnDesc = document.getElementById('editTxnDesc');
     const editTxnAmount = document.getElementById('editTxnAmount');
+
+    // Search & pagination UI
+    const ledgerSearch = document.getElementById('ledgerSearch');
+    const btnSearch = document.getElementById('btnSearch');
+    const btnClearSearch = document.getElementById('btnClearSearch');
+    const btnPrevPage = document.getElementById('btnPrevPage');
+    const btnNextPage = document.getElementById('btnNextPage');
+    const pageIndicator = document.getElementById('pageIndicator');
 
     // Export/Import UI
     const btnExport = document.getElementById('btnExport');
@@ -328,6 +367,7 @@
     loadData();
     refreshUserBusinessSelectors();
     ensureSelection();
+    currentPage = 1;
     renderLedger();
     calculateSummary();
 
@@ -345,9 +385,13 @@
       businessSelect.innerHTML = '';
       data.businesses.forEach(b => {
         const owner = findUser(b.ownerId);
+        const enabledParts = [];
+        if (b.vatEnabled) enabledParts.push('VAT');
+        if (b.pitEnabled) enabledParts.push('PIT');
+        const status = enabledParts.length ? ' — ' + enabledParts.join('/') : '';
         const opt = document.createElement('option');
         opt.value = b.id;
-        opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${b.vatRate}% VAT)`;
+        opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${b.vatRate}% VAT)${status}`;
         businessSelect.appendChild(opt);
       });
       // populate bizOwner select for business modal
@@ -462,6 +506,7 @@
       const owned = data.businesses.find(b => b.ownerId === selectedUserId);
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
+      currentPage = 1;
       renderLedger();
       calculateSummary();
     });
@@ -475,6 +520,8 @@
       bizThreshold.value = 800000;
       bizNotes.value = '';
       bizOwner.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
+      bizVatEnabled.checked = true;
+      bizPitEnabled.checked = true;
       bizEditingId = null;
       openModal(businessModal);
     });
@@ -490,6 +537,8 @@
       bizThreshold.value = (typeof b.threshold === 'number') ? b.threshold : 800000;
       bizNotes.value = b.notes || '';
       bizOwner.value = b.ownerId || (data.users[0] && data.users[0].id) || '';
+      bizVatEnabled.checked = !!b.vatEnabled;
+      bizPitEnabled.checked = (typeof b.pitEnabled === 'undefined') ? true : !!b.pitEnabled;
       bizEditingId = b.id;
       openModal(businessModal);
     });
@@ -508,6 +557,7 @@
       saveData();
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
       refreshUserBusinessSelectors();
+      currentPage = 1;
       renderLedger();
       calculateSummary();
     });
@@ -518,6 +568,8 @@
       const vat = parseFloat(bizVat.value);
       const currency = (bizCurrency.value || '₦').trim();
       const threshold = Number(bizThreshold.value) || 800000;
+      const vatEnabledVal = !!bizVatEnabled.checked;
+      const pitEnabledVal = !!bizPitEnabled.checked;
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
       if (bizEditingId) {
@@ -529,6 +581,8 @@
         b.currency = currency;
         b.threshold = threshold;
         b.notes = (bizNotes.value || '').trim();
+        b.vatEnabled = vatEnabledVal;
+        b.pitEnabled = pitEnabledVal;
       } else {
         const id = uid('biz');
         data.businesses.push({
@@ -536,13 +590,16 @@
           vatRate: isNaN(vat) ? 7.5 : vat,
           currency,
           threshold,
-          notes: (bizNotes.value || '').trim()
+          notes: (bizNotes.value || '').trim(),
+          vatEnabled: vatEnabledVal,
+          pitEnabled: pitEnabledVal
         });
       }
       saveData();
       closeModal(businessModal);
       refreshUserBusinessSelectors();
       ensureSelection();
+      currentPage = 1;
       renderLedger();
       calculateSummary();
     });
@@ -551,6 +608,7 @@
 
     businessSelect.addEventListener('change', (e) => {
       selectedBusinessId = e.target.value;
+      currentPage = 1;
       renderLedger();
       calculateSummary();
     });
@@ -577,6 +635,7 @@
       data.transactions[selectedUserId][selectedBusinessId].push(txn);
       saveData();
       clearForm();
+      currentPage = Math.ceil(((ledgerFiltered.length || 0) + 1) / PAGE_SIZE); // jump to last page after adding (approx)
       renderLedger();
       calculateSummary();
     });
@@ -591,13 +650,37 @@
 
     function renderLedger() {
       ledgerTbody.innerHTML = '';
-      if (!selectedUserId || !selectedBusinessId) return;
-      const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      if (!selectedUserId || !selectedBusinessId) {
+        ledgerFiltered = [];
+        updatePaginationControls();
+        return;
+      }
+      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      // apply search filter (case-insensitive)
+      const q = (ledgerFilterText || '').trim().toLowerCase();
+      ledgerFiltered = allTxns.filter(txn => {
+        if (!q) return true;
+        const parts = [
+          txn.date || '',
+          txn.type || '',
+          txn.category || '',
+          txn.desc || '',
+          String(txn.amount || '')
+        ];
+        return parts.join(' ').toLowerCase().includes(q);
+      });
+
       const biz = findBiz(selectedBusinessId);
       const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-      txns.forEach((txn, idx) => {
+      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const pageSlice = ledgerFiltered.slice(start, start + PAGE_SIZE);
+
+      pageSlice.forEach((txn, idx) => {
         let vat = 0;
-        if (txn.type === 'Income' || txn.type === 'Expense') vat = txn.amount * vatRate;
+        if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${txn.date}</td>
@@ -605,7 +688,7 @@
           <td>${txn.category}</td>
           <td>${escapeHtml(txn.desc)}</td>
           <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
-          <td>${vat ? (biz && biz.currency ? biz.currency : '₦') + formatNumber(vat) : ''}</td>
+          <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
           <td>
             <div class="actions">
               <button class="small" onclick="openEditModal('${txn.id}')">Edit</button>
@@ -614,7 +697,45 @@
           </td>`;
         ledgerTbody.appendChild(tr);
       });
+
+      updatePaginationControls();
     }
+
+    function updatePaginationControls() {
+      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
+      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+      btnPrevPage.disabled = currentPage <= 1;
+      btnNextPage.disabled = currentPage >= totalPages;
+    }
+
+    btnPrevPage.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderLedger();
+      }
+    });
+    btnNextPage.addEventListener('click', () => {
+      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderLedger();
+      }
+    });
+
+    btnSearch.addEventListener('click', () => {
+      ledgerFilterText = ledgerSearch.value || '';
+      currentPage = 1;
+      renderLedger();
+      calculateSummary();
+    });
+
+    btnClearSearch.addEventListener('click', () => {
+      ledgerSearch.value = '';
+      ledgerFilterText = '';
+      currentPage = 1;
+      renderLedger();
+      calculateSummary();
+    });
 
     // Expose functions needed by inline onclick attributes
     window.openEditModal = function(txnId) {
@@ -640,6 +761,9 @@
       if (idx === -1) return;
       txns.splice(idx,1);
       saveData();
+      // keep page sane
+      const totalPages = Math.max(1, Math.ceil(((ledgerFiltered.length - 1) || 0) / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
       renderLedger();
       calculateSummary();
     };
@@ -675,17 +799,18 @@
       const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
 
-      const txns = (selectedUserId && selectedBusinessId && data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) ? data.transactions[selectedUserId][selectedBusinessId] : [];
+      // Use ledgerFiltered so summaries match the filtered view
+      const txns = ledgerFiltered || [];
 
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
       let vatOutputTotal = 0, vatInputTotal = 0;
       txns.forEach(txn => {
         if (txn.type === 'Income') {
           incomeTotal += txn.amount;
-          vatOutputTotal += txn.amount * vatRate;
+          if (biz && biz.vatEnabled) vatOutputTotal += txn.amount * vatRate;
         } else if (txn.type === 'Expense') {
           expenseTotal += txn.amount;
-          vatInputTotal += txn.amount * vatRate;
+          if (biz && biz.vatEnabled) vatInputTotal += txn.amount * vatRate;
           if (txn.category === 'Rent') rentTotal += txn.amount;
         } else if (txn.type === 'Deduction') {
           deductionTotal += txn.amount;
@@ -693,7 +818,7 @@
       });
 
       let netBalance = incomeTotal - expenseTotal;
-      let vatPayable = vatOutputTotal - vatInputTotal;
+      let vatPayable = (vatOutputTotal - vatInputTotal);
       // rent relief same as original: 20% of rent up to 500,000
       let rentRelief = rentTotal * 0.20;
       if (rentRelief > 500000) rentRelief = 500000;
@@ -703,12 +828,17 @@
       if (adjIncome < 0) adjIncome = 0;
 
       // Tax calculation using DEFAULT_PIT (can be extended to business-specific slices)
-      let tax = computeTax(adjIncome, biz);
+      let tax = 0;
+      if (biz && (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled)) {
+        tax = computeTax(adjIncome, biz);
+      } else {
+        tax = 0;
+      }
 
       let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
 
       vatSummaryDiv.innerHTML =
-        `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
+        `<strong>VAT Summary (${biz && biz.vatEnabled ? (vatRate*100).toFixed(2)+'%' : 'VAT Disabled'}):</strong><br>
          VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
          VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
          <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
@@ -731,6 +861,8 @@
 
     function computeTax(adjIncome, biz) {
       // biz may include custom PIT slices in biz.pit (not exposed in UI now).
+      // If PIT disabled on business, return 0
+      if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) return 0;
       const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
       // If adjIncome <= threshold => 0
       let tax = 0;
@@ -785,6 +917,7 @@
           saveData();
           refreshUserBusinessSelectors();
           ensureSelection();
+          currentPage = 1;
           renderLedger();
           calculateSummary();
           alert('Import successful');
@@ -803,6 +936,7 @@
       loadData();
       refreshUserBusinessSelectors();
       ensureSelection();
+      currentPage = 1;
       renderLedger();
       calculateSummary();
       alert('All data cleared and reset to demo.');
@@ -844,7 +978,9 @@
   </script>
 
   <footer>
-    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT (Nigeria 2026 slices). Businesses are assigned to an owner user. Import/Export uses JSON.</div>
+    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT per business when enabled.</div>
   </footer>
 </body>
-  </html>
+</html>
+
+If you want, I can open a pull request in the repository adding this updated index.html (or push it to a new branch). Would you like me to create the PR now?
