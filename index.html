@@ -138,6 +138,33 @@ GitHub Copilot Chat Assistant — updated index.html below.
       <div class="totals" id="totalsSummary"></div>
       <div class="tax-summary" id="taxSummary"></div>
     </section>
+
+    <!-- Reports Panel -->
+    <section class="panel section">
+      <h2 style="margin:0 0 8px 0;">Reports</h2>
+      <div class="form-inline" style="margin-bottom:12px;">
+        <label>Start Date: <input type="date" id="reportStartDate" /></label>
+        <label>End Date: <input type="date" id="reportEndDate" /></label>
+        <label>Scope:
+          <select id="reportScope">
+            <option value="current">Current selection (user & business)</option>
+            <option value="all">All users & businesses</option>
+          </select>
+        </label>
+        <button class="primary" id="btnGenerateReport">Generate Report</button>
+      </div>
+      <small class="note">Select date range (leave empty for no limit) and scope to generate a comprehensive report showing Profit, VAT, and PAYE summaries.</small>
+      
+      <div id="reportOutput" style="display:none; margin-top:16px;">
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+          <button id="btnExportJSON" class="small">Export JSON</button>
+          <button id="btnExportCSV" class="small">Export CSV</button>
+          <button id="btnPrintableReport" class="small">Printable Report</button>
+        </div>
+        
+        <div id="reportContent"></div>
+      </div>
+    </section>
   </main>
 
   <!-- Modals -->
@@ -247,6 +274,9 @@ GitHub Copilot Chat Assistant — updated index.html below.
 
     // Transaction edit state
     let editIndex = null;
+    
+    // Current report state
+    let currentReport = null;
 
     // Ledger UI state
     const PAGE_SIZE = 20;
@@ -902,6 +932,561 @@ GitHub Copilot Chat Assistant — updated index.html below.
       }
       return Math.max(0, Math.round(tax)); // tax in whole Naira
     }
+
+    // --- Reports Functions ---
+    
+    /**
+     * Compute tax with detailed slice-level breakdown for reports
+     * Returns: { totalTax, slices: [{ upTo, rate, taxableAmount, taxAmount }] }
+     */
+    function computeTaxWithBreakdown(adjIncome, biz) {
+      const result = { totalTax: 0, slices: [] };
+      
+      if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) {
+        return result;
+      }
+      
+      const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
+      const threshold = pit.threshold || DEFAULT_PIT.threshold;
+      
+      if (adjIncome <= threshold) {
+        return result;
+      }
+      
+      let remaining = adjIncome - threshold;
+      let prevUpper = threshold;
+      
+      for (let s of pit.slices) {
+        const upper = s.upTo;
+        let sliceLimit = (upper === Infinity) ? Infinity : (upper - prevUpper);
+        if (remaining <= 0) break;
+        
+        const taxableAmount = Math.min(remaining, sliceLimit);
+        const taxAmount = taxableAmount * s.rate;
+        
+        result.slices.push({
+          upTo: upper,
+          rate: s.rate,
+          taxableAmount: taxableAmount,
+          taxAmount: taxAmount
+        });
+        
+        result.totalTax += taxAmount;
+        remaining -= taxableAmount;
+        prevUpper = upper;
+      }
+      
+      result.totalTax = Math.max(0, Math.round(result.totalTax));
+      return result;
+    }
+
+    /**
+     * Build comprehensive report data based on date range and scope
+     * @param {Object} params - { startDate, endDate, scope }
+     * @returns {Object} Report data with meta, totals, vat, and paye sections
+     */
+    function buildReportData(params) {
+      const { startDate, endDate, scope } = params;
+      
+      const report = {
+        meta: {
+          generatedAt: new Date().toISOString(),
+          scope: scope,
+          startDate: startDate || 'N/A',
+          endDate: endDate || 'N/A'
+        },
+        totals: {
+          income: 0,
+          expense: 0,
+          deductions: 0,
+          netProfit: 0
+        },
+        vat: {
+          output: 0,
+          input: 0,
+          payable: 0,
+          vatRate: 0
+        },
+        paye: {
+          threshold: 0,
+          rentRelief: 0,
+          taxableIncome: 0,
+          slices: [],
+          totalTax: 0,
+          pitEnabled: false
+        }
+      };
+      
+      let allTxns = [];
+      let aggregateVatRate = 0;
+      let vatRateCount = 0;
+      let aggregateThreshold = DEFAULT_PIT.threshold;
+      let rentTotal = 0;
+      let anyPitEnabled = false;
+      
+      // Collect transactions based on scope
+      if (scope === 'current') {
+        // Current selection only
+        if (selectedUserId && selectedBusinessId) {
+          const biz = findBiz(selectedBusinessId);
+          if (biz) {
+            const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+            allTxns = txns.map(t => ({ ...t, biz }));
+            aggregateVatRate = (typeof biz.vatRate === 'number') ? biz.vatRate : 7.5;
+            vatRateCount = 1;
+            aggregateThreshold = (typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+            anyPitEnabled = (typeof biz.pitEnabled === 'undefined') ? true : !!biz.pitEnabled;
+          }
+        }
+      } else {
+        // All users and businesses
+        for (const userId of Object.keys(data.transactions)) {
+          for (const bizId of Object.keys(data.transactions[userId])) {
+            const biz = findBiz(bizId);
+            const txns = data.transactions[userId][bizId] || [];
+            allTxns.push(...txns.map(t => ({ ...t, biz })));
+            if (biz) {
+              aggregateVatRate += (typeof biz.vatRate === 'number') ? biz.vatRate : 7.5;
+              vatRateCount++;
+              if (typeof biz.pitEnabled === 'undefined' || biz.pitEnabled) {
+                anyPitEnabled = true;
+              }
+            }
+          }
+        }
+        // Average VAT rate across businesses
+        if (vatRateCount > 0) aggregateVatRate = aggregateVatRate / vatRateCount;
+      }
+      
+      // Filter by date range
+      const filtered = allTxns.filter(txn => {
+        if (startDate && txn.date < startDate) return false;
+        if (endDate && txn.date > endDate) return false;
+        return true;
+      });
+      
+      // Calculate totals
+      filtered.forEach(txn => {
+        const vatRate = (txn.biz && typeof txn.biz.vatRate === 'number') ? (txn.biz.vatRate / 100) : 0.075;
+        const vatEnabled = txn.biz ? !!txn.biz.vatEnabled : false;
+        
+        if (txn.type === 'Income') {
+          report.totals.income += txn.amount;
+          if (vatEnabled) report.vat.output += txn.amount * vatRate;
+        } else if (txn.type === 'Expense') {
+          report.totals.expense += txn.amount;
+          if (vatEnabled) report.vat.input += txn.amount * vatRate;
+          if (txn.category === 'Rent') rentTotal += txn.amount;
+        } else if (txn.type === 'Deduction') {
+          report.totals.deductions += txn.amount;
+        }
+      });
+      
+      report.totals.netProfit = report.totals.income - report.totals.expense - report.totals.deductions;
+      report.vat.payable = report.vat.output - report.vat.input;
+      report.vat.vatRate = aggregateVatRate;
+      
+      // Calculate PAYE/PIT
+      report.paye.threshold = aggregateThreshold;
+      report.paye.rentRelief = Math.min(rentTotal * 0.20, 500000);
+      report.paye.taxableIncome = Math.max(0, report.totals.income - report.totals.deductions - report.paye.rentRelief);
+      report.paye.pitEnabled = anyPitEnabled;
+      
+      if (anyPitEnabled) {
+        // Use first business for PIT calculation if current scope, otherwise use defaults
+        let bizForPIT = null;
+        if (scope === 'current' && selectedBusinessId) {
+          bizForPIT = findBiz(selectedBusinessId);
+        }
+        const taxBreakdown = computeTaxWithBreakdown(report.paye.taxableIncome, bizForPIT);
+        report.paye.slices = taxBreakdown.slices;
+        report.paye.totalTax = taxBreakdown.totalTax;
+      }
+      
+      return report;
+    }
+
+    /**
+     * Generate and display report in the UI
+     */
+    function generateReport() {
+      const startDate = document.getElementById('reportStartDate').value;
+      const endDate = document.getElementById('reportEndDate').value;
+      const scope = document.getElementById('reportScope').value;
+      
+      const report = buildReportData({ startDate, endDate, scope });
+      
+      // Store report in module scope for export functions
+      currentReport = report;
+      
+      // Render report
+      const reportOutput = document.getElementById('reportOutput');
+      const reportContent = document.getElementById('reportContent');
+      
+      const currency = '₦';
+      
+      let html = '<div style="margin-top:16px;">';
+      
+      // Meta info
+      html += '<div class="totals" style="margin-bottom:12px;">';
+      html += `<strong>Report Generated:</strong> ${new Date(report.meta.generatedAt).toLocaleString()}<br>`;
+      html += `<strong>Scope:</strong> ${report.meta.scope === 'current' ? 'Current selection' : 'All users & businesses'}<br>`;
+      html += `<strong>Date Range:</strong> ${report.meta.startDate} to ${report.meta.endDate}`;
+      html += '</div>';
+      
+      // Profit Summary
+      html += '<div class="totals" style="margin-top:12px;">';
+      html += '<strong>Profit Summary:</strong><br>';
+      html += `Income: ${currency}${formatNumber(report.totals.income)}<br>`;
+      html += `Expenses: ${currency}${formatNumber(report.totals.expense)}<br>`;
+      html += `Deductions: ${currency}${formatNumber(report.totals.deductions)}<br>`;
+      html += `<strong>Net Profit:</strong> ${currency}${formatNumber(report.totals.netProfit)}`;
+      html += '</div>';
+      
+      // VAT Summary
+      html += '<div class="vat-summary" style="margin-top:12px;">';
+      html += `<strong>VAT Summary (${report.vat.vatRate.toFixed(2)}%):</strong><br>`;
+      html += `VAT Output (Sales): ${currency}${formatNumber(report.vat.output)}<br>`;
+      html += `VAT Input (Purchases): ${currency}${formatNumber(report.vat.input)}<br>`;
+      html += `<strong>VAT Payable:</strong> ${currency}${formatNumber(report.vat.payable)}`;
+      html += '</div>';
+      
+      // PAYE/PIT Summary
+      html += '<div class="tax-summary" style="margin-top:12px;">';
+      if (report.paye.pitEnabled) {
+        html += '<strong>PAYE/PIT Summary:</strong><br>';
+        html += `Tax-free threshold: ${currency}${formatNumber(report.paye.threshold)}<br>`;
+        html += `Rent relief applied: ${currency}${formatNumber(report.paye.rentRelief)}<br>`;
+        html += `Taxable income after deductions: ${currency}${formatNumber(report.paye.taxableIncome)}<br>`;
+        
+        if (report.paye.slices.length > 0) {
+          html += '<br><strong>Tax Breakdown by Slice:</strong><br>';
+          html += '<table class="ledger-table" style="margin-top:8px;"><thead><tr>';
+          html += '<th>Tax Band (Up To)</th><th>Rate</th><th>Taxable Amount</th><th>Tax Amount</th>';
+          html += '</tr></thead><tbody>';
+          
+          report.paye.slices.forEach(slice => {
+            const bandLabel = slice.upTo === Infinity ? 'Above' : currency + formatNumber(slice.upTo, 0);
+            html += '<tr>';
+            html += `<td>${bandLabel}</td>`;
+            html += `<td>${(slice.rate * 100).toFixed(0)}%</td>`;
+            html += `<td>${currency}${formatNumber(slice.taxableAmount)}</td>`;
+            html += `<td>${currency}${formatNumber(slice.taxAmount)}</td>`;
+            html += '</tr>';
+          });
+          
+          html += '</tbody></table>';
+        }
+        
+        html += `<br><strong>Total Tax Payable:</strong> ${currency}${formatNumber(report.paye.totalTax, 0)}`;
+      } else {
+        html += '<strong>PIT/PAYE:</strong> PIT is disabled for the selected business(es).';
+      }
+      html += '</div>';
+      
+      html += '</div>';
+      
+      reportContent.innerHTML = html;
+      reportOutput.style.display = 'block';
+    }
+
+    /**
+     * Export report as JSON file
+     */
+    function exportReportJSON(report) {
+      if (!report) report = currentReport;
+      if (!report) {
+        alert('Generate a report first.');
+        return;
+      }
+      
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      a.download = `report_${timestamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    /**
+     * Export report as CSV file
+     */
+    function exportReportCSV(report) {
+      if (!report) report = currentReport;
+      if (!report) {
+        alert('Generate a report first.');
+        return;
+      }
+      
+      let csv = 'Nigeria Tax Calculator Report\n\n';
+      csv += `Generated,${new Date(report.meta.generatedAt).toLocaleString()}\n`;
+      csv += `Scope,${report.meta.scope}\n`;
+      csv += `Date Range,${report.meta.startDate} to ${report.meta.endDate}\n\n`;
+      
+      csv += 'PROFIT SUMMARY\n';
+      csv += `Income,${report.totals.income.toFixed(2)}\n`;
+      csv += `Expenses,${report.totals.expense.toFixed(2)}\n`;
+      csv += `Deductions,${report.totals.deductions.toFixed(2)}\n`;
+      csv += `Net Profit,${report.totals.netProfit.toFixed(2)}\n\n`;
+      
+      csv += 'VAT SUMMARY\n';
+      csv += `VAT Rate,${report.vat.vatRate.toFixed(2)}%\n`;
+      csv += `VAT Output (Sales),${report.vat.output.toFixed(2)}\n`;
+      csv += `VAT Input (Purchases),${report.vat.input.toFixed(2)}\n`;
+      csv += `VAT Payable,${report.vat.payable.toFixed(2)}\n\n`;
+      
+      csv += 'PAYE/PIT SUMMARY\n';
+      csv += `PIT Enabled,${report.paye.pitEnabled}\n`;
+      csv += `Tax-free Threshold,${report.paye.threshold.toFixed(2)}\n`;
+      csv += `Rent Relief,${report.paye.rentRelief.toFixed(2)}\n`;
+      csv += `Taxable Income,${report.paye.taxableIncome.toFixed(2)}\n`;
+      
+      if (report.paye.slices.length > 0) {
+        csv += '\nTax Band,Rate,Taxable Amount,Tax Amount\n';
+        report.paye.slices.forEach(slice => {
+          const band = slice.upTo === Infinity ? 'Above' : slice.upTo.toFixed(0);
+          csv += `${band},${(slice.rate * 100).toFixed(0)}%,${slice.taxableAmount.toFixed(2)},${slice.taxAmount.toFixed(2)}\n`;
+        });
+      }
+      
+      csv += `\nTotal Tax Payable,${report.paye.totalTax.toFixed(2)}\n`;
+      
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      a.download = `report_${timestamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    /**
+     * Open printable report in new window
+     */
+    function openPrintableReport(report) {
+      if (!report) report = currentReport;
+      if (!report) {
+        alert('Generate a report first.');
+        return;
+      }
+      
+      const currency = '₦';
+      let html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Report - ${new Date(report.meta.generatedAt).toLocaleDateString()}</title>
+  <style>
+    @media print {
+      @page { margin: 1cm; size: A4; }
+      body { margin: 0; }
+      .no-print { display: none; }
+    }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      color: #333;
+    }
+    h1 {
+      color: #0077cc;
+      border-bottom: 2px solid #0077cc;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+    h2 {
+      color: #0077cc;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 5px;
+      margin-top: 25px;
+      margin-bottom: 12px;
+    }
+    .info-box {
+      background: #f8f9fb;
+      padding: 12px;
+      border-radius: 5px;
+      margin: 15px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background: #f2f6fa;
+      font-weight: bold;
+    }
+    td.amount {
+      text-align: right;
+      font-family: 'Courier New', monospace;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 8px 0;
+    }
+    .summary-row.total {
+      font-weight: bold;
+      border-top: 2px solid #333;
+      padding-top: 8px;
+      margin-top: 8px;
+    }
+    .print-btn {
+      margin: 20px 0;
+      padding: 10px 20px;
+      background: #0077cc;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12pt;
+    }
+    .print-btn:hover {
+      background: #005fa3;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-btn no-print" onclick="window.print()">Print Report</button>
+  
+  <h1>Nigeria Tax Calculator - Report</h1>
+  
+  <div class="info-box">
+    <strong>Generated:</strong> ${new Date(report.meta.generatedAt).toLocaleString()}<br>
+    <strong>Scope:</strong> ${report.meta.scope === 'current' ? 'Current selection' : 'All users & businesses'}<br>
+    <strong>Date Range:</strong> ${report.meta.startDate} to ${report.meta.endDate}
+  </div>
+  
+  <h2>Profit Summary</h2>
+  <div class="info-box">
+    <div class="summary-row">
+      <span>Income:</span>
+      <span>${currency}${formatNumber(report.totals.income)}</span>
+    </div>
+    <div class="summary-row">
+      <span>Expenses:</span>
+      <span>${currency}${formatNumber(report.totals.expense)}</span>
+    </div>
+    <div class="summary-row">
+      <span>Deductions:</span>
+      <span>${currency}${formatNumber(report.totals.deductions)}</span>
+    </div>
+    <div class="summary-row total">
+      <span>Net Profit:</span>
+      <span>${currency}${formatNumber(report.totals.netProfit)}</span>
+    </div>
+  </div>
+  
+  <h2>VAT Summary</h2>
+  <div class="info-box">
+    <strong>VAT Rate:</strong> ${report.vat.vatRate.toFixed(2)}%<br><br>
+    <div class="summary-row">
+      <span>VAT Output (Sales):</span>
+      <span>${currency}${formatNumber(report.vat.output)}</span>
+    </div>
+    <div class="summary-row">
+      <span>VAT Input (Purchases):</span>
+      <span>${currency}${formatNumber(report.vat.input)}</span>
+    </div>
+    <div class="summary-row total">
+      <span>VAT Payable:</span>
+      <span>${currency}${formatNumber(report.vat.payable)}</span>
+    </div>
+  </div>
+  
+  <h2>PAYE/PIT Summary</h2>
+  <div class="info-box">`;
+      
+      if (report.paye.pitEnabled) {
+        html += `
+    <div class="summary-row">
+      <span>Tax-free Threshold:</span>
+      <span>${currency}${formatNumber(report.paye.threshold)}</span>
+    </div>
+    <div class="summary-row">
+      <span>Rent Relief:</span>
+      <span>${currency}${formatNumber(report.paye.rentRelief)}</span>
+    </div>
+    <div class="summary-row">
+      <span>Taxable Income:</span>
+      <span>${currency}${formatNumber(report.paye.taxableIncome)}</span>
+    </div>
+  </div>`;
+        
+        if (report.paye.slices.length > 0) {
+          html += `
+  <h3>Tax Breakdown by Slice</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tax Band (Up To)</th>
+        <th>Rate</th>
+        <th class="amount">Taxable Amount</th>
+        <th class="amount">Tax Amount</th>
+      </tr>
+    </thead>
+    <tbody>`;
+          
+          report.paye.slices.forEach(slice => {
+            const band = slice.upTo === Infinity ? 'Above' : currency + formatNumber(slice.upTo, 0);
+            html += `
+      <tr>
+        <td>${band}</td>
+        <td>${(slice.rate * 100).toFixed(0)}%</td>
+        <td class="amount">${currency}${formatNumber(slice.taxableAmount)}</td>
+        <td class="amount">${currency}${formatNumber(slice.taxAmount)}</td>
+      </tr>`;
+          });
+          
+          html += `
+    </tbody>
+  </table>`;
+        }
+        
+        html += `
+  <div class="info-box">
+    <div class="summary-row total">
+      <span>Total Tax Payable:</span>
+      <span>${currency}${formatNumber(report.paye.totalTax, 0)}</span>
+    </div>
+  </div>`;
+      } else {
+        html += `<p><strong>Note:</strong> PIT is disabled for the selected business(es).</p></div>`;
+      }
+      
+      html += `
+</body>
+</html>`;
+      
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+      } else {
+        alert('Pop-up blocked. Please allow pop-ups for this site.');
+      }
+    }
+
+    // Wire up report UI buttons
+    document.getElementById('btnGenerateReport').addEventListener('click', generateReport);
+    document.getElementById('btnExportJSON').addEventListener('click', () => exportReportJSON());
+    document.getElementById('btnExportCSV').addEventListener('click', () => exportReportCSV());
+    document.getElementById('btnPrintableReport').addEventListener('click', () => openPrintableReport());
 
     // --- Export / Import / Clear ---
     btnExport.addEventListener('click', () => {
