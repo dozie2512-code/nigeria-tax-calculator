@@ -794,70 +794,89 @@ GitHub Copilot Chat Assistant — updated index.html below.
 
     // --- Summaries and tax calculations ---
     function calculateSummary() {
-      const biz = findBiz(selectedBusinessId);
-      const currency = (biz && biz.currency) ? biz.currency : '₦';
-      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-      const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+  const biz = findBiz(selectedBusinessId);
+  const currency = (biz && biz.currency) ? biz.currency : '₦';
+  const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+  const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
 
-      // Use ledgerFiltered so summaries match the filtered view
-      const txns = ledgerFiltered || [];
+  // Determine if PIT is enabled (default true if undefined)
+  const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
+  const vatEnabled = biz ? !!biz.vatEnabled : false;
 
-      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
-      let vatOutputTotal = 0, vatInputTotal = 0;
-      txns.forEach(txn => {
-        if (txn.type === 'Income') {
-          incomeTotal += txn.amount;
-          if (biz && biz.vatEnabled) vatOutputTotal += txn.amount * vatRate;
-        } else if (txn.type === 'Expense') {
-          expenseTotal += txn.amount;
-          if (biz && biz.vatEnabled) vatInputTotal += txn.amount * vatRate;
-          if (txn.category === 'Rent') rentTotal += txn.amount;
-        } else if (txn.type === 'Deduction') {
-          deductionTotal += txn.amount;
-        }
-      });
+  // Use ledgerFiltered so summaries match the filtered view
+  const txns = ledgerFiltered || [];
 
-      let netBalance = incomeTotal - expenseTotal;
-      let vatPayable = (vatOutputTotal - vatInputTotal);
-      // rent relief same as original: 20% of rent up to 500,000
-      let rentRelief = rentTotal * 0.20;
-      if (rentRelief > 500000) rentRelief = 500000;
-
-      // taxable income after deductions and relief
-      let adjIncome = incomeTotal - deductionTotal - rentRelief;
-      if (adjIncome < 0) adjIncome = 0;
-
-      // Tax calculation using DEFAULT_PIT (can be extended to business-specific slices)
-      let tax = 0;
-      if (biz && (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled)) {
-        tax = computeTax(adjIncome, biz);
-      } else {
-        tax = 0;
-      }
-
-      let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
-
-      vatSummaryDiv.innerHTML =
-        `<strong>VAT Summary (${biz && biz.vatEnabled ? (vatRate*100).toFixed(2)+'%' : 'VAT Disabled'}):</strong><br>
-         VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
-         VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
-         <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
-
-      totalsSummaryDiv.innerHTML =
-        `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
-         <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
-         <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
-         <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
-
-      taxSummaryDiv.innerHTML =
-        `<strong>Tax Calculation (PIT):</strong><br>
-         Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
-         Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
-         Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
-         <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
-         Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-         ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
+  let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
+  let vatOutputTotal = 0, vatInputTotal = 0;
+  txns.forEach(txn => {
+    if (txn.type === 'Income') {
+      incomeTotal += txn.amount;
+      if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
+    } else if (txn.type === 'Expense') {
+      expenseTotal += txn.amount;
+      if (vatEnabled) vatInputTotal += txn.amount * vatRate;
+      if (txn.category === 'Rent') rentTotal += txn.amount;
+    } else if (txn.type === 'Deduction') {
+      deductionTotal += txn.amount;
     }
+  });
+
+  let netBalance = incomeTotal - expenseTotal;
+  let vatPayable = (vatOutputTotal - vatInputTotal);
+  // rent relief: 20% of rent up to 500,000
+  let rentRelief = rentTotal * 0.20;
+  if (rentRelief > 500000) rentRelief = 500000;
+
+  // taxable income after deductions and relief
+  let adjIncome = incomeTotal - deductionTotal - rentRelief;
+  if (adjIncome < 0) adjIncome = 0;
+
+  // Tax calculation
+  let tax = 0;
+  if (pitEnabled) {
+    tax = computeTax(adjIncome, biz);
+  } else {
+    tax = 0;
+  }
+
+  let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
+
+  // VAT summary: show only when VAT enabled for the business
+  if (vatEnabled) {
+    vatSummaryDiv.style.display = '';
+    vatSummaryDiv.innerHTML =
+      `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
+       VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
+       VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
+       <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
+  } else {
+    vatSummaryDiv.style.display = 'none';
+    vatSummaryDiv.innerHTML = '';
+  }
+
+  totalsSummaryDiv.style.display = ''; // totals always shown
+  totalsSummaryDiv.innerHTML =
+    `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
+     <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
+     <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
+     <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
+
+  // PIT summary: show only when PIT enabled
+  if (pitEnabled) {
+    taxSummaryDiv.style.display = '';
+    taxSummaryDiv.innerHTML =
+      `<strong>Tax Calculation (PIT):</strong><br>
+       Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
+       Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
+       Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
+       <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
+       Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
+       ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
+  } else {
+    taxSummaryDiv.style.display = 'none';
+    taxSummaryDiv.innerHTML = '';
+  }
+    }   
 
     function computeTax(adjIncome, biz) {
       // biz may include custom PIT slices in biz.pit (not exposed in UI now).
