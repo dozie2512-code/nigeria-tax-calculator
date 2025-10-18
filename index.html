@@ -937,4 +937,178 @@
     });
 
     btnExportHtml.addEventListener('click', () => exportReport('html'));
-    btnExportCsv.addEventListener('click', () => exportRepor
+    btnExportCsv.addEventListener('click', () => exportReport('csv'));
+    btnExportJson.addEventListener('click', () => exportReport('json'));
+
+    function filterTxnsByDate(txns, from, to) {
+      if (!from && !to) return txns;
+      return txns.filter(txn => {
+        const d = txn.date;
+        return (!from || d >= from) && (!to || d <= to);
+      });
+    }
+
+    function generateReport(type, from, to) {
+      if (!selectedUserId || !selectedBusinessId) return { error: "Select user and business first." };
+      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const txns = filterTxnsByDate(allTxns, from, to);
+      const biz = findBiz(selectedBusinessId);
+      const currency = (biz && biz.currency) ? biz.currency : '₦';
+      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+      const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
+      const vatEnabled = biz ? !!biz.vatEnabled : false;
+
+      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0, salaryTotal = 0;
+      let vatOutputTotal = 0, vatInputTotal = 0;
+      let salaryDetails = [];
+
+      txns.forEach(txn => {
+        if (txn.type === 'Income') {
+          incomeTotal += txn.amount;
+          if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
+        } else if (txn.type === 'Expense') {
+          expenseTotal += txn.amount;
+          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
+          if (txn.category === 'Rent') rentTotal += txn.amount;
+        } else if (txn.type === 'Deduction') {
+          deductionTotal += txn.amount;
+        }
+        if (txn.category === 'Salary' && txn.type === 'Expense') {
+          salaryTotal += txn.amount;
+          salaryDetails.push({ desc: txn.desc, amount: txn.amount, date: txn.date });
+        }
+      });
+
+      let netProfit = incomeTotal - expenseTotal;
+      let vatPayable = vatOutputTotal - vatInputTotal;
+      let rentRelief = Math.min(rentTotal * 0.20, 500000);
+      let adjIncome = incomeTotal - deductionTotal - rentRelief;
+      if (adjIncome < 0) adjIncome = 0;
+      let tax = pitEnabled ? computeTax(adjIncome, biz) : 0;
+      let payeTotal = pitEnabled ? computeTax(salaryTotal, biz) : 0;
+
+      if (type === "profit") {
+        return {
+          heading: "Profit Report",
+          items: [
+            { label: "Income", value: `${currency}${formatNumber(incomeTotal)}` },
+            { label: "Expenses", value: `${currency}${formatNumber(expenseTotal)}` },
+            { label: "Deductions", value: `${currency}${formatNumber(deductionTotal)}` },
+            { label: "Net Profit", value: `${currency}${formatNumber(netProfit)}` },
+          ],
+          raw: { incomeTotal, expenseTotal, deductionTotal, netProfit, from, to, business: biz ? biz.name : null }
+        };
+      } else if (type === "vat") {
+        return {
+          heading: "VAT Report",
+          items: [
+            { label: "VAT Output (Sales)", value: `${currency}${formatNumber(vatOutputTotal)}` },
+            { label: "VAT Input (Purchases)", value: `${currency}${formatNumber(vatInputTotal)}` },
+            { label: "VAT Payable", value: `${currency}${formatNumber(vatPayable)}` }
+          ],
+          raw: { vatOutputTotal, vatInputTotal, vatPayable, from, to, business: biz ? biz.name : null }
+        };
+      } else if (type === "paye") {
+        return {
+          heading: "PAYE Report",
+          items: [
+            { label: "Total Salary Expenses", value: `${currency}${formatNumber(salaryTotal)}` },
+            { label: "PAYE (using PIT rates)", value: `${currency}${formatNumber(payeTotal,0)}` },
+            { label: "Salary Details", value: salaryDetails.length ? salaryDetails.map(s => `${s.date}: ${s.desc} - ${currency}${formatNumber(s.amount)}`).join("<br>") : 'No salary transactions found' }
+          ],
+          raw: { salaryTotal, payeTotal, salaryDetails, from, to, business: biz ? biz.name : null }
+        };
+      } else {
+        return { error: "Unknown report type" };
+      }
+    }
+
+    function renderReportOutput(report, type) {
+      if (report.error) {
+        reportOutput.innerHTML = `<span style="color:red">${report.error}</span>`;
+        return;
+      }
+      let out = `<h3>${escapeHtml(report.heading)}</h3><ul>`;
+      report.items.forEach(item => {
+        out += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+      });
+      out += "</ul>";
+      reportOutput.innerHTML = out;
+      window._lastReport = { report, type };
+    }
+
+    function exportReport(format) {
+      if (!window._lastReport || !window._lastReport.report) {
+        alert("Generate a report first.");
+        return;
+      }
+      const { report, type } = window._lastReport;
+      let filename = `report_${type}_${new Date().toISOString().slice(0,10)}.${format}`;
+      if (format === "html") {
+        let html = `<html><head><meta charset="utf-8"><title>${report.heading}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px}h2{margin-top:0}ul{padding-left:18px}</style></head><body><h2>${escapeHtml(report.heading)}</h2><ul>`;
+        report.items.forEach(item => {
+          html += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+        });
+        html += "</ul></body></html>";
+        const blob = new Blob([html], { type: "text/html" });
+        downloadBlob(blob, filename);
+      } else if (format === "csv") {
+        let csv = "Label,Value\n";
+        report.items.forEach(item => {
+          const v = typeof item.value === 'string' ? item.value.replace(/"/g,'""') : String(item.value);
+          csv += `"${item.label.replace(/"/g,'""')}","${v}"\n`;
+        });
+        const blob = new Blob([csv], { type: "text/csv" });
+        downloadBlob(blob, filename.replace('.csv', '.csv'));
+      } else if (format === "json") {
+        const blob = new Blob([JSON.stringify(report.raw, null, 2)], { type: "application/json" });
+        downloadBlob(blob, filename.replace('.json', '.json'));
+      }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    // Helpers
+    function formatNumber(n, fractionDigits=2) {
+      if (typeof n !== 'number') n = Number(n) || 0;
+      return n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits });
+    }
+
+    function escapeHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    modalOverlay.addEventListener('click', () => {
+      closeModal(userModal);
+      closeModal(businessModal);
+      closeModal(editModal);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModal(userModal);
+        closeModal(businessModal);
+        closeModal(editModal);
+      }
+    });
+
+    window._ntc = { data, saveData, loadData, refreshUserBusinessSelectors, renderLedger, calculateSummary };
+
+    setTimeout(()=>{ if (userSelect.options.length) userSelect.focus(); }, 300);
+  </script>
+
+  <footer>
+    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT (Paye) using configurable slices.</div>
+  </footer>
+</body>
+  </html>
