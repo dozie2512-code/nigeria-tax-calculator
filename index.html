@@ -1,3 +1,5 @@
+GitHub Copilot Chat Assistant — updated index.html implementing multi-user (members) per business. Paste this file to replace the existing index.html in the repo.
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,7 +28,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(680px,96vw); max-height:80vh; overflow:auto; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(680px,96vw); max-height:76vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -34,6 +36,7 @@
     footer { margin-top:20px; font-size:0.85rem; color:var(--muted); }
     .search-bar { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
     .pagination { display:flex; gap:8px; align-items:center; margin-top:8px; }
+    .biz-members { border:1px dashed #e6e6e6; padding:8px; border-radius:6px; max-height:180px; overflow:auto; }
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
     pre.small { font-size:0.85rem; white-space:pre-wrap; }
   </style>
@@ -98,7 +101,7 @@
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings).</small>
+      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Businesses are visible only to their owner and members.</small>
     </section>
 
     <section class="panel section">
@@ -184,6 +187,13 @@
     </div>
     <div class="row">
       <label>Owner (user id): <select id="bizOwner"></select></label>
+      <small style="color:var(--muted);">Owner is the admin for this business and will always be a member.</small>
+    </div>
+    <div class="row">
+      <label>Members:</label>
+    </div>
+    <div class="row">
+      <div id="bizMembers" class="biz-members" aria-live="polite"></div>
     </div>
     <div class="row">
       <label>VAT rate (%): <input type="number" id="bizVat" min="0" step="0.01" /></label>
@@ -201,7 +211,7 @@
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria slices unless overridden per business.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria schedules unless customized per business.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -279,6 +289,8 @@
             if (!data.users) data.users = [];
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
+            // Ensure businesses have members array (compatibility)
+            data.businesses.forEach(b => { if (!Array.isArray(b.members)) b.members = [b.ownerId].filter(Boolean); });
             return;
           }
         } catch(e) { console.error('Invalid saved data', e); }
@@ -288,7 +300,7 @@
       const bizId = uid('biz');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
-        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
+        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, members: [userId], vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
         transactions: { [userId]: { [bizId]: [
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000 },
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000 }
@@ -333,6 +345,7 @@
     const businessModalTitle = document.getElementById('businessModalTitle');
     const bizName = document.getElementById('bizName');
     const bizOwner = document.getElementById('bizOwner');
+    const bizMembersDiv = document.getElementById('bizMembers');
     const bizVat = document.getElementById('bizVat');
     const bizCurrency = document.getElementById('bizCurrency');
     const bizThreshold = document.getElementById('bizThreshold');
@@ -399,8 +412,33 @@
       bizEditingId = null;
     }
 
+    // --- Manage business members UI ---
+    function populateBizMembers(selectedMembers = [], ownerId = null) {
+      bizMembersDiv.innerHTML = '';
+      data.users.forEach(u => {
+        const id = u.id;
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.gap = '8px';
+        wrapper.style.alignItems = 'center';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = id;
+        cb.id = 'biz_member_' + id;
+        cb.checked = selectedMembers.includes(id) || (ownerId && ownerId === id);
+        // Do not prevent unchecking owner here; we'll enforce owner inclusion on save
+        const lbl = document.createElement('label');
+        lbl.htmlFor = cb.id;
+        lbl.textContent = (u.display || u.username) + ' (' + u.username + ')';
+        wrapper.appendChild(cb);
+        wrapper.appendChild(lbl);
+        bizMembersDiv.appendChild(wrapper);
+      });
+    }
+
     // --- User & Business management ---
     function refreshUserBusinessSelectors() {
+      // Users dropdown
       userSelect.innerHTML = '';
       data.users.forEach(u => {
         const opt = document.createElement('option');
@@ -408,8 +446,17 @@
         opt.textContent = (u.display || u.username) + ' (' + u.username + ')';
         userSelect.appendChild(opt);
       });
+
+      // Businesses dropdown - only businesses where selected user is owner or member
       businessSelect.innerHTML = '';
-      data.businesses.forEach(b => {
+      const accessible = data.businesses.filter(b => {
+        if (!selectedUserId) return true; // when no selection, show all
+        if (b.ownerId === selectedUserId) return true;
+        if (Array.isArray(b.members) && b.members.includes(selectedUserId)) return true;
+        return false;
+      });
+
+      accessible.forEach(b => {
         const owner = findUser(b.ownerId);
         const enabledParts = [];
         if (b.vatEnabled) enabledParts.push('VAT');
@@ -420,6 +467,8 @@
         opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${b.vatRate}% VAT)${status}`;
         businessSelect.appendChild(opt);
       });
+
+      // bizOwner select lists all users (owner can be reassigned to any existing user)
       bizOwner.innerHTML = '';
       data.users.forEach(u => {
         const o = document.createElement('option');
@@ -428,8 +477,12 @@
         bizOwner.appendChild(o);
       });
 
+      // If selectedUserId is no longer present, set to first user
       if (!data.users.find(u=>u.id===selectedUserId)) selectedUserId = data.users.length ? data.users[0].id : null;
-      if (!data.businesses.find(b=>b.id===selectedBusinessId)) selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
+      // If selected business isn't accessible, set it to first accessible
+      if (!data.businesses.find(b=>b.id===selectedBusinessId) || !accessible.find(b=>b.id===selectedBusinessId)) {
+        selectedBusinessId = accessible.length ? accessible[0].id : null;
+      }
 
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
@@ -437,7 +490,15 @@
 
     function ensureSelection() {
       if (!selectedUserId && data.users.length) selectedUserId = data.users[0].id;
-      if (!selectedBusinessId && data.businesses.length) selectedBusinessId = data.businesses[0].id;
+      if (!selectedBusinessId) {
+        const accessible = data.businesses.filter(b => {
+          if (!selectedUserId) return true;
+          if (b.ownerId === selectedUserId) return true;
+          if (Array.isArray(b.members) && b.members.includes(selectedUserId)) return true;
+          return false;
+        });
+        selectedBusinessId = accessible.length ? accessible[0].id : (data.businesses[0] ? data.businesses[0].id : null);
+      }
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
@@ -468,10 +529,28 @@
       if (!selectedUserId) return alert('Select a user first.');
       const u = findUser(selectedUserId);
       if (!u) return;
-      if (!confirm(`Delete user "${u.display || u.username}" and all their businesses & transactions? This action cannot be undone.`)) return;
+      if (!confirm(`Delete user "${u.display || u.username}" and all their transactions? This action cannot be undone.`)) return;
+      // Delete businesses they own
+      const ownedBizIds = data.businesses.filter(b => b.ownerId === u.id).map(b => b.id);
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
+      // Remove user from members lists of all businesses
+      data.businesses.forEach(b => {
+        if (Array.isArray(b.members)) {
+          b.members = b.members.filter(mid => mid !== u.id);
+        }
+      });
+      // Delete their transactions
       delete data.transactions[u.id];
+      // Remove their records
       data.users = data.users.filter(x => x.id !== u.id);
+
+      // For each owned business deleted, remove transactions for that business for all users
+      for (const bid of ownedBizIds) {
+        for (const uid of Object.keys(data.transactions)) {
+          if (data.transactions[uid] && data.transactions[uid][bid]) delete data.transactions[uid][bid];
+        }
+      }
+
       if (!data.users.length) {
         data = { users: [], businesses: [], transactions: {} };
       }
@@ -508,10 +587,12 @@
 
     userSelect.addEventListener('change', (e) => {
       selectedUserId = e.target.value;
-      const owned = data.businesses.find(b => b.ownerId === selectedUserId);
-      if (owned) selectedBusinessId = owned.id;
+      // Choose a business owned by or shared with the selected user if available
+      const ownedOrMember = data.businesses.find(b => b.ownerId === selectedUserId || (Array.isArray(b.members) && b.members.includes(selectedUserId)));
+      if (ownedOrMember) selectedBusinessId = ownedOrMember.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
       currentPage = 1;
+      refreshUserBusinessSelectors();
       renderLedger();
       calculateSummary();
     });
@@ -528,6 +609,8 @@
       bizVatEnabled.checked = true;
       bizPitEnabled.checked = true;
       bizEditingId = null;
+      // populate members with current users, ensure owner checked
+      populateBizMembers([], bizOwner.value);
       openModal(businessModal);
     });
 
@@ -545,7 +628,15 @@
       bizVatEnabled.checked = !!b.vatEnabled;
       bizPitEnabled.checked = (typeof b.pitEnabled === 'undefined') ? true : !!b.pitEnabled;
       bizEditingId = b.id;
+      populateBizMembers(Array.isArray(b.members) ? b.members : [b.ownerId], b.ownerId);
       openModal(businessModal);
+    });
+
+    // When owner selection changes, ensure owner is checked in members UI
+    bizOwner.addEventListener('change', () => {
+      const ownerId = bizOwner.value;
+      const cb = document.getElementById('biz_member_' + ownerId);
+      if (cb) cb.checked = true;
     });
 
     btnDeleteBusiness.addEventListener('click', () => {
@@ -575,21 +666,33 @@
       const pitEnabledVal = !!bizPitEnabled.checked;
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
+      // collect members from checkboxes
+      const checked = Array.from(bizMembersDiv.querySelectorAll('input[type="checkbox"]:checked')).map(n=>n.value);
+      // ensure owner is included
+      if (!checked.includes(ownerIdVal)) checked.push(ownerIdVal);
+      // dedupe
+      const membersUnique = Array.from(new Set(checked));
+
       if (bizEditingId) {
         const b = findBiz(bizEditingId);
         if (!b) return;
         b.name = name;
         b.ownerId = ownerIdVal;
+        b.members = membersUnique;
         b.vatRate = isNaN(vat) ? 7.5 : vat;
         b.currency = currency;
         b.threshold = threshold;
         b.notes = (bizNotes.value || '').trim();
         b.vatEnabled = vatEnabledVal;
         b.pitEnabled = pitEnabledVal;
+        // ensure owner is member
+        if (!Array.isArray(b.members)) b.members = [];
+        if (!b.members.includes(ownerIdVal)) b.members.push(ownerIdVal);
       } else {
         const id = uid('biz');
         data.businesses.push({
           id, name, ownerId: ownerIdVal,
+          members: membersUnique,
           vatRate: isNaN(vat) ? 7.5 : vat,
           currency,
           threshold,
@@ -628,6 +731,14 @@
         alert('Select user and business before adding a transaction.');
         return;
       }
+      // Ensure selected user is allowed to use the selected business
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) { alert('Business not found'); return; }
+      if (!(biz.ownerId === selectedUserId || (Array.isArray(biz.members) && biz.members.includes(selectedUserId)))) {
+        alert('You are not a member of the selected business. Switch to a user who is a member, or add yourself to the business members.');
+        return;
+      }
+
       if (!date || !desc || amount <= 0) {
         alert('Please fill all fields and enter a valid amount.');
         return;
@@ -657,6 +768,13 @@
         updatePaginationControls();
         return;
       }
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) {
+        ledgerFiltered = [];
+        updatePaginationControls();
+        return;
+      }
+      // Show transactions for the selected user for the selected business.
       const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
       const q = (ledgerFilterText || '').trim().toLowerCase();
       ledgerFiltered = allTxns.filter(txn => {
@@ -665,7 +783,6 @@
         return parts.join(' ').toLowerCase().includes(q);
       });
 
-      const biz = findBiz(selectedBusinessId);
       const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
       const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
@@ -791,6 +908,8 @@
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
       const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
       const vatEnabled = biz ? !!biz.vatEnabled : false;
+
+      // For summary we consider the currently visible ledger (i.e., selected user's txns for the selected business)
       const txns = ledgerFiltered && ledgerFiltered.length ? ledgerFiltered : (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
 
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
@@ -801,314 +920,4 @@
           if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
         } else if (txn.type === 'Expense') {
           expenseTotal += txn.amount;
-          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
-          if (txn.category === 'Rent') rentTotal += txn.amount;
-        } else if (txn.type === 'Deduction') {
-          deductionTotal += txn.amount;
-        }
-      });
-
-      let netBalance = incomeTotal - expenseTotal;
-      let vatPayable = (vatOutputTotal - vatInputTotal);
-      let rentRelief = rentTotal * 0.20;
-      if (rentRelief > 500000) rentRelief = 500000;
-      let adjIncome = incomeTotal - deductionTotal - rentRelief;
-      if (adjIncome < 0) adjIncome = 0;
-      let tax = 0;
-      if (pitEnabled) tax = computeTax(adjIncome, biz);
-      let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
-
-      if (vatEnabled) {
-        vatSummaryDiv.style.display = '';
-        vatSummaryDiv.innerHTML =
-          `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
-           VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
-           VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
-           <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
-      } else {
-        vatSummaryDiv.style.display = 'none';
-        vatSummaryDiv.innerHTML = '';
-      }
-
-      totalsSummaryDiv.style.display = '';
-      totalsSummaryDiv.innerHTML =
-        `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
-         <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
-         <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
-         <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
-
-      if (pitEnabled) {
-        taxSummaryDiv.style.display = '';
-        taxSummaryDiv.innerHTML =
-          `<strong>Tax Calculation (PIT):</strong><br>
-           Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
-           Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
-           Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
-           <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
-           Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-           ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
-      } else {
-        taxSummaryDiv.style.display = 'none';
-        taxSummaryDiv.innerHTML = '';
-      }
-    }
-
-    function computeTax(adjIncome, biz) {
-      if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) return 0;
-      const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
-      let tax = 0;
-      if (adjIncome > (pit.threshold || DEFAULT_PIT.threshold)) {
-        let remaining = adjIncome - (pit.threshold || DEFAULT_PIT.threshold);
-        let prevUpper = (pit.threshold || DEFAULT_PIT.threshold);
-        for (let s of pit.slices) {
-          const upper = s.upTo;
-          let sliceLimit = (upper === Infinity) ? Infinity : (upper - prevUpper);
-          if (remaining <= 0) break;
-          const slice = Math.min(remaining, sliceLimit);
-          tax += slice * s.rate;
-          remaining -= slice;
-          prevUpper = upper;
-        }
-      }
-      return Math.max(0, Math.round(tax));
-    }
-
-    // Export / Import / Clear
-    btnExport.addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const now = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-      a.download = `ntc_data_export_${now}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    });
-
-    btnImport.addEventListener('click', () => fileInput.click());
-
-    fileInput.addEventListener('change', (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const imported = JSON.parse(ev.target.result);
-          if (!imported.users || !imported.businesses) throw new Error('Invalid format: missing users/businesses');
-          if (!confirm('Import will replace current data. Continue?')) return;
-          data = imported;
-          if (!data.transactions) data.transactions = {};
-          saveData();
-          refreshUserBusinessSelectors();
-          ensureSelection();
-          currentPage = 1;
-          renderLedger();
-          calculateSummary();
-          alert('Import successful');
-        } catch (err) {
-          alert('Failed to import JSON: ' + err.message);
-        }
-      };
-      reader.readAsText(f);
-      fileInput.value = '';
-    });
-
-    btnClearAll.addEventListener('click', () => {
-      if (!confirm('Clear ALL saved data (users, businesses, transactions)? This cannot be undone.')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      loadData();
-      refreshUserBusinessSelectors();
-      ensureSelection();
-      currentPage = 1;
-      renderLedger();
-      calculateSummary();
-      alert('All data cleared and reset to demo.');
-    });
-
-    // Reports
-    btnGenerateReport.addEventListener('click', () => {
-      const type = reportType.value;
-      const dateFrom = reportDateFrom.value;
-      const dateTo = reportDateTo.value;
-      const result = generateReport(type, dateFrom, dateTo);
-      renderReportOutput(result, type);
-    });
-
-    btnExportHtml.addEventListener('click', () => exportReport('html'));
-    btnExportCsv.addEventListener('click', () => exportReport('csv'));
-    btnExportJson.addEventListener('click', () => exportReport('json'));
-
-    function filterTxnsByDate(txns, from, to) {
-      if (!from && !to) return txns;
-      return txns.filter(txn => {
-        const d = txn.date;
-        return (!from || d >= from) && (!to || d <= to);
-      });
-    }
-
-    function generateReport(type, from, to) {
-      if (!selectedUserId || !selectedBusinessId) return { error: "Select user and business first." };
-      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
-      const txns = filterTxnsByDate(allTxns, from, to);
-      const biz = findBiz(selectedBusinessId);
-      const currency = (biz && biz.currency) ? biz.currency : '₦';
-      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-      const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
-      const vatEnabled = biz ? !!biz.vatEnabled : false;
-
-      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0, salaryTotal = 0;
-      let vatOutputTotal = 0, vatInputTotal = 0;
-      let salaryDetails = [];
-
-      txns.forEach(txn => {
-        if (txn.type === 'Income') {
-          incomeTotal += txn.amount;
-          if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
-        } else if (txn.type === 'Expense') {
-          expenseTotal += txn.amount;
-          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
-          if (txn.category === 'Rent') rentTotal += txn.amount;
-        } else if (txn.type === 'Deduction') {
-          deductionTotal += txn.amount;
-        }
-        if (txn.category === 'Salary' && txn.type === 'Expense') {
-          salaryTotal += txn.amount;
-          salaryDetails.push({ desc: txn.desc, amount: txn.amount, date: txn.date });
-        }
-      });
-
-      let netProfit = incomeTotal - expenseTotal;
-      let vatPayable = vatOutputTotal - vatInputTotal;
-      let rentRelief = Math.min(rentTotal * 0.20, 500000);
-      let adjIncome = incomeTotal - deductionTotal - rentRelief;
-      if (adjIncome < 0) adjIncome = 0;
-      let tax = pitEnabled ? computeTax(adjIncome, biz) : 0;
-      let payeTotal = pitEnabled ? computeTax(salaryTotal, biz) : 0;
-
-      if (type === "profit") {
-        return {
-          heading: "Profit Report",
-          items: [
-            { label: "Income", value: `${currency}${formatNumber(incomeTotal)}` },
-            { label: "Expenses", value: `${currency}${formatNumber(expenseTotal)}` },
-            { label: "Deductions", value: `${currency}${formatNumber(deductionTotal)}` },
-            { label: "Net Profit", value: `${currency}${formatNumber(netProfit)}` },
-          ],
-          raw: { incomeTotal, expenseTotal, deductionTotal, netProfit, from, to, business: biz ? biz.name : null }
-        };
-      } else if (type === "vat") {
-        return {
-          heading: "VAT Report",
-          items: [
-            { label: "VAT Output (Sales)", value: `${currency}${formatNumber(vatOutputTotal)}` },
-            { label: "VAT Input (Purchases)", value: `${currency}${formatNumber(vatInputTotal)}` },
-            { label: "VAT Payable", value: `${currency}${formatNumber(vatPayable)}` }
-          ],
-          raw: { vatOutputTotal, vatInputTotal, vatPayable, from, to, business: biz ? biz.name : null }
-        };
-      } else if (type === "paye") {
-        return {
-          heading: "PAYE Report",
-          items: [
-            { label: "Total Salary Expenses", value: `${currency}${formatNumber(salaryTotal)}` },
-            { label: "PAYE (using PIT rates)", value: `${currency}${formatNumber(payeTotal,0)}` },
-            { label: "Salary Details", value: salaryDetails.length ? salaryDetails.map(s => `${s.date}: ${s.desc} - ${currency}${formatNumber(s.amount)}`).join("<br>") : 'No salary transactions found' }
-          ],
-          raw: { salaryTotal, payeTotal, salaryDetails, from, to, business: biz ? biz.name : null }
-        };
-      } else {
-        return { error: "Unknown report type" };
-      }
-    }
-
-    function renderReportOutput(report, type) {
-      if (report.error) {
-        reportOutput.innerHTML = `<span style="color:red">${report.error}</span>`;
-        return;
-      }
-      let out = `<h3>${escapeHtml(report.heading)}</h3><ul>`;
-      report.items.forEach(item => {
-        out += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
-      });
-      out += "</ul>";
-      reportOutput.innerHTML = out;
-      window._lastReport = { report, type };
-    }
-
-    function exportReport(format) {
-      if (!window._lastReport || !window._lastReport.report) {
-        alert("Generate a report first.");
-        return;
-      }
-      const { report, type } = window._lastReport;
-      let filename = `report_${type}_${new Date().toISOString().slice(0,10)}.${format}`;
-      if (format === "html") {
-        let html = `<html><head><meta charset="utf-8"><title>${report.heading}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px}h2{margin-top:0}ul{padding-left:18px}</style></head><body><h2>${escapeHtml(report.heading)}</h2><ul>`;
-        report.items.forEach(item => {
-          html += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
-        });
-        html += "</ul></body></html>";
-        const blob = new Blob([html], { type: "text/html" });
-        downloadBlob(blob, filename);
-      } else if (format === "csv") {
-        let csv = "Label,Value\n";
-        report.items.forEach(item => {
-          const v = typeof item.value === 'string' ? item.value.replace(/"/g,'""') : String(item.value);
-          csv += `"${item.label.replace(/"/g,'""')}","${v}"\n`;
-        });
-        const blob = new Blob([csv], { type: "text/csv" });
-        downloadBlob(blob, filename.replace('.csv', '.csv'));
-      } else if (format === "json") {
-        const blob = new Blob([JSON.stringify(report.raw, null, 2)], { type: "application/json" });
-        downloadBlob(blob, filename.replace('.json', '.json'));
-      }
-    }
-
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 500);
-    }
-
-    // Helpers
-    function formatNumber(n, fractionDigits=2) {
-      if (typeof n !== 'number') n = Number(n) || 0;
-      return n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits });
-    }
-
-    function escapeHtml(s) {
-      if (!s) return '';
-      return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    }
-
-    modalOverlay.addEventListener('click', () => {
-      closeModal(userModal);
-      closeModal(businessModal);
-      closeModal(editModal);
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        closeModal(userModal);
-        closeModal(businessModal);
-        closeModal(editModal);
-      }
-    });
-
-    window._ntc = { data, saveData, loadData, refreshUserBusinessSelectors, renderLedger, calculateSummary };
-
-    setTimeout(()=>{ if (userSelect.options.length) userSelect.focus(); }, 300);
-  </script>
-
-  <footer>
-    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT (Paye) using configurable slices.</div>
-  </footer>
-</body>
-  </html>
+          if (
