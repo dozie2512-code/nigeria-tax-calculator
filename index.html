@@ -1,3 +1,5 @@
+GitHub Copilot Chat Assistant — Updated index.html follows.
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,7 +28,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(680px,96vw); max-height:80vh; overflow:auto; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(680px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -98,14 +100,14 @@
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings).</small>
+      <small class="note">Transactions are saved at the business level. Each transaction records its author (selected user). Business members can view/add transactions depending on membership.</small>
     </section>
 
     <section class="panel section">
       <h2 style="margin:0 0 8px 0;">Transactions Ledger</h2>
 
       <div class="search-bar">
-        <input type="text" id="ledgerSearch" placeholder="Search by date/type/category/description/amount" style="flex:1 1 320px; padding:6px; border:1px solid #cfcfcf; border-radius:4px;" />
+        <input type="text" id="ledgerSearch" placeholder="Search by date/type/category/description/amount/author" style="flex:1 1 320px; padding:6px; border:1px solid #cfcfcf; border-radius:4px;" />
         <button id="btnSearch" class="small">Search</button>
         <button id="btnClearSearch" class="small">Clear</button>
       </div>
@@ -119,6 +121,7 @@
             <th>Description</th>
             <th>Amount (₦)</th>
             <th>VAT (₦)</th>
+            <th>Author</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -186,6 +189,10 @@
       <label>Owner (user id): <select id="bizOwner"></select></label>
     </div>
     <div class="row">
+      <label>Members: <select id="bizMembers" multiple size="5" style="min-width:180px"></select></label>
+      <small class="note">Hold Ctrl/Cmd to select multiple members. Owner will be included automatically on save.</small>
+    </div>
+    <div class="row">
       <label>VAT rate (%): <input type="number" id="bizVat" min="0" step="0.01" /></label>
       <label>Currency: <input type="text" id="bizCurrency" value="₦" /></label>
     </div>
@@ -201,7 +208,7 @@
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria slices unless overridden per business.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria slices unless customized in the business object.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -239,9 +246,10 @@
 
   <script>
     // GitHub Copilot Chat Assistant
-    // Data model in localStorage key 'ntc_data_v1'
-    const STORAGE_KEY = 'ntc_data_v1';
+    // Data model (new): data = { users: [], businesses: [], transactions: { [bizId]: [ txn, ... ] } }
+    // Old model migration: data.transactions used to be { [userId]: { [bizId]: [txn,...] } } - migrated into new structure with authorUserId added.
 
+    const STORAGE_KEY = 'ntc_data_v1';
     const DEFAULT_PIT = {
       threshold: 800000,
       slices: [
@@ -269,30 +277,80 @@
 
     function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
+    function migrateOldTransactions(oldTxns) {
+      // oldTxns: { userId: { bizId: [txn,...] } }
+      const newTxns = {};
+      for (const userId of Object.keys(oldTxns)) {
+        const perUser = oldTxns[userId] || {};
+        for (const bizId of Object.keys(perUser)) {
+          const arr = perUser[bizId] || [];
+          if (!newTxns[bizId]) newTxns[bizId] = [];
+          for (const t of arr) {
+            // Ensure txn has id
+            const newTxn = {
+              id: t.id || uid('txn'),
+              date: (t.date || new Date().toISOString().slice(0,10)),
+              type: t.type || 'Income',
+              category: t.category || 'Other',
+              desc: t.desc || '',
+              amount: Number(t.amount) || 0,
+              authorUserId: userId
+            };
+            newTxns[bizId].push(newTxn);
+          }
+        }
+      }
+      return newTxns;
+    }
+
     function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
           if (parsed && typeof parsed === 'object') {
-            data = parsed;
-            if (!data.users) data.users = [];
-            if (!data.businesses) data.businesses = [];
-            if (!data.transactions) data.transactions = {};
+            // Basic structure validation & migration
+            data.users = parsed.users || [];
+            data.businesses = parsed.businesses || [];
+            const tx = parsed.transactions || {};
+            // Detect old structure: keys are userIds and values are objects mapping bizId->array
+            // Heuristic: if any value is object and keys look like biz ids containing 'biz_' OR values are objects and not arrays
+            let isOldStructure = false;
+            for (const k of Object.keys(tx)) {
+              const v = tx[k];
+              if (Array.isArray(v)) { isOldStructure = isOldStructure || false; }
+              else if (v && typeof v === 'object') { isOldStructure = true; break; }
+            }
+            if (isOldStructure) {
+              data.transactions = migrateOldTransactions(tx);
+              // Also ensure that migrated transactions have authorUserId set (done in migrate)
+            } else {
+              // new structure expected: { [bizId]: [txn,...] }
+              data.transactions = tx;
+            }
+            // Ensure businesses have members arrays
+            data.businesses = data.businesses.map(b => {
+              if (!Array.isArray(b.members)) b.members = [];
+              if (!b.ownerId && b.members && b.members.length) b.ownerId = b.members[0];
+              // ensure owner is in members
+              if (b.ownerId && !b.members.includes(b.ownerId)) b.members.push(b.ownerId);
+              return b;
+            });
+            // done
             return;
           }
         } catch(e) { console.error('Invalid saved data', e); }
       }
-      // default demo
+      // default demo (new structure)
       const userId = uid('user');
       const bizId = uid('biz');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
-        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
-        transactions: { [userId]: { [bizId]: [
-          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000 },
-          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000 }
-        ] } }
+        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, members: [userId], vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
+        transactions: { [bizId]: [
+          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000, authorUserId: userId },
+          { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, authorUserId: userId }
+        ] }
       };
       saveData();
     }
@@ -333,6 +391,7 @@
     const businessModalTitle = document.getElementById('businessModalTitle');
     const bizName = document.getElementById('bizName');
     const bizOwner = document.getElementById('bizOwner');
+    const bizMembers = document.getElementById('bizMembers');
     const bizVat = document.getElementById('bizVat');
     const bizCurrency = document.getElementById('bizCurrency');
     const bizThreshold = document.getElementById('bizThreshold');
@@ -401,6 +460,7 @@
 
     // --- User & Business management ---
     function refreshUserBusinessSelectors() {
+      // Users
       userSelect.innerHTML = '';
       data.users.forEach(u => {
         const opt = document.createElement('option');
@@ -408,8 +468,18 @@
         opt.textContent = (u.display || u.username) + ' (' + u.username + ')';
         userSelect.appendChild(opt);
       });
+
+      // Businesses: show businesses the selected user is a member of; if none, show all
       businessSelect.innerHTML = '';
-      data.businesses.forEach(b => {
+      const bizList = [];
+      if (selectedUserId) {
+        for (const b of data.businesses) {
+          if (Array.isArray(b.members) && b.members.includes(selectedUserId)) bizList.push(b);
+        }
+      }
+      if (bizList.length === 0) bizList.push(...data.businesses);
+
+      bizList.forEach(b => {
         const owner = findUser(b.ownerId);
         const enabledParts = [];
         if (b.vatEnabled) enabledParts.push('VAT');
@@ -420,16 +490,28 @@
         opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${b.vatRate}% VAT)${status}`;
         businessSelect.appendChild(opt);
       });
+
+      // bizOwner and members options
       bizOwner.innerHTML = '';
+      bizMembers.innerHTML = '';
       data.users.forEach(u => {
         const o = document.createElement('option');
         o.value = u.id;
         o.textContent = (u.display || u.username);
         bizOwner.appendChild(o);
+
+        const m = document.createElement('option');
+        m.value = u.id;
+        m.textContent = (u.display || u.username) + ' (' + u.username + ')';
+        bizMembers.appendChild(m);
       });
 
       if (!data.users.find(u=>u.id===selectedUserId)) selectedUserId = data.users.length ? data.users[0].id : null;
-      if (!data.businesses.find(b=>b.id===selectedBusinessId)) selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
+      if (!data.businesses.find(b=>b.id===selectedBusinessId)) {
+        // try to pick a business where selected user is member
+        const pick = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
+        selectedBusinessId = pick ? pick.id : (data.businesses.length ? data.businesses[0].id : null);
+      }
 
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
@@ -437,7 +519,10 @@
 
     function ensureSelection() {
       if (!selectedUserId && data.users.length) selectedUserId = data.users[0].id;
-      if (!selectedBusinessId && data.businesses.length) selectedBusinessId = data.businesses[0].id;
+      if (!selectedBusinessId && data.businesses.length) {
+        const pick = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
+        selectedBusinessId = pick ? pick.id : data.businesses[0].id;
+      }
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
@@ -468,10 +553,24 @@
       if (!selectedUserId) return alert('Select a user first.');
       const u = findUser(selectedUserId);
       if (!u) return;
-      if (!confirm(`Delete user "${u.display || u.username}" and all their businesses & transactions? This action cannot be undone.`)) return;
+      if (!confirm(`Delete user "${u.display || u.username}" and remove their authored transactions? This action cannot be undone.`)) return;
+      // Remove businesses owned by this user
+      const ownedBizIds = data.businesses.filter(b => b.ownerId === u.id).map(b=>b.id);
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
-      delete data.transactions[u.id];
+      for (const bid of ownedBizIds) {
+        if (data.transactions[bid]) delete data.transactions[bid];
+      }
+      // Remove user from members lists of other businesses and remove their authored txns
+      for (const b of data.businesses) {
+        if (Array.isArray(b.members)) {
+          b.members = b.members.filter(mid => mid !== u.id);
+        }
+        const txs = data.transactions[b.id] || [];
+        data.transactions[b.id] = txs.filter(t => t.authorUserId !== u.id);
+      }
+      // Remove user
       data.users = data.users.filter(x => x.id !== u.id);
+      // If no users left reset everything
       if (!data.users.length) {
         data = { users: [], businesses: [], transactions: {} };
       }
@@ -508,16 +607,19 @@
 
     userSelect.addEventListener('change', (e) => {
       selectedUserId = e.target.value;
-      const owned = data.businesses.find(b => b.ownerId === selectedUserId);
+      // prefer a business the user is member of
+      const owned = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
       currentPage = 1;
+      refreshUserBusinessSelectors();
       renderLedger();
       calculateSummary();
     });
 
     // Businesses
     btnAddBusiness.addEventListener('click', () => {
+      if (!selectedUserId) { alert('Create/select a user first'); return; }
       businessModalTitle.textContent = 'Add Business';
       bizName.value = '';
       bizVat.value = 7.5;
@@ -525,6 +627,10 @@
       bizThreshold.value = 800000;
       bizNotes.value = '';
       bizOwner.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
+      // select owner as the sole member by default
+      for (const opt of bizMembers.options) opt.selected = false;
+      const ownerVal = bizOwner.value;
+      for (const opt of bizMembers.options) if (opt.value === ownerVal) opt.selected = true;
       bizVatEnabled.checked = true;
       bizPitEnabled.checked = true;
       bizEditingId = null;
@@ -542,6 +648,10 @@
       bizThreshold.value = (typeof b.threshold === 'number') ? b.threshold : 800000;
       bizNotes.value = b.notes || '';
       bizOwner.value = b.ownerId || (data.users[0] && data.users[0].id) || '';
+      // members
+      for (const opt of bizMembers.options) {
+        opt.selected = Array.isArray(b.members) && b.members.includes(opt.value);
+      }
       bizVatEnabled.checked = !!b.vatEnabled;
       bizPitEnabled.checked = (typeof b.pitEnabled === 'undefined') ? true : !!b.pitEnabled;
       bizEditingId = b.id;
@@ -552,11 +662,9 @@
       if (!selectedBusinessId) return alert('Select a business first.');
       const b = findBiz(selectedBusinessId);
       if (!b) return;
-      if (!confirm(`Delete business "${b.name}" and all its transactions for all users? This action cannot be undone.`)) return;
+      if (!confirm(`Delete business "${b.name}" and all its transactions? This action cannot be undone.`)) return;
       data.businesses = data.businesses.filter(x => x.id !== b.id);
-      for (const uid of Object.keys(data.transactions)) {
-        if (data.transactions[uid] && data.transactions[uid][b.id]) delete data.transactions[uid][b.id];
-      }
+      if (data.transactions[b.id]) delete data.transactions[b.id];
       saveData();
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
       refreshUserBusinessSelectors();
@@ -575,11 +683,20 @@
       const pitEnabledVal = !!bizPitEnabled.checked;
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
+      // gather members from multi-select
+      const members = [];
+      for (const opt of bizMembers.options) {
+        if (opt.selected) members.push(opt.value);
+      }
+      // ensure owner included
+      if (!members.includes(ownerIdVal)) members.push(ownerIdVal);
+
       if (bizEditingId) {
         const b = findBiz(bizEditingId);
         if (!b) return;
         b.name = name;
         b.ownerId = ownerIdVal;
+        b.members = members;
         b.vatRate = isNaN(vat) ? 7.5 : vat;
         b.currency = currency;
         b.threshold = threshold;
@@ -589,7 +706,7 @@
       } else {
         const id = uid('biz');
         data.businesses.push({
-          id, name, ownerId: ownerIdVal,
+          id, name, ownerId: ownerIdVal, members,
           vatRate: isNaN(vat) ? 7.5 : vat,
           currency,
           threshold,
@@ -597,6 +714,8 @@
           vatEnabled: vatEnabledVal,
           pitEnabled: pitEnabledVal
         });
+        // ensure transactions map has key
+        if (!data.transactions[id]) data.transactions[id] = [];
       }
       saveData();
       closeModal(businessModal);
@@ -628,14 +747,20 @@
         alert('Select user and business before adding a transaction.');
         return;
       }
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) { alert('Selected business not found'); return; }
+      // Check membership
+      if (!Array.isArray(biz.members) || !biz.members.includes(selectedUserId)) {
+        alert('You are not a member of the selected business. Ask the owner to add you as member.');
+        return;
+      }
       if (!date || !desc || amount <= 0) {
         alert('Please fill all fields and enter a valid amount.');
         return;
       }
-      const txn = { id: uid('txn'), date, type, category, desc, amount };
-      if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
-      if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
-      data.transactions[selectedUserId][selectedBusinessId].push(txn);
+      const txn = { id: uid('txn'), date, type, category, desc, amount, authorUserId: selectedUserId };
+      if (!data.transactions[selectedBusinessId]) data.transactions[selectedBusinessId] = [];
+      data.transactions[selectedBusinessId].push(txn);
       saveData();
       clearForm();
       renderLedger();
@@ -657,11 +782,13 @@
         updatePaginationControls();
         return;
       }
-      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const allTxns = (data.transactions[selectedBusinessId]) || [];
       const q = (ledgerFilterText || '').trim().toLowerCase();
       ledgerFiltered = allTxns.filter(txn => {
         if (!q) return true;
-        const parts = [ txn.date || '', txn.type || '', txn.category || '', txn.desc || '', String(txn.amount || '') ];
+        const author = findUser(txn.authorUserId);
+        const authorName = author ? (author.display || author.username) : '';
+        const parts = [ txn.date || '', txn.type || '', txn.category || '', txn.desc || '', String(txn.amount || ''), authorName ];
         return parts.join(' ').toLowerCase().includes(q);
       });
 
@@ -676,6 +803,8 @@
       pageSlice.forEach((txn) => {
         let vat = 0;
         if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
+        const author = findUser(txn.authorUserId);
+        const authorName = author ? (author.display || author.username) : '(unknown)';
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${txn.date}</td>
@@ -684,6 +813,7 @@
           <td>${escapeHtml(txn.desc)}</td>
           <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
           <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
+          <td>${escapeHtml(authorName)}</td>
           <td>
             <div class="actions">
               <button class="small" onclick="openEditModal('${txn.id}')">Edit</button>
@@ -733,8 +863,8 @@
     });
 
     window.openEditModal = function(txnId) {
-      if (!selectedUserId || !selectedBusinessId) return;
-      const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      if (!selectedBusinessId) return;
+      const txns = data.transactions[selectedBusinessId] || [];
       const idx = txns.findIndex(t => t.id === txnId);
       if (idx === -1) return;
       editIndex = idx;
@@ -748,9 +878,9 @@
     };
 
     window.removeTransaction = function(txnId) {
-      if (!selectedUserId || !selectedBusinessId) return;
+      if (!selectedBusinessId) return;
       if (!confirm('Delete this transaction?')) return;
-      const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const txns = data.transactions[selectedBusinessId] || [];
       const idx = txns.findIndex(t=>t.id===txnId);
       if (idx === -1) return;
       txns.splice(idx,1);
@@ -773,9 +903,11 @@
       const desc = editTxnDesc.value.trim();
       const amount = parseFloat(editTxnAmount.value) || 0;
       if (!date || !desc || amount <= 0) { alert('Fill fields and enter valid amount'); return; }
-      const txns = data.transactions[selectedUserId][selectedBusinessId];
+      const txns = data.transactions[selectedBusinessId];
       if (!txns || !txns[editIndex]) return;
-      txns[editIndex] = { ...txns[editIndex], date, type, category, desc, amount };
+      // preserve id and authorUserId
+      const orig = txns[editIndex];
+      txns[editIndex] = { ...orig, date, type, category, desc, amount };
       saveData();
       closeEditModal();
       renderLedger();
@@ -791,7 +923,7 @@
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
       const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
       const vatEnabled = biz ? !!biz.vatEnabled : false;
-      const txns = ledgerFiltered && ledgerFiltered.length ? ledgerFiltered : (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const txns = ledgerFiltered && ledgerFiltered.length ? ledgerFiltered : (data.transactions[selectedBusinessId]) || [];
 
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
       let vatOutputTotal = 0, vatInputTotal = 0;
@@ -899,7 +1031,22 @@
           if (!imported.users || !imported.businesses) throw new Error('Invalid format: missing users/businesses');
           if (!confirm('Import will replace current data. Continue?')) return;
           data = imported;
-          if (!data.transactions) data.transactions = {};
+          // handle old transaction structure if present
+          if (data.transactions && Object.keys(data.transactions).length) {
+            // detect old structure again
+            let isOld = false;
+            for (const k of Object.keys(data.transactions)) {
+              if (!Array.isArray(data.transactions[k]) && typeof data.transactions[k] === 'object') { isOld = true; break; }
+            }
+            if (isOld) data.transactions = migrateOldTransactions(data.transactions);
+          }
+          // ensure businesses have members array and owner included
+          data.businesses = data.businesses.map(b => {
+            if (!Array.isArray(b.members)) b.members = [];
+            if (!b.ownerId && b.members && b.members.length) b.ownerId = b.members[0];
+            if (b.ownerId && !b.members.includes(b.ownerId)) b.members.push(b.ownerId);
+            return b;
+          });
           saveData();
           refreshUserBusinessSelectors();
           ensureSelection();
@@ -950,7 +1097,7 @@
 
     function generateReport(type, from, to) {
       if (!selectedUserId || !selectedBusinessId) return { error: "Select user and business first." };
-      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      const allTxns = (data.transactions[selectedBusinessId]) || [];
       const txns = filterTxnsByDate(allTxns, from, to);
       const biz = findBiz(selectedBusinessId);
       const currency = (biz && biz.currency) ? biz.currency : '₦';
@@ -975,7 +1122,7 @@
         }
         if (txn.category === 'Salary' && txn.type === 'Expense') {
           salaryTotal += txn.amount;
-          salaryDetails.push({ desc: txn.desc, amount: txn.amount, date: txn.date });
+          salaryDetails.push({ desc: txn.desc, amount: txn.amount, date: txn.date, author: findUser(txn.authorUserId) ? (findUser(txn.authorUserId).display || findUser(txn.authorUserId).username) : '(unknown)' });
         }
       });
 
@@ -1012,103 +1159,113 @@
         return {
           heading: "PAYE Report",
           items: [
-            { label: "Total Salary Expenses", value: `${currency}${formatNumber(salaryTotal)}` },
-            { label: "PAYE (using PIT rates)", value: `${currency}${formatNumber(payeTotal,0)}` },
-            { label: "Salary Details", value: salaryDetails.length ? salaryDetails.map(s => `${s.date}: ${s.desc} - ${currency}${formatNumber(s.amount)}`).join("<br>") : 'No salary transactions found' }
+            { label: "Salary total", value: `${currency}${formatNumber(salaryTotal)}` },
+            { label: "Estimated PAYE (tax on salaries)", value: `${currency}${formatNumber(payeTotal)}` }
           ],
-          raw: { salaryTotal, payeTotal, salaryDetails, from, to, business: biz ? biz.name : null }
+          details: salaryDetails,
+          raw: { salaryTotal, payeTotal, from, to, business: biz ? biz.name : null }
         };
       } else {
         return { error: "Unknown report type" };
       }
     }
 
-    function renderReportOutput(report, type) {
-      if (report.error) {
-        reportOutput.innerHTML = `<span style="color:red">${report.error}</span>`;
-        return;
-      }
-      let out = `<h3>${escapeHtml(report.heading)}</h3><ul>`;
-      report.items.forEach(item => {
-        out += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+    function renderReportOutput(result, type) {
+      if (!result) { reportOutput.innerHTML = 'No data'; return; }
+      if (result.error) { reportOutput.innerHTML = `<div class="muted">${escapeHtml(result.error)}</div>`; return; }
+      let html = `<h3>${escapeHtml(result.heading)}</h3>`;
+      html += '<ul>';
+      result.items.forEach(it => {
+        html += `<li><strong>${escapeHtml(it.label)}:</strong> ${escapeHtml(it.value)}</li>`;
       });
-      out += "</ul>";
-      reportOutput.innerHTML = out;
-      window._lastReport = { report, type };
+      html += '</ul>';
+      if (result.details && result.details.length) {
+        html += `<h4>Details</h4><ul>`;
+        result.details.forEach(d => {
+          html += `<li>${escapeHtml(d.date)} - ${escapeHtml(d.desc)} - ${escapeHtml(d.author)} - ${escapeHtml((data.businesses.find(b=>b.id===selectedBusinessId) || {}).currency || '₦')}${formatNumber(d.amount)}</li>`;
+        });
+        html += '</ul>';
+      }
+      reportOutput.innerHTML = html;
     }
 
     function exportReport(format) {
-      if (!window._lastReport || !window._lastReport.report) {
-        alert("Generate a report first.");
-        return;
-      }
-      const { report, type } = window._lastReport;
-      let filename = `report_${type}_${new Date().toISOString().slice(0,10)}.${format}`;
-      if (format === "html") {
-        let html = `<html><head><meta charset="utf-8"><title>${report.heading}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px}h2{margin-top:0}ul{padding-left:18px}</style></head><body><h2>${escapeHtml(report.heading)}</h2><ul>`;
-        report.items.forEach(item => {
-          html += `<li><strong>${escapeHtml(item.label)}:</strong> ${item.value}</li>`;
+      const type = reportType.value;
+      const dateFrom = reportDateFrom.value;
+      const dateTo = reportDateTo.value;
+      const result = generateReport(type, dateFrom, dateTo);
+      if (result.error) return alert(result.error);
+      if (format === 'json') {
+        const blob = new Blob([JSON.stringify(result.raw || result, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${type}_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } else if (format === 'csv') {
+        // Simple CSV from items
+        let csv = 'label,value\n';
+        (result.items || []).forEach(it => {
+          csv += `"${it.label.replace(/"/g,'""')}","${String(it.value).replace(/"/g,'""')}"\n`;
         });
-        html += "</ul></body></html>";
-        const blob = new Blob([html], { type: "text/html" });
-        downloadBlob(blob, filename);
-      } else if (format === "csv") {
-        let csv = "Label,Value\n";
-        report.items.forEach(item => {
-          const v = typeof item.value === 'string' ? item.value.replace(/"/g,'""') : String(item.value);
-          csv += `"${item.label.replace(/"/g,'""')}","${v}"\n`;
-        });
-        const blob = new Blob([csv], { type: "text/csv" });
-        downloadBlob(blob, filename.replace('.csv', '.csv'));
-      } else if (format === "json") {
-        const blob = new Blob([JSON.stringify(report.raw, null, 2)], { type: "application/json" });
-        downloadBlob(blob, filename.replace('.json', '.json'));
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${type}_${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } else if (format === 'html') {
+        const html = reportOutput.innerHTML || '<div>No report</div>';
+        const blob = new Blob([`<html><body>${html}</body></html>`], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${type}_${new Date().toISOString().slice(0,10)}.html`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
       }
     }
 
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 500);
-    }
-
-    // Helpers
-    function formatNumber(n, fractionDigits=2) {
+    // Utilities
+    function formatNumber(n, decimals=2) {
       if (typeof n !== 'number') n = Number(n) || 0;
-      return n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits });
+      return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     }
-
     function escapeHtml(s) {
-      if (!s) return '';
-      return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/[&<>"']/g, function(m) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m];
+      });
     }
 
-    modalOverlay.addEventListener('click', () => {
-      closeModal(userModal);
-      closeModal(businessModal);
-      closeModal(editModal);
+    // Initial UI update bindings for controls created earlier
+    // ensure selected options reflect state
+    refreshUserBusinessSelectors();
+    ensureSelection();
+    renderLedger();
+    calculateSummary();
+
+    // When page visibility changes (just a simple hook), re-render to account for updated user/business lists
+    window.addEventListener('storage', () => {
+      loadData();
+      refreshUserBusinessSelectors();
+      ensureSelection();
+      renderLedger();
+      calculateSummary();
     });
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        closeModal(userModal);
-        closeModal(businessModal);
-        closeModal(editModal);
-      }
-    });
-
-    window._ntc = { data, saveData, loadData, refreshUserBusinessSelectors, renderLedger, calculateSummary };
-
-    setTimeout(()=>{ if (userSelect.options.length) userSelect.focus(); }, 300);
   </script>
 
   <footer>
-    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT per business and calculates PIT (Paye) using configurable slices.</div>
+    <div class="muted">This is a client-only demo. Data is stored in your browser localStorage. Export to backup.</div>
   </footer>
 </body>
-  </html>
+                             </html>
