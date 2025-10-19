@@ -26,7 +26,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw)[...]
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -101,7 +101,7 @@
 
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions (derived from account type). Default WHT rate is 5% per transa[...]
+      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions (derived from account type). Default WHT rate is 5% per transaction.</small>
     </section>
 
     <section class="panel section">
@@ -314,7 +314,7 @@
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant - updated index.html: removed Type & Category from UI and moved Account before Description
+    // GitHub Copilot Chat Assistant - repaired index.html script
     const STORAGE_KEY = 'ntc_data_v2';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -344,7 +344,7 @@
     function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
     function formatMoney(v){ return (Number(v)||0).toLocaleString('en-NG', {maximumFractionDigits:2, minimumFractionDigits:0}); }
     function escapeHtml(s){ if (s === undefined || s === null) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function saveData(){ try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) { console.error('Save failed', e); alert('Saving failed: ' + e.message); } }
+    function saveData(){ try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) { console.error('Save failed', e); alert('Saving failed: ' + (e && e.message)); } }
 
     function ensureBizWhtAccount(b){
       if (!b) return;
@@ -425,8 +425,8 @@
       };
       const now = new Date().toISOString().slice(0,10);
       data.transactions[bizId] = [
-        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts.find(a=>a.ty[...]
-        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type[...]
+        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate: 0 },
+        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 5 }
       ];
       saveData();
     }
@@ -579,7 +579,7 @@
 
     // modal helpers
     function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; modal.setAttribute('aria-hidden','false'); }
-    function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; a[...]
+    function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; accountEditingId=null; editTxnId=null; }
     modalOverlay.addEventListener('click', () => {
       const modals = [userModal, businessModal, editModal, contactModal, accountModal];
       modals.forEach(m=>{ if (m && m.style.display === 'block') closeModal(m); });
@@ -670,7 +670,7 @@
       const ownedBizIds = data.businesses.filter(b=>b.ownerId===u.id).map(b=>b.id);
       data.businesses = data.businesses.filter(b=>b.ownerId !== u.id);
       for (const bid of ownedBizIds){ if (data.transactions[bid]) delete data.transactions[bid]; }
-      for (const b of data.businesses){ if (Array.isArray(b.members)) b.members = b.members.filter(mid=>mid!==u.id); const txs = data.transactions[b.id]||[]; data.transactions[b.id] = txs.filter(t=>t.[...]
+      for (const b of data.businesses){ if (Array.isArray(b.members)) b.members = b.members.filter(mid=>mid!==u.id); const txs = data.transactions[b.id]||[]; data.transactions[b.id] = txs.filter(t=>t.authorUserId !== u.id); }
       data.users = data.users.filter(x=>x.id !== u.id);
       if (!data.users.length) { data = { users: [], businesses: [], transactions: {} }; }
       saveData();
@@ -816,7 +816,7 @@
         b.contacts.forEach(c=>{
           const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
           d.innerHTML = `<div><strong>${escapeHtml(c.name)}</strong> <span class="muted">(${escapeHtml(c.type)})</span><br/><small class="muted">${escapeHtml(c.info||'')}</small></div>
-            <div style="display:flex;gap:6px"><button class="small" onclick="window.editContact('${c.id}')">Edit</button><button class="small danger" onclick="window.deleteContact('${c.id}')">Delete</[...]
+            <div style="display:flex;gap:6px"><button class="small" onclick="window.editContact('${c.id}')">Edit</button><button class="small danger" onclick="window.deleteContact('${c.id}')">Delete</button></div>`;
           contactsListDiv.appendChild(d);
         });
       }
@@ -826,8 +826,8 @@
         b.accounts.forEach(a=>{
           const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
           const isWht = (b.whtAccountId && a.id === b.whtAccountId);
-          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''} <span class="muted">(${escapeHtml(a.type)})</span><[...]
-            <div style="display:flex;gap:6px"><button class="small" onclick="window.editAccount('${a.id}')">Edit</button><button class="small danger" onclick="window.deleteAccount('${a.id}')">Delete</[...]
+          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''} <span class="muted">(${escapeHtml(a.type)})</span><br/><small class="muted">${escapeHtml(a.notes||'')}</small></div>
+            <div style="display:flex;gap:6px"><button class="small" onclick="window.editAccount('${a.id}')">Edit</button><button class="small danger" onclick="window.deleteAccount('${a.id}')">Delete</button></div>`;
           accountsListDiv.appendChild(d);
         });
       }
@@ -839,7 +839,7 @@
     window.editContact = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
       const c = b.contacts.find(x=>x.id===id); if (!c) return;
-      contactModalTitle.textContent = 'Edit Contact'; contactName.value = c.name||''; contactType.value = c.type||'Customer'; contactInfo.value = c.info||''; contactNotes.value = c.notes||''; contactE[...]
+      contactModalTitle.textContent = 'Edit Contact'; contactName.value = c.name||''; contactType.value = c.type||'Customer'; contactInfo.value = c.info||''; contactNotes.value = c.notes||''; contactEditingId = c.id; openModal(contactModal);
     };
     window.deleteContact = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
@@ -853,7 +853,7 @@
     window.editAccount = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
       const a = b.accounts.find(x=>x.id===id); if (!a) return;
-      accountModalTitle.textContent = 'Edit Account'; accountCode.value = a.code||''; accountName.value = a.name||''; accountType.value = a.type||'Asset'; accountNotes.value = a.notes||''; accountEdit[...]
+      accountModalTitle.textContent = 'Edit Account'; accountCode.value = a.code||''; accountName.value = a.name||''; accountType.value = a.type||'Asset'; accountNotes.value = a.notes||''; accountEditingId = a.id; openModal(accountModal);
     };
     window.deleteAccount = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
@@ -943,7 +943,6 @@
 
     // update WHT inline visibility (shown when selected account is Expense)
     function updateWhtInlineVisibility(){
-      const b = findBiz(selectedBusinessId);
       const acc = findAccount(selectedBusinessId, txnAccount.value);
       const isExpense = acc && acc.type === 'Expense';
       whtInlineLabel.style.display = isExpense ? 'inline-block' : 'none';
@@ -965,5 +964,91 @@
     // Add transaction
     btnAddTxn.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
-      const date = txnDate.value || new Date().toISOString().slice(0,10`
-
+      const date = txnDate.value || new Date().toISOString().slice(0,10);
+      const desc = (txnDesc.value||'').trim();
+      const amount = Number(txnAmount.value) || 0;
+      const accountId = txnAccount.value || null;
+      const contactId = txnContact.value || null;
+      const whtEnabledVal = !!txnWhtEnabled.checked;
+      const whtRateVal = parseFloat(txnWhtRate.value) || 0;
+      if (!accountId){ if (!confirm('No account selected. Add transaction without account?')) return; }
+      if (!amount || amount <= 0){ alert('Amount must be > 0'); return; }
+      const id = uid('txn'); const t = { id, date, desc, amount, authorUserId: selectedUserId, contactId: contactId || null, accountId: accountId || null, whtEnabled: whtEnabledVal, whtRate: whtRateVal };
+      if (!data.transactions[b.id]) data.transactions[b.id] = [];
+      data.transactions[b.id].unshift(t);
+      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary(); refreshContactsAccountsUI();
+    });
+
+    // render ledger with pagination and search
+    function getFilteredTransactions(){ const all = data.transactions[selectedBusinessId] || []; if (!ledgerFilterText) return all; const q = ledgerFilterText.toLowerCase(); return all.filter(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); const accName = acc ? ((acc.code?acc.code+' - ':'')+acc.name) : ''; const contact = findContact(selectedBusinessId, t.contactId); const contactName = contact ? contact.name : ''; const author = findUser(t.authorUserId); const authorName = author ? (author.display || author.username) : ''; return (t.date||'').toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q) || String(t.amount||'').toLowerCase().includes(q) || accName.toLowerCase().includes(q) || contactName.toLowerCase().includes(q) || authorName.toLowerCase().includes(q); }); }
+
+    function renderLedger(){ ledgerTbody.innerHTML=''; const b = findBiz(selectedBusinessId); if (!b){ ledgerTbody.innerHTML = '<tr><td colspan="8" class="muted">No business selected.</td></tr>'; return; } const filtered = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); if (currentPage > totalPages) currentPage = totalPages; const start = (currentPage-1)*PAGE_SIZE; const pageTx = filtered.slice(start, start+PAGE_SIZE);
+      pageTx.forEach(t=>{ const tr=document.createElement('tr'); const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' ('+acc.type+')') : '(none)'; const contact = findContact(selectedBusinessId, t.contactId); const contactText = contact ? contact.name+' ('+contact.type+')' : ''; const author = findUser(t.authorUserId); const authorText = author ? (author.display || author.username) : ''; const whtAmt = (t.whtEnabled && t.whtRate) ? (Number(t.amount||0) * (Number(t.whtRate||0)/100)) : 0; tr.innerHTML = `<td>${escapeHtml(t.date||'')}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(accText)}</td><td class="nowrap">${formatMoney(t.amount)}</td><td class="nowrap">${whtAmt?formatMoney(whtAmt):'-'}</td><td>${escapeHtml(contactText)}</td><td>${escapeHtml(authorText)}</td><td><div class="actions"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`; ledgerTbody.appendChild(tr); });
+      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+    }
+
+    window.openEditTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id]||[]; const t = txs.find(x=>x.id===id); if (!t) return; editTxnId = t.id; editTxnDate.value = t.date || ''; editTxnDesc.value = t.desc || ''; editTxnAmount.value = t.amount || 0; editTxnAccount.value = t.accountId || ''; editTxnContact.value = t.contactId || ''; editTxnWhtEnabled.checked = !!t.whtEnabled; editTxnWhtRate.value = t.whtRate || 5; updateEditWhtVisibility(); openModal(editModal); };
+
+    window.deleteTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; if (!confirm('Delete transaction?')) return; data.transactions[b.id] = (data.transactions[b.id]||[]).filter(x=>x.id!==id); saveData(); renderLedger(); calculateSummary(); };
+
+    editSave.addEventListener('click', ()=>{ if (!editTxnId) return; const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id] || []; const t = txs.find(x=>x.id===editTxnId); if (!t) return; t.date = editTxnDate.value || new Date().toISOString().slice(0,10); t.desc = (editTxnDesc.value||'').trim(); t.amount = Number(editTxnAmount.value) || 0; t.accountId = editTxnAccount.value || null; t.contactId = editTxnContact.value || null; t.whtEnabled = !!editTxnWhtEnabled.checked; t.whtRate = parseFloat(editTxnWhtRate.value) || 0; saveData(); closeModal(editModal); renderLedger(); calculateSummary(); });
+    editCancel.addEventListener('click', ()=> closeModal(editModal));
+
+    // search & pagination
+    btnSearch.addEventListener('click', ()=>{ ledgerFilterText = (ledgerSearch.value||'').trim(); currentPage = 1; renderLedger(); });
+    btnClearSearch.addEventListener('click', ()=>{ ledgerFilterText = ''; ledgerSearch.value=''; currentPage = 1; renderLedger(); });
+    btnPrevPage.addEventListener('click', ()=>{ if (currentPage>1) { currentPage--; renderLedger(); } });
+    btnNextPage.addEventListener('click', ()=>{ const filtered = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(filtered.length/PAGE_SIZE)); if (currentPage < totalPages){ currentPage++; renderLedger(); } });
+
+    // summaries
+    function calculateSummary(){ const b=findBiz(selectedBusinessId); if (!b){ vatSummaryDiv.innerHTML=''; totalsSummaryDiv.innerHTML=''; taxSummaryDiv.innerHTML=''; return; } const txs = data.transactions[b.id] || []; let totalIncome=0, totalExpense=0, totalWht=0, vatCollected=0; txs.forEach(t=>{ const acc = findAccount(b.id, t.accountId); const type = acc ? acc.type : null; if (type === 'Revenue') { totalIncome += Number(t.amount || 0); if (b.vatEnabled) vatCollected += Number(t.amount || 0) * (Number(b.vatRate||0)/100); } else if (type === 'Expense'){ totalExpense += Number(t.amount || 0); if (t.whtEnabled) totalWht += Number(t.amount || 0) * (Number(t.whtRate||0)/100); } else { /* other types treated as income by default */ totalIncome += Number(t.amount || 0); } });
+      const net = totalIncome - totalExpense;
+      vatSummaryDiv.innerHTML = `<strong>VAT summary</strong><div class="muted">VAT enabled: ${b.vatEnabled ? 'Yes' : 'No'} — Rate: ${b.vatRate}%</div><div>Total VAT (approx): ${formatMoney(vatCollected)}</div>`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div>Total income: ${formatMoney(totalIncome)}</div><div>Total expenses: ${formatMoney(totalExpense)}</div><div>Net: ${formatMoney(net)}</div>`;
+      // PIT calculation (simple annualized approach using slices on income minus threshold)
+      let taxHtml = '<strong>Tax summary</strong>';
+      if (b.pitEnabled){
+        const taxable = Math.max(0, totalIncome - (b.threshold || DEFAULT_PIT.threshold));
+        let pitTotal = 0;
+        let remaining = taxable;
+        if (remaining > 0){
+          const slices = b.pit && b.pit.slices ? b.pit.slices : DEFAULT_PIT.slices;
+          let prev = 0;
+          for (const s of slices){
+            const upto = s.upTo;
+            const band = Math.max(0, Math.min(remaining, upto - prev));
+            if (band <= 0) { prev = upto; continue; }
+            pitTotal += band * s.rate;
+            remaining -= band;
+            prev = upto;
+            if (remaining <= 0) break;
+          }
+        }
+        taxHtml += `<div>Taxable income (approx): ${formatMoney(taxable)}</div><div>Estimated PIT (approx): ${formatMoney(pitTotal)}</div>`;
+      } else { taxHtml += '<div class="muted">PIT disabled for this business.</div>'; }
+      taxHtml += `<div>Withheld WHT: ${formatMoney(totalWht)}</div>`;
+      taxSummaryDiv.innerHTML = taxHtml;
+    }
+
+    // export / import / clear
+    btnExport.addEventListener('click', ()=>{ const payload = JSON.stringify(data, null, 2); const blob = new Blob([payload], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc_export_'+(new Date().toISOString().slice(0,10))+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+    btnImport.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', (e)=>{ const f = e.target.files && e.target.files[0]; if (!f) return; const reader = new FileReader(); reader.onload = (ev)=>{ try{ const parsed = JSON.parse(ev.target.result); if (!confirm('Import will replace current data. Continue?')) return; data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); alert('Import complete'); } catch(err){ alert('Import failed: '+err.message); } }; reader.readAsText(f); fileInput.value=''; });
+    btnClearAll.addEventListener('click', ()=>{ if (!confirm('Clear all data and reset to demo?')) return; localStorage.removeItem(STORAGE_KEY); loadData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); alert('Data reset to demo'); });
+
+    // simple report generator and exports
+    btnGenerateReport.addEventListener('click', ()=>{ const type = reportType.value; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const b = findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const txs = (data.transactions[b.id]||[]).filter(t => (t.date||'') >= from && (t.date||'') <= to); lastReport = { business: b.name, type, from, to, txs }; renderReport(lastReport); });
+    function renderReport(r){ if (!r){ reportOutput.innerHTML='No report generated'; return; } if (r.type === 'vat'){ let html=`<h3>VAT report for ${escapeHtml(r.business)}</h3>`; let totalVat=0; r.txs.forEach(t=>{ const acc=findAccount(selectedBusinessId, t.accountId); if (acc && acc.type==='Revenue' && findBiz(selectedBusinessId).vatEnabled){ const vat = Number(t.amount||0) * (Number(findBiz(selectedBusinessId).vatRate||0)/100); totalVat += vat; } }); html += `<div>Total VAT (approx): ${formatMoney(totalVat)}</div>`; reportOutput.innerHTML = html; } else if (r.type === 'wht'){ let html=`<h3>WHT report for ${escapeHtml(r.business)}</h3>`; let totalWht=0; r.txs.forEach(t=>{ if (t.whtEnabled) totalWht += Number(t.amount||0) * (Number(t.whtRate||0)/100); }); html += `<div>Total WHT withheld: ${formatMoney(totalWht)}</div>`; reportOutput.innerHTML = html; } else { let html=`<h3>${escapeHtml(r.type.toUpperCase())} report for ${escapeHtml(r.business)}</h3>`; html += `<div>Transactions: ${r.txs.length}</div>`; html += '<table class="report"><thead><tr><th>Date</th><th>Desc</th><th>Account</th><th>Amount</th></tr></thead><tbody>'; r.txs.forEach(t=>{ const acc=findAccount(selectedBusinessId, t.accountId); html += `<tr><td>${escapeHtml(t.date||'')}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(acc ? (acc.code?acc.code+' - ':'')+acc.name : '(none)')}</td><td>${formatMoney(t.amount)}</td></tr>`; }); html += '</tbody></table>'; reportOutput.innerHTML = html; } }
+    btnExportHtml.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const html = reportOutput.innerHTML; const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'report.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+    btnExportCsv.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const rows = [['Date','Desc','Account','Amount']]; lastReport.txs.forEach(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); rows.push([t.date||'', t.desc||'', acc ? ((acc.code?acc.code+' - ':'')+acc.name) : '', String(t.amount||'')]); }); const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+    btnExportJson.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const blob=new Blob([JSON.stringify(lastReport, null, 2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+
+    // export contacts/accounts
+    btnExportContacts.addEventListener('click', ()=>{ const b=findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const blob=new Blob([JSON.stringify(b.contacts||[],null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='contacts_'+(b.name||'biz')+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+    btnExportAccounts.addEventListener('click', ()=>{ const b=findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const blob=new Blob([JSON.stringify(b.accounts||[],null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='accounts_'+(b.name||'biz')+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+
+    // initial focus defaults
+    window.addEventListener('load', ()=>{ if (!txnDate.value) txnDate.value = new Date().toISOString().slice(0,10); });
+  </script>
+</body>
+        </html>
