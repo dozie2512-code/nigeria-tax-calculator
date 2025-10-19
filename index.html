@@ -1,10 +1,8 @@
-GitHub Copilot Chat Assistant — Updated index.html follows.
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Nigeria Simple Accounting & Tax Software with VAT (Multi-user / Multi-business)</title>
+  <title>Nigeria Simple Accounting & Tax Software with VAT & WHT (Multi-user / Multi-business)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --gap:12px; --muted:#666; --danger:#b00; --accent:#0077cc; --bg:#f8f9fb; }
@@ -28,7 +26,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:78vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -38,11 +36,12 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     .pagination { display:flex; gap:8px; align-items:center; margin-top:8px; }
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
     pre.small { font-size:0.85rem; white-space:pre-wrap; }
+    .nowrap { white-space:nowrap; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Nigeria Accounting & Tax (VAT) — Multi-user / Multi-business</h1>
+    <h1>Nigeria Accounting & Tax (VAT & WHT) — Multi-user / Multi-business</h1>
     <div class="controls panel">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <label for="userSelect">User:</label>
@@ -98,6 +97,15 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         </label>
         <label>Description: <input type="text" id="txnDesc" placeholder="Details" /></label>
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
+
+        <!-- WHT inline controls (shown/enabled for Expense by JS) -->
+        <label id="whtInlineLabel" style="display:none;">
+          <input type="checkbox" id="txnWhtEnabled" /> Withhold WHT
+        </label>
+        <label id="whtRateInlineLabel" style="display:none;">
+          WHT rate (%): <input type="number" id="txnWhtRate" min="0" step="0.01" value="5" style="width:70px;" />
+        </label>
+
         <label>Contact:
           <select id="txnContact"></select>
         </label>
@@ -108,7 +116,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         <button class="small" id="btnAddAccountInline">+ Account</button>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. Each transaction records its author (selected user). Business members can view/add transactions depending on membership. Contacts and Accounts are scoped per business.</small>
+      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applied by default only to Expense transactions if toggled. Default WHT rate is 5% per transaction.</small>
     </section>
 
     <section class="panel section">
@@ -128,7 +136,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
             <th>Category</th>
             <th>Description</th>
             <th>Amount (₦)</th>
-            <th>VAT (₦)</th>
+            <th>WHT (₦)</th>
             <th>Contact</th>
             <th>Account</th>
             <th>Author</th>
@@ -178,6 +186,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
             <option value="profit">Profit</option>
             <option value="vat">VAT</option>
             <option value="paye">PAYE</option>
+            <option value="wht">WHT</option>
           </select>
         </label>
         <label>Date From: <input type="date" id="reportDateFrom" /></label>
@@ -233,11 +242,15 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       <label><input type="checkbox" id="bizVatEnabled" /> Enable VAT</label>
       <label><input type="checkbox" id="bizPitEnabled" /> Enable PIT (tax)</label>
     </div>
+    <div class="row">
+      <label><input type="checkbox" id="bizWhtEnabled" /> Auto-create WHT Payable account</label>
+      <label>WHT account code: <input type="text" id="bizWhtCode" value="2300" style="width:90px" /></label>
+    </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. WHT Payable account will be created if enabled and not present.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -267,6 +280,15 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     </label><br/>
     <label>Description: <input type="text" id="editTxnDesc" /></label><br/>
     <label>Amount (₦): <input type="number" id="editTxnAmount" min="0" step="0.01" /></label><br/>
+
+    <!-- WHT fields in edit modal -->
+    <label id="editWhtLabel" style="display:none;">
+      <input type="checkbox" id="editTxnWhtEnabled" /> Withhold WHT
+    </label><br/>
+    <label id="editWhtRateLabel" style="display:none;">
+      WHT rate (%): <input type="number" id="editTxnWhtRate" min="0" step="0.01" value="5" style="width:70px;" />
+    </label><br/>
+
     <label>Contact:
       <select id="editTxnContact"></select>
     </label><br/>
@@ -274,8 +296,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       <select id="editTxnAccount"></select>
     </label><br/>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-      <button onclick="closeEditModal()">Cancel</button>
-      <button class="primary" onclick="saveEdit()">Save</button>
+      <button id="editCancel">Cancel</button>
+      <button class="primary" id="editSave">Save</button>
     </div>
   </div>
 
@@ -328,9 +350,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant
-    // Extended: contacts and chart of accounts (COA) per business. Transactions now store contactId and accountId.
-
+    // GitHub Copilot Chat Assistant - updated index.html with WHT support
     const STORAGE_KEY = 'ntc_data_v2';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -342,32 +362,33 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         { upTo: Infinity, rate: 0.25 }
       ]
     };
+    const DEFAULT_WHT_RATE = 5.0;
 
-    // In-memory state
+    // state
     let data = { users: [], businesses: [], transactions: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
-    let editIndex = null;
+    let editTxnId = null;
 
-    // Ledger UI state
+    // pagination
     const PAGE_SIZE = 20;
     let currentPage = 1;
     let ledgerFilterText = '';
-    let ledgerFiltered = [];
 
-    function uid(prefix='id') { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
+    function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
+    function formatMoney(v){ return (Number(v)||0).toLocaleString('en-NG', {maximumFractionDigits:2, minimumFractionDigits:0}); }
+    function escapeHtml(s){ if (!s && s!==0) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function saveData(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
-    function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-
-    function migrateOldTransactions(oldTxns) {
-      // oldTxns: { userId: { bizId: [txn,...] } }
+    function migrateOldTransactions(oldTxns){
+      // oldTxns might be nested by user/biz; we convert to { bizId: [txns...] }
       const newTxns = {};
-      for (const userId of Object.keys(oldTxns)) {
+      for (const userId of Object.keys(oldTxns)){
         const perUser = oldTxns[userId] || {};
-        for (const bizId of Object.keys(perUser)) {
+        for (const bizId of Object.keys(perUser)){
           const arr = perUser[bizId] || [];
           if (!newTxns[bizId]) newTxns[bizId] = [];
-          for (const t of arr) {
+          for (const t of arr){
             const newTxn = {
               id: t.id || uid('txn'),
               date: (t.date || new Date().toISOString().slice(0,10)),
@@ -377,7 +398,12 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
               amount: Number(t.amount) || 0,
               authorUserId: userId,
               contactId: t.contactId || null,
-              accountId: t.accountId || null
+              accountId: t.accountId || null,
+              // new WHT defaults
+              whtEnabled: !!t.whtEnabled,
+              whtRate: Number(t.whtRate) || 0,
+              whtAmount: Number(t.whtAmount) || 0,
+              whtAccountId: t.whtAccountId || null
             };
             newTxns[bizId].push(newTxn);
           }
@@ -386,48 +412,63 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       return newTxns;
     }
 
-    function loadData() {
+    function ensureBizWhtAccount(b){
+      if (!b) return;
+      if (!Array.isArray(b.accounts)) b.accounts = [];
+      if (!b.whtAccountId && !!b.whtAutoCreate) {
+        // create account
+        const exists = b.accounts.find(a => (a.code && String(a.code) === String(b.whtCode || '2300')) && a.name === 'WHT Payable');
+        if (exists) b.whtAccountId = exists.id;
+        else {
+          const acc = { id: uid('a'), code: (b.whtCode || '2300'), name: 'WHT Payable', type: 'Liability', notes: 'Auto-created for withheld tax' };
+          b.accounts.push(acc);
+          b.whtAccountId = acc.id;
+        }
+      }
+    }
+
+    function loadData(){
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
+      if (raw){
         try {
           const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
+          if (parsed && typeof parsed === 'object'){
             data.users = parsed.users || [];
             data.businesses = parsed.businesses || [];
-            const tx = parsed.transactions || {};
+            let tx = parsed.transactions || {};
             // detect old structure
             let isOldStructure = false;
-            for (const k of Object.keys(tx)) {
+            for (const k of Object.keys(tx)){
               const v = tx[k];
               if (Array.isArray(v)) { /* new style */ }
               else if (v && typeof v === 'object') { isOldStructure = true; break; }
             }
-            if (isOldStructure) {
-              data.transactions = migrateOldTransactions(tx);
-            } else {
-              data.transactions = tx;
-            }
-            // Ensure businesses have members, contacts, accounts arrays and default vats/pit
-            data.businesses = data.businesses.map(b => {
+            if (isOldStructure) data.transactions = migrateOldTransactions(tx);
+            else data.transactions = tx;
+
+            // normalize businesses and ensure defaults
+            data.businesses = data.businesses.map(b=>{
               if (!Array.isArray(b.members)) b.members = [];
-              if (!b.ownerId && b.members && b.members.length) b.ownerId = b.members[0];
               if (!Array.isArray(b.contacts)) b.contacts = [];
               if (!Array.isArray(b.accounts)) b.accounts = [];
-              if (!b.vatRate) b.vatRate = 7.5;
+              if (typeof b.vatRate !== 'number') b.vatRate = 7.5;
               if (typeof b.vatEnabled === 'undefined') b.vatEnabled = true;
               if (typeof b.pitEnabled === 'undefined') b.pitEnabled = true;
               if (!b.pit) b.pit = DEFAULT_PIT;
-              if (b.ownerId && !b.members.includes(b.ownerId)) b.members.push(b.ownerId);
+              if (typeof b.whtAutoCreate === 'undefined') b.whtAutoCreate = true;
+              if (!b.whtCode) b.whtCode = '2300';
+              ensureBizWhtAccount(b);
               return b;
             });
             return;
           }
-        } catch(e) { console.error('Invalid saved data', e); }
+        } catch(e){ console.error('Invalid saved data', e); }
       }
 
-      // default demo (new structure)
+      // default demo
       const userId = uid('user');
       const bizId = uid('biz');
+      const whtAccountId = uid('a_wht');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
         businesses: [{
@@ -441,6 +482,9 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           notes: 'Sample business',
           vatEnabled: true,
           pitEnabled: true,
+          whtAutoCreate: true,
+          whtCode: '2300',
+          whtAccountId: whtAccountId,
           contacts: [
             { id: uid('c'), name: 'ACME Co', type: 'Customer', info: 'acme@example.com', notes: '' },
             { id: uid('c'), name: 'Office Supplies Ltd', type: 'Vendor', info: '0803-xxx', notes: '' },
@@ -450,33 +494,32 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
             { id: uid('a'), code: '1000', name: 'Cash', type: 'Asset', notes: '' },
             { id: uid('a'), code: '2000', name: 'Accounts Payable', type: 'Liability', notes: '' },
             { id: uid('a'), code: '4000', name: 'Sales Revenue', type: 'Revenue', notes: '' },
-            { id: uid('a'), code: '5000', name: 'Rent Expense', type: 'Expense', notes: '' }
+            { id: uid('a'), code: '5000', name: 'Rent Expense', type: 'Expense', notes: '' },
+            { id: whtAccountId, code: '2300', name: 'WHT Payable', type: 'Liability', notes: 'Auto-created' }
           ],
           pit: DEFAULT_PIT
         }],
         transactions: {}
       };
       data.transactions[bizId] = [
-        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts[2].id },
-        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts[3].id }
+        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts[2].id, whtEnabled:false, whtRate:0, whtAmount:0, whtAccountId:null },
+        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts[3].id, whtEnabled:true, whtRate:5, whtAmount:10000, whtAccountId:whtAccountId }
       ];
       saveData();
     }
 
-    function findUser(id){ return data.users.find(u=>u.id===id); }
-    function findBiz(id){ return data.businesses.find(b=>b.id===id); }
-    function findContact(bizId, contactId) {
-      const b = findBiz(bizId);
-      if (!b || !Array.isArray(b.contacts)) return null;
-      return b.contacts.find(c => c.id === contactId) || null;
+    function findUser(id){ return data.users.find(u=>u.id===id) || null; }
+    function findBiz(id){ return data.businesses.find(b=>b.id===id) || null; }
+    function findContact(bizId, contactId){
+      const b = findBiz(bizId); if (!b || !Array.isArray(b.contacts)) return null;
+      return b.contacts.find(c=>c.id===contactId) || null;
     }
-    function findAccount(bizId, accountId) {
-      const b = findBiz(bizId);
-      if (!b || !Array.isArray(b.accounts)) return null;
-      return b.accounts.find(a => a.id === accountId) || null;
+    function findAccount(bizId, accountId){
+      const b = findBiz(bizId); if (!b || !Array.isArray(b.accounts)) return null;
+      return b.accounts.find(a=>a.id===accountId) || null;
     }
 
-    // UI wiring
+    // UI references
     const userSelect = document.getElementById('userSelect');
     const businessSelect = document.getElementById('businessSelect');
     const btnAddUser = document.getElementById('btnAddUser');
@@ -495,7 +538,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
 
     const modalOverlay = document.getElementById('modalOverlay');
 
-    // User modal elements
+    // User modal
     const userModal = document.getElementById('userModal');
     const userModalTitle = document.getElementById('userModalTitle');
     const userName = document.getElementById('userName');
@@ -504,7 +547,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const userSave = document.getElementById('userSave');
     const userCancel = document.getElementById('userCancel');
 
-    // Business modal elements
+    // Business modal
     const businessModal = document.getElementById('businessModal');
     const businessModalTitle = document.getElementById('businessModalTitle');
     const bizName = document.getElementById('bizName');
@@ -516,10 +559,12 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const bizNotes = document.getElementById('bizNotes');
     const bizVatEnabled = document.getElementById('bizVatEnabled');
     const bizPitEnabled = document.getElementById('bizPitEnabled');
+    const bizWhtEnabled = document.getElementById('bizWhtEnabled');
+    const bizWhtCode = document.getElementById('bizWhtCode');
     const bizSave = document.getElementById('bizSave');
     const bizCancel = document.getElementById('bizCancel');
 
-    // Contact modal
+    // Contact & account modals
     const contactModal = document.getElementById('contactModal');
     const contactModalTitle = document.getElementById('contactModalTitle');
     const contactName = document.getElementById('contactName');
@@ -529,7 +574,6 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const contactSave = document.getElementById('contactSave');
     const contactCancel = document.getElementById('contactCancel');
 
-    // Account modal
     const accountModal = document.getElementById('accountModal');
     const accountModalTitle = document.getElementById('accountModalTitle');
     const accountCode = document.getElementById('accountCode');
@@ -539,7 +583,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const accountSave = document.getElementById('accountSave');
     const accountCancel = document.getElementById('accountCancel');
 
-    // Edit transaction modal
+    // Edit modal
     const editModal = document.getElementById('editModal');
     const editTxnDate = document.getElementById('editTxnDate');
     const editTxnType = document.getElementById('editTxnType');
@@ -548,28 +592,28 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const editTxnAmount = document.getElementById('editTxnAmount');
     const editTxnContact = document.getElementById('editTxnContact');
     const editTxnAccount = document.getElementById('editTxnAccount');
+    const editTxnWhtEnabled = document.getElementById('editTxnWhtEnabled');
+    const editTxnWhtRate = document.getElementById('editTxnWhtRate');
+    const editWhtLabel = document.getElementById('editWhtLabel');
+    const editWhtRateLabel = document.getElementById('editWhtRateLabel');
+    const editCancel = document.getElementById('editCancel');
+    const editSave = document.getElementById('editSave');
 
-    // Transaction inline selects
+    // Add txn inline controls
+    const txnDate = document.getElementById('txnDate');
+    const txnType = document.getElementById('txnType');
+    const txnCategory = document.getElementById('txnCategory');
+    const txnDesc = document.getElementById('txnDesc');
+    const txnAmount = document.getElementById('txnAmount');
     const txnContact = document.getElementById('txnContact');
     const txnAccount = document.getElementById('txnAccount');
+    const txnWhtEnabled = document.getElementById('txnWhtEnabled');
+    const txnWhtRate = document.getElementById('txnWhtRate');
+    const whtInlineLabel = document.getElementById('whtInlineLabel');
+    const whtRateInlineLabel = document.getElementById('whtRateInlineLabel');
+
     const btnAddContactInline = document.getElementById('btnAddContactInline');
     const btnAddAccountInline = document.getElementById('btnAddAccountInline');
-
-    // Search & pagination UI
-    const ledgerSearch = document.getElementById('ledgerSearch');
-    const btnSearch = document.getElementById('btnSearch');
-    const btnClearSearch = document.getElementById('btnClearSearch');
-    const btnPrevPage = document.getElementById('btnPrevPage');
-    const btnNextPage = document.getElementById('btnNextPage');
-    const pageIndicator = document.getElementById('pageIndicator');
-
-    // Export/Import UI
-    const btnExport = document.getElementById('btnExport');
-    const btnImport = document.getElementById('btnImport');
-    const fileInput = document.getElementById('fileInput');
-    const btnClearAll = document.getElementById('btnClearAll');
-
-    // Contacts & accounts UI
     const btnOpenContacts = document.getElementById('btnOpenContacts');
     const contactsListDiv = document.getElementById('contactsList');
     const btnExportContacts = document.getElementById('btnExportContacts');
@@ -578,7 +622,18 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const accountsListDiv = document.getElementById('accountsList');
     const btnExportAccounts = document.getElementById('btnExportAccounts');
 
-    // Reports UI
+    const ledgerSearch = document.getElementById('ledgerSearch');
+    const btnSearch = document.getElementById('btnSearch');
+    const btnClearSearch = document.getElementById('btnClearSearch');
+    const btnPrevPage = document.getElementById('btnPrevPage');
+    const btnNextPage = document.getElementById('btnNextPage');
+    const pageIndicator = document.getElementById('pageIndicator');
+
+    const btnExport = document.getElementById('btnExport');
+    const btnImport = document.getElementById('btnImport');
+    const fileInput = document.getElementById('fileInput');
+    const btnClearAll = document.getElementById('btnClearAll');
+
     const reportType = document.getElementById('reportType');
     const reportDateFrom = document.getElementById('reportDateFrom');
     const reportDateTo = document.getElementById('reportDateTo');
@@ -588,12 +643,13 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const btnExportJson = document.getElementById('btnExportJson');
     const reportOutput = document.getElementById('reportOutput');
 
+    // temp editing ids
     let userEditingId = null;
     let bizEditingId = null;
     let contactEditingId = null;
     let accountEditingId = null;
 
-    // Initialization
+    // initialize
     loadData();
     refreshUserBusinessSelectors();
     ensureSelection();
@@ -602,40 +658,22 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     renderLedger();
     calculateSummary();
 
-    // --- Helpers for modals ---
-    function openModal(modal) {
-      modalOverlay.style.display = 'block';
-      modal.style.display = 'block';
-      modal.setAttribute('aria-hidden','false');
-    }
-    function closeModal(modal) {
-      modalOverlay.style.display = 'none';
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden','true');
-      userEditingId = null;
-      bizEditingId = null;
-      contactEditingId = null;
-      accountEditingId = null;
-    }
+    // modal helpers
+    function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; modal.setAttribute('aria-hidden','false'); }
+    function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; accountEditingId=null; editTxnId=null; }
 
     modalOverlay.addEventListener('click', () => {
-      // close any open modal
       const modals = [userModal, businessModal, editModal, contactModal, accountModal];
-      modals.forEach(m => { if (m && m.style.display === 'block') closeModal(m); });
+      modals.forEach(m=>{ if (m && m.style.display === 'block') closeModal(m); });
     });
 
-    // --- User & Business management ---
-    function refreshUserBusinessSelectors() {
-      // Users
+    // User & Business selectors
+    function refreshUserBusinessSelectors(){
       userSelect.innerHTML = '';
-      data.users.forEach(u => {
-        const opt = document.createElement('option');
-        opt.value = u.id;
-        opt.textContent = (u.display || u.username) + ' (' + u.username + ')';
-        userSelect.appendChild(opt);
+      data.users.forEach(u=>{
+        const opt = document.createElement('option'); opt.value = u.id; opt.textContent = (u.display||u.username) + ' (' + u.username + ')'; userSelect.appendChild(opt);
       });
 
-      // Businesses: show businesses the selected user is a member of; if none, show all
       businessSelect.innerHTML = '';
       const bizList = [];
       if (selectedUserId) {
@@ -645,11 +683,12 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       }
       if (bizList.length === 0) bizList.push(...data.businesses);
 
-      bizList.forEach(b => {
+      bizList.forEach(b=>{
         const owner = findUser(b.ownerId);
         const enabledParts = [];
         if (b.vatEnabled) enabledParts.push('VAT');
         if (b.pitEnabled) enabledParts.push('PIT');
+        if (b.whtAutoCreate) enabledParts.push('WHT');
         const status = enabledParts.length ? ' — ' + enabledParts.join('/') : '';
         const opt = document.createElement('option');
         opt.value = b.id;
@@ -657,19 +696,11 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         businessSelect.appendChild(opt);
       });
 
-      // bizOwner and members options
       bizOwner.innerHTML = '';
       bizMembers.innerHTML = '';
-      data.users.forEach(u => {
-        const o = document.createElement('option');
-        o.value = u.id;
-        o.textContent = (u.display || u.username);
-        bizOwner.appendChild(o);
-
-        const m = document.createElement('option');
-        m.value = u.id;
-        m.textContent = (u.display || u.username) + ' (' + u.username + ')';
-        bizMembers.appendChild(m);
+      data.users.forEach(u=>{
+        const o = document.createElement('option'); o.value = u.id; o.textContent = (u.display||u.username); bizOwner.appendChild(o);
+        const m = document.createElement('option'); m.value = u.id; m.textContent = (u.display||u.username) + ' (' + u.username + ')'; bizMembers.appendChild(m);
       });
 
       if (!data.users.find(u=>u.id===selectedUserId)) selectedUserId = data.users.length ? data.users[0].id : null;
@@ -681,14 +712,13 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
 
-      // refresh inline selects
       populateContactSelects();
       populateAccountSelects();
     }
 
-    function ensureSelection() {
+    function ensureSelection(){
       if (!selectedUserId && data.users.length) selectedUserId = data.users[0].id;
-      if (!selectedBusinessId && data.businesses.length) {
+      if (!selectedBusinessId && data.businesses.length){
         const pick = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
         selectedBusinessId = pick ? pick.id : data.businesses[0].id;
       }
@@ -696,20 +726,17 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
 
-    // Users
-    btnAddUser.addEventListener('click', () => {
+    // User actions
+    btnAddUser.addEventListener('click', ()=>{
       userModalTitle.textContent = 'Add User';
-      userName.value = '';
-      userDisplay.value = '';
-      userNotes.value = '';
+      userName.value=''; userDisplay.value=''; userNotes.value='';
       userEditingId = null;
       openModal(userModal);
     });
 
-    btnEditUser.addEventListener('click', () => {
+    btnEditUser.addEventListener('click', ()=>{
       if (!selectedUserId) return alert('Select a user first.');
-      const u = findUser(selectedUserId);
-      if (!u) return;
+      const u = findUser(selectedUserId); if (!u) return;
       userModalTitle.textContent = 'Edit User';
       userName.value = u.username || '';
       userDisplay.value = u.display || '';
@@ -718,27 +745,16 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       openModal(userModal);
     });
 
-    btnDeleteUser.addEventListener('click', () => {
+    btnDeleteUser.addEventListener('click', ()=>{
       if (!selectedUserId) return alert('Select a user first.');
-      const u = findUser(selectedUserId);
-      if (!u) return;
+      const u = findUser(selectedUserId); if (!u) return;
       if (!confirm(`Delete user "${u.display || u.username}" and remove their authored transactions? This action cannot be undone.`)) return;
-      const ownedBizIds = data.businesses.filter(b => b.ownerId === u.id).map(b=>b.id);
-      data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
-      for (const bid of ownedBizIds) {
-        if (data.transactions[bid]) delete data.transactions[bid];
-      }
-      for (const b of data.businesses) {
-        if (Array.isArray(b.members)) {
-          b.members = b.members.filter(mid => mid !== u.id);
-        }
-        const txs = data.transactions[b.id] || [];
-        data.transactions[b.id] = txs.filter(t => t.authorUserId !== u.id);
-      }
-      data.users = data.users.filter(x => x.id !== u.id);
-      if (!data.users.length) {
-        data = { users: [], businesses: [], transactions: {} };
-      }
+      const ownedBizIds = data.businesses.filter(b=>b.ownerId===u.id).map(b=>b.id);
+      data.businesses = data.businesses.filter(b=>b.ownerId !== u.id);
+      for (const bid of ownedBizIds){ if (data.transactions[bid]) delete data.transactions[bid]; }
+      for (const b of data.businesses){ if (Array.isArray(b.members)) b.members = b.members.filter(mid=>mid!==u.id); const txs = data.transactions[b.id]||[]; data.transactions[b.id] = txs.filter(t=>t.authorUserId !== u.id); }
+      data.users = data.users.filter(x=>x.id !== u.id);
+      if (!data.users.length) { data = { users: [], businesses: [], transactions: {} }; }
       saveData();
       selectedUserId = data.users.length ? data.users[0].id : null;
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
@@ -747,63 +763,47 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       calculateSummary();
     });
 
-    userSave.addEventListener('click', () => {
-      const username = (userName.value || '').trim();
+    userSave.addEventListener('click', ()=>{
+      const username = (userName.value||'').trim();
       if (!username) { alert('Username required'); return; }
-      if (userEditingId) {
-        const u = findUser(userEditingId);
-        if (!u) return;
-        u.username = username;
-        u.display = (userDisplay.value||'').trim();
-        u.notes = (userNotes.value||'').trim();
+      if (userEditingId){
+        const u = findUser(userEditingId); if (!u) return;
+        u.username = username; u.display = (userDisplay.value||'').trim(); u.notes = (userNotes.value||'').trim();
       } else {
-        const exists = data.users.find(x => x.username === username);
-        if (exists) { if (!confirm('Username already exists. Add anyway?')) return; }
-        const id = uid('user');
-        data.users.push({ id, username, display: (userDisplay.value||'').trim(), notes: (userNotes.value||'').trim() });
+        const exists = data.users.find(x=>x.username === username);
+        if (exists && !confirm('Username already exists. Add anyway?')) return;
+        const id = uid('user'); data.users.push({ id, username, display: (userDisplay.value||'').trim(), notes: (userNotes.value||'').trim() });
       }
-      saveData();
-      closeModal(userModal);
-      refreshUserBusinessSelectors();
-      ensureSelection();
+      saveData(); closeModal(userModal); refreshUserBusinessSelectors(); ensureSelection();
     });
 
-    userCancel.addEventListener('click', () => closeModal(userModal));
+    userCancel.addEventListener('click', ()=> closeModal(userModal));
 
-    userSelect.addEventListener('change', (e) => {
+    userSelect.addEventListener('change', (e)=>{
       selectedUserId = e.target.value;
       const owned = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
-      currentPage = 1;
-      refreshUserBusinessSelectors();
-      renderLedger();
-      calculateSummary();
+      currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary();
     });
 
-    // Businesses
-    btnAddBusiness.addEventListener('click', () => {
+    // Business actions
+    btnAddBusiness.addEventListener('click', ()=>{
       if (!selectedUserId) { alert('Create/select a user first'); return; }
       businessModalTitle.textContent = 'Add Business';
-      bizName.value = '';
-      bizVat.value = 7.5;
-      bizCurrency.value = '₦';
-      bizThreshold.value = 800000;
-      bizNotes.value = '';
+      bizName.value=''; bizVat.value=7.5; bizCurrency.value='₦'; bizThreshold.value=800000; bizNotes.value='';
       bizOwner.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
       for (const opt of bizMembers.options) opt.selected = false;
       const ownerVal = bizOwner.value;
       for (const opt of bizMembers.options) if (opt.value === ownerVal) opt.selected = true;
-      bizVatEnabled.checked = true;
-      bizPitEnabled.checked = true;
+      bizVatEnabled.checked = true; bizPitEnabled.checked = true; bizWhtEnabled.checked = true; bizWhtCode.value = '2300';
       bizEditingId = null;
       openModal(businessModal);
     });
 
-    btnEditBusiness.addEventListener('click', () => {
+    btnEditBusiness.addEventListener('click', ()=>{
       if (!selectedBusinessId) return alert('Select a business first.');
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
+      const b = findBiz(selectedBusinessId); if (!b) return;
       businessModalTitle.textContent = 'Edit Business';
       bizName.value = b.name || '';
       bizVat.value = (typeof b.vatRate === 'number') ? b.vatRate : 7.5;
@@ -811,21 +811,20 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       bizThreshold.value = (typeof b.threshold === 'number') ? b.threshold : 800000;
       bizNotes.value = b.notes || '';
       bizOwner.value = b.ownerId || (data.users[0] && data.users[0].id) || '';
-      for (const opt of bizMembers.options) {
-        opt.selected = Array.isArray(b.members) && b.members.includes(opt.value);
-      }
+      for (const opt of bizMembers.options){ opt.selected = Array.isArray(b.members) && b.members.includes(opt.value); }
       bizVatEnabled.checked = !!b.vatEnabled;
       bizPitEnabled.checked = (typeof b.pitEnabled === 'undefined') ? true : !!b.pitEnabled;
+      bizWhtEnabled.checked = (typeof b.whtAutoCreate === 'undefined') ? true : !!b.whtAutoCreate;
+      bizWhtCode.value = b.whtCode || '2300';
       bizEditingId = b.id;
       openModal(businessModal);
     });
 
-    btnDeleteBusiness.addEventListener('click', () => {
+    btnDeleteBusiness.addEventListener('click', ()=>{
       if (!selectedBusinessId) return alert('Select a business first.');
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
+      const b = findBiz(selectedBusinessId); if (!b) return;
       if (!confirm(`Delete business "${b.name}" and all its transactions? This action cannot be undone.`)) return;
-      data.businesses = data.businesses.filter(x => x.id !== b.id);
+      data.businesses = data.businesses.filter(x=>x.id!==b.id);
       if (data.transactions[b.id]) delete data.transactions[b.id];
       saveData();
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
@@ -835,702 +834,523 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       calculateSummary();
     });
 
-    bizSave.addEventListener('click', () => {
-      const name = (bizName.value || '').trim();
+    bizSave.addEventListener('click', ()=>{
+      const name = (bizName.value||'').trim();
       const ownerIdVal = bizOwner.value;
       const vat = parseFloat(bizVat.value);
-      const currency = (bizCurrency.value || '₦').trim();
+      const currency = (bizCurrency.value||'₦').trim();
       const threshold = Number(bizThreshold.value) || 800000;
       const vatEnabledVal = !!bizVatEnabled.checked;
       const pitEnabledVal = !!bizPitEnabled.checked;
+      const whtAuto = !!bizWhtEnabled.checked;
+      const whtCodeVal = (bizWhtCode.value||'2300').trim() || '2300';
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
       const members = [];
-      for (const opt of bizMembers.options) {
-        if (opt.selected) members.push(opt.value);
-      }
+      for (const opt of bizMembers.options) if (opt.selected) members.push(opt.value);
       if (!members.includes(ownerIdVal)) members.push(ownerIdVal);
 
-      if (bizEditingId) {
-        const b = findBiz(bizEditingId);
-        if (!b) return;
-        b.name = name;
-        b.ownerId = ownerIdVal;
-        b.members = members;
-        b.vatRate = isNaN(vat) ? 7.5 : vat;
-        b.currency = currency;
-        b.threshold = threshold;
-        b.notes = (bizNotes.value || '').trim();
-        b.vatEnabled = vatEnabledVal;
-        b.pitEnabled = pitEnabledVal;
+      if (bizEditingId){
+        const b = findBiz(bizEditingId); if (!b) return;
+        b.name = name; b.ownerId = ownerIdVal; b.members = members;
+        b.vatRate = isNaN(vat) ? 7.5 : vat; b.currency = currency; b.threshold = threshold; b.notes = (bizNotes.value||'').trim();
+        b.vatEnabled = vatEnabledVal; b.pitEnabled = pitEnabledVal; b.whtAutoCreate = whtAuto; b.whtCode = whtCodeVal;
+        ensureBizWhtAccount(b);
       } else {
         const id = uid('biz');
-        data.businesses.push({
+        const newBiz = {
           id, name, ownerId: ownerIdVal, members,
           vatRate: isNaN(vat) ? 7.5 : vat,
           currency,
           threshold,
-          notes: (bizNotes.value || '').trim(),
+          notes: (bizNotes.value||'').trim(),
           vatEnabled: vatEnabledVal,
           pitEnabled: pitEnabledVal,
+          whtAutoCreate: whtAuto,
+          whtCode: whtCodeVal,
           contacts: [],
           accounts: [],
           pit: DEFAULT_PIT
-        });
-        if (!data.transactions[id]) data.transactions[id] = [];
+        };
+        if (whtAuto) ensureBizWhtAccount(newBiz);
+        data.businesses.push(newBiz);
+        if (!data.transactions[newBiz.id]) data.transactions[newBiz.id] = [];
       }
-      saveData();
-      closeModal(businessModal);
-      refreshUserBusinessSelectors();
-      ensureSelection();
-      currentPage = 1;
-      renderLedger();
-      calculateSummary();
+      saveData(); closeModal(businessModal); refreshUserBusinessSelectors(); ensureSelection(); currentPage=1; renderLedger(); calculateSummary();
     });
 
-    bizCancel.addEventListener('click', () => closeModal(businessModal));
+    bizCancel.addEventListener('click', ()=> closeModal(businessModal));
 
-    businessSelect.addEventListener('change', (e) => {
-      selectedBusinessId = e.target.value;
-      currentPage = 1;
-      refreshUserBusinessSelectors();
-      renderLedger();
-      calculateSummary();
-      refreshContactsAccountsUI();
+    businessSelect.addEventListener('change', (e)=>{
+      selectedBusinessId = e.target.value; currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary(); refreshContactsAccountsUI();
     });
 
-    // Contacts and Accounts management
-    function refreshContactsAccountsUI() {
-      contactsListDiv.innerHTML = '';
-      accountsListDiv.innerHTML = '';
+    // Contacts & Accounts UI
+    function refreshContactsAccountsUI(){
+      contactsListDiv.innerHTML = ''; accountsListDiv.innerHTML = '';
       const b = findBiz(selectedBusinessId);
-      if (!b) {
-        contactsListDiv.textContent = 'No business selected.';
-        accountsListDiv.textContent = 'No business selected.';
-        populateContactSelects();
-        populateAccountSelects();
-        return;
-      }
+      if (!b){ contactsListDiv.textContent='No business selected.'; accountsListDiv.textContent='No business selected.'; populateContactSelects(); populateAccountSelects(); return; }
       if (!Array.isArray(b.contacts)) b.contacts = [];
       if (!Array.isArray(b.accounts)) b.accounts = [];
 
-      if (b.contacts.length === 0) {
-        contactsListDiv.innerHTML = '<div class="muted">No contacts for this business.</div>';
-      } else {
-        b.contacts.forEach(c => {
-          const d = document.createElement('div');
-          d.style.display = 'flex';
-          d.style.justifyContent = 'space-between';
-          d.style.padding = '4px 0';
-          d.innerHTML = `<div><strong>${escapeHtml(c.name)}</strong> <span class="muted">(${c.type})</span><br/><small class="muted">${escapeHtml(c.info || '')}</small></div>
-            <div style="display:flex;gap:6px"><button class="small" onclick="editContact('${c.id}')">Edit</button><button class="small danger" onclick="deleteContact('${c.id}')">Delete</button></div>`;
+      if (b.contacts.length === 0) contactsListDiv.innerHTML = '<div class="muted">No contacts for this business.</div>';
+      else {
+        b.contacts.forEach(c=>{
+          const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
+          d.innerHTML = `<div><strong>${escapeHtml(c.name)}</strong> <span class="muted">(${escapeHtml(c.type)})</span><br/><small class="muted">${escapeHtml(c.info||'')}</small></div>
+            <div style="display:flex;gap:6px"><button class="small" onclick="window.editContact('${c.id}')">Edit</button><button class="small danger" onclick="window.deleteContact('${c.id}')">Delete</button></div>`;
           contactsListDiv.appendChild(d);
         });
       }
 
-      if (b.accounts.length === 0) {
-        accountsListDiv.innerHTML = '<div class="muted">No accounts for this business.</div>';
-      } else {
-        b.accounts.forEach(a => {
-          const d = document.createElement('div');
-          d.style.display = 'flex';
-          d.style.justifyContent = 'space-between';
-          d.style.padding = '4px 0';
-          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> <span class="muted">(${a.type})</span><br/><small class="muted">${escapeHtml(a.notes || '')}</small></div>
-            <div style="display:flex;gap:6px"><button class="small" onclick="editAccount('${a.id}')">Edit</button><button class="small danger" onclick="deleteAccount('${a.id}')">Delete</button></div>`;
+      if (b.accounts.length === 0) accountsListDiv.innerHTML = '<div class="muted">No accounts for this business.</div>';
+      else {
+        b.accounts.forEach(a=>{
+          const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
+          const isWht = (b.whtAccountId && a.id === b.whtAccountId);
+          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''} <span class="muted">(${a.type})</span><br/><small class="muted">${escapeHtml(a.notes || '')}</small></div>
+            <div style="display:flex;gap:6px"><button class="small" onclick="window.editAccount('${a.id}')">Edit</button><button class="small danger" onclick="window.deleteAccount('${a.id}')">Delete</button></div>`;
           accountsListDiv.appendChild(d);
         });
       }
-
       populateContactSelects();
       populateAccountSelects();
     }
 
-    btnOpenContacts.addEventListener('click', () => {
-      contactModalTitle.textContent = 'Add Contact';
-      contactName.value = '';
-      contactType.value = 'Customer';
-      contactInfo.value = '';
-      contactNotes.value = '';
-      contactEditingId = null;
-      openModal(contactModal);
+    // Expose edit/delete contact/account for inline onclick (simple approach)
+    window.editContact = function(id){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const c = b.contacts.find(x=>x.id===id); if (!c) return;
+      contactModalTitle.textContent = 'Edit Contact'; contactName.value = c.name||''; contactType.value = c.type||'Customer'; contactInfo.value = c.info||''; contactNotes.value = c.notes||''; contactEditingId = c.id; openModal(contactModal);
+    };
+    window.deleteContact = function(id){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      if (!confirm('Delete contact?')) return;
+      b.contacts = b.contacts.filter(x=>x.id!==id);
+      // remove contact references from transactions
+      const txs = data.transactions[b.id] || [];
+      for (const t of txs) if (t.contactId === id) t.contactId = null;
+      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+    };
+
+    window.editAccount = function(id){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const a = b.accounts.find(x=>x.id===id); if (!a) return;
+      accountModalTitle.textContent = 'Edit Account'; accountCode.value = a.code||''; accountName.value = a.name||''; accountType.value = a.type||'Asset'; accountNotes.value = a.notes||''; accountEditingId = a.id; openModal(accountModal);
+    };
+    window.deleteAccount = function(id){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      if (b.whtAccountId === id) { if (!confirm('This is the WHT Payable account. Deleting will unset the WHT account. Continue?')) return; b.whtAccountId = null; }
+      b.accounts = b.accounts.filter(x=>x.id!==id);
+      // remove account refs from txns
+      const txs = data.transactions[b.id] || [];
+      for (const t of txs) if (t.accountId === id) t.accountId = null;
+      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+    };
+
+    btnOpenContacts.addEventListener('click', ()=>{
+      contactModalTitle.textContent = 'Add Contact'; contactName.value=''; contactType.value='Customer'; contactInfo.value=''; contactNotes.value=''; contactEditingId = null; openModal(contactModal);
+    });
+    btnAddContactInline.addEventListener('click', ()=>{
+      contactModalTitle.textContent = 'Add Contact'; contactName.value=''; contactType.value='Vendor'; contactInfo.value=''; contactNotes.value=''; contactEditingId = null; openModal(contactModal);
     });
 
-    btnOpenAccounts.addEventListener('click', () => {
-      accountModalTitle.textContent = 'Add Account';
-      accountCode.value = '';
-      accountName.value = '';
-      accountType.value = 'Asset';
-      accountNotes.value = '';
-      accountEditingId = null;
-      openModal(accountModal);
-    });
-
-    btnAddContactInline.addEventListener('click', () => {
-      contactModalTitle.textContent = 'Add Contact';
-      contactName.value = '';
-      contactType.value = 'Customer';
-      contactInfo.value = '';
-      contactNotes.value = '';
-      contactEditingId = null;
-      openModal(contactModal);
-    });
-
-    btnAddAccountInline.addEventListener('click', () => {
-      accountModalTitle.textContent = 'Add Account';
-      accountCode.value = '';
-      accountName.value = '';
-      accountType.value = 'Asset';
-      accountNotes.value = '';
-      accountEditingId = null;
-      openModal(accountModal);
-    });
-
-    contactSave.addEventListener('click', () => {
-      const b = findBiz(selectedBusinessId);
-      if (!b) { alert('Select a business first'); return; }
-      const name = (contactName.value || '').trim();
-      if (!name) { alert('Contact name required'); return; }
-      const info = (contactInfo.value || '').trim();
-      const notes = (contactNotes.value || '').trim();
-      const type = contactType.value || 'Customer';
-      if (contactEditingId) {
-        const c = b.contacts.find(x=>x.id===contactEditingId);
-        if (!c) return;
+    contactSave.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
+      const name = (contactName.value||'').trim(); if (!name) { alert('Contact name required'); return; }
+      const info = (contactInfo.value||'').trim(); const notes = (contactNotes.value||'').trim(); const type = contactType.value || 'Customer';
+      if (contactEditingId){
+        const c = b.contacts.find(x=>x.id===contactEditingId); if (!c) return;
         c.name = name; c.type = type; c.info = info; c.notes = notes;
       } else {
-        b.contacts.push({ id: uid('c'), name, type, info, notes });
+        const id = uid('c'); b.contacts.push({ id, name, type, info, notes });
       }
-      saveData();
-      closeModal(contactModal);
-      refreshContactsAccountsUI();
-      renderLedger();
+      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+    });
+    contactCancel.addEventListener('click', ()=> closeModal(contactModal));
+
+    btnOpenAccounts.addEventListener('click', ()=>{
+      accountModalTitle.textContent = 'Add Account'; accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountEditingId = null; openModal(accountModal);
+    });
+    btnAddAccountInline.addEventListener('click', ()=>{
+      accountModalTitle.textContent = 'Add Account'; accountCode.value=''; accountName.value=''; accountType.value='Expense'; accountNotes.value=''; accountEditingId = null; openModal(accountModal);
     });
 
-    contactCancel.addEventListener('click', () => closeModal(contactModal));
-
-    accountSave.addEventListener('click', () => {
-      const b = findBiz(selectedBusinessId);
-      if (!b) { alert('Select a business first'); return; }
-      const code = (accountCode.value || '').trim();
-      const name = (accountName.value || '').trim();
+    accountSave.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
+      const code = (accountCode.value||'').trim(); const name = (accountName.value||'').trim(); const type = accountType.value || 'Asset'; const notes = (accountNotes.value||'').trim();
       if (!name) { alert('Account name required'); return; }
-      const notes = (accountNotes.value || '').trim();
-      const type = accountType.value || 'Asset';
-      if (accountEditingId) {
-        const a = b.accounts.find(x=>x.id===accountEditingId);
-        if (!a) return;
+      if (accountEditingId){
+        const a = b.accounts.find(x=>x.id===accountEditingId); if (!a) return;
         a.code = code; a.name = name; a.type = type; a.notes = notes;
       } else {
-        b.accounts.push({ id: uid('a'), code, name, type, notes });
+        const id = uid('a'); b.accounts.push({ id, code, name, type, notes });
       }
-      saveData();
-      closeModal(accountModal);
-      refreshContactsAccountsUI();
-      renderLedger();
+      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
     });
+    accountCancel.addEventListener('click', ()=> closeModal(accountModal));
 
-    accountCancel.addEventListener('click', () => closeModal(accountModal));
-
-    window.editContact = function(contactId) {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      const c = b.contacts.find(x=>x.id===contactId);
-      if (!c) return;
-      contactModalTitle.textContent = 'Edit Contact';
-      contactName.value = c.name || '';
-      contactType.value = c.type || 'Customer';
-      contactInfo.value = c.info || '';
-      contactNotes.value = c.notes || '';
-      contactEditingId = c.id;
-      openModal(contactModal);
-    };
-
-    window.deleteContact = function(contactId) {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      if (!confirm('Delete this contact?')) return;
-      b.contacts = b.contacts.filter(c => c.id !== contactId);
-      // remove contact reference from transactions
-      const txs = data.transactions[b.id] || [];
-      txs.forEach(t => { if (t.contactId === contactId) t.contactId = null; });
-      saveData();
-      refreshContactsAccountsUI();
-      renderLedger();
-    };
-
-    window.editAccount = function(accountId) {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      const a = b.accounts.find(x=>x.id===accountId);
-      if (!a) return;
-      accountModalTitle.textContent = 'Edit Account';
-      accountCode.value = a.code || '';
-      accountName.value = a.name || '';
-      accountType.value = a.type || 'Asset';
-      accountNotes.value = a.notes || '';
-      accountEditingId = a.id;
-      openModal(accountModal);
-    };
-
-    window.deleteAccount = function(accountId) {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      if (!confirm('Delete this account?')) return;
-      b.accounts = b.accounts.filter(a => a.id !== accountId);
-      const txs = data.transactions[b.id] || [];
-      txs.forEach(t => { if (t.accountId === accountId) t.accountId = null; });
-      saveData();
-      refreshContactsAccountsUI();
-      renderLedger();
-    };
-
-    function populateContactSelects() {
-      const b = findBiz(selectedBusinessId);
-      [txnContact, editTxnContact].forEach(sel => {
+    // populate selects
+    function populateContactSelects(){
+      [txnContact, editTxnContact].forEach(sel=>{
         if (!sel) return;
         sel.innerHTML = '<option value="">(none)</option>';
+        const b = findBiz(selectedBusinessId);
         if (!b || !Array.isArray(b.contacts)) return;
-        b.contacts.forEach(c => {
-          const opt = document.createElement('option');
-          opt.value = c.id;
-          opt.textContent = `${c.name} (${c.type})`;
-          sel.appendChild(opt);
-        });
+        b.contacts.forEach(c=>{ const o = document.createElement('option'); o.value = c.id; o.textContent = c.name + ' (' + c.type + ')'; sel.appendChild(o); });
       });
     }
-
-    function populateAccountSelects() {
-      const b = findBiz(selectedBusinessId);
-      [txnAccount, editTxnAccount].forEach(sel => {
+    function populateAccountSelects(){
+      [txnAccount, editTxnAccount].forEach(sel=>{
         if (!sel) return;
         sel.innerHTML = '<option value="">(none)</option>';
+        const b = findBiz(selectedBusinessId);
         if (!b || !Array.isArray(b.accounts)) return;
-        b.accounts.forEach(a => {
-          const opt = document.createElement('option');
-          opt.value = a.id;
-          opt.textContent = `${a.code ? a.code + ' - ' : ''}${a.name} (${a.type})`;
-          sel.appendChild(opt);
-        });
+        // ensure WHT account exists if auto-create enabled
+        ensureBizWhtAccount(b);
+        b.accounts.forEach(a=>{ const o = document.createElement('option'); o.value=a.id; o.textContent=(a.code? a.code + ' - ':'') + a.name + ' (' + a.type + ')'; sel.appendChild(o); });
       });
     }
 
-    // Transactions
-    btnAddTxn.addEventListener('click', () => {
-      const date = document.getElementById('txnDate').value;
-      const type = document.getElementById('txnType').value;
-      const category = document.getElementById('txnCategory').value;
-      const desc = document.getElementById('txnDesc').value.trim();
-      const amount = parseFloat(document.getElementById('txnAmount').value) || 0;
-      const contactIdVal = txnContact.value || null;
-      const accountIdVal = txnAccount.value || null;
+    // Add transaction
+    btnAddTxn.addEventListener('click', ()=>{
+      if (!selectedBusinessId) return alert('Select a business first.');
+      const b = findBiz(selectedBusinessId);
+      const date = txnDate.value || new Date().toISOString().slice(0,10);
+      const type = txnType.value || 'Income';
+      const category = txnCategory.value || 'Other';
+      const desc = (txnDesc.value||'').trim();
+      const amount = Number(txnAmount.value) || 0;
+      const contactId = txnContact.value || null;
+      const accountId = txnAccount.value || null;
+      const authorUserId = selectedUserId;
 
-      if (!selectedUserId || !selectedBusinessId) {
-        alert('Select user and business before adding a transaction.');
-        return;
+      // WHT only relevant if Expense and toggled
+      const whtEnabledVal = !!txnWhtEnabled.checked && type === 'Expense';
+      const whtRateVal = whtEnabledVal ? (Number(txnWhtRate.value) || DEFAULT_WHT_RATE) : 0;
+      const whtAmountVal = whtEnabledVal ? (Math.round((amount * (whtRateVal/100)) * 100)/100) : 0;
+
+      // ensure WHT account exists if needed
+      let whtAccountIdVal = null;
+      if (whtEnabledVal && b){
+        if (!b.whtAccountId && b.whtAutoCreate) ensureBizWhtAccount(b);
+        whtAccountIdVal = b.whtAccountId || null;
       }
-      const biz = findBiz(selectedBusinessId);
-      if (!biz) { alert('Selected business not found'); return; }
-      if (!Array.isArray(biz.members) || !biz.members.includes(selectedUserId)) {
-        alert('You are not a member of the selected business. Ask the owner to add you as member.');
-        return;
-      }
-      if (!date || !desc || amount <= 0) {
-        alert('Please fill all fields and enter a valid amount.');
-        return;
-      }
-      const txn = { id: uid('txn'), date, type, category, desc, amount, authorUserId: selectedUserId, contactId: contactIdVal || null, accountId: accountIdVal || null };
+
+      const txn = {
+        id: uid('txn'),
+        date, type, category, desc,
+        amount,
+        contactId,
+        accountId,
+        authorUserId,
+        // WHT fields
+        whtEnabled: whtEnabledVal,
+        whtRate: whtRateVal,
+        whtAmount: whtAmountVal,
+        whtAccountId: whtAccountIdVal
+      };
+
       if (!data.transactions[selectedBusinessId]) data.transactions[selectedBusinessId] = [];
       data.transactions[selectedBusinessId].push(txn);
       saveData();
-      clearForm();
-      renderLedger();
-      calculateSummary();
+
+      // reset form minimal
+      txnDate.value=''; txnDesc.value=''; txnAmount.value=''; txnContact.value=''; txnAccount.value='';
+      txnWhtEnabled.checked = false; txnWhtRate.value = DEFAULT_WHT_RATE;
+
+      currentPage = 1; renderLedger(); calculateSummary(); refreshContactsAccountsUI();
     });
 
-    function clearForm() {
-      document.getElementById('txnDate').value = "";
-      document.getElementById('txnDesc').value = "";
-      document.getElementById('txnAmount').value = "";
-      document.getElementById('txnType').value = "Income";
-      document.getElementById('txnCategory').value = "Salary";
-      if (txnContact) txnContact.value = '';
-      if (txnAccount) txnAccount.value = '';
-    }
-
-    function renderLedger() {
+    // Render ledger
+    function renderLedger(){
       ledgerTbody.innerHTML = '';
-      if (!selectedUserId || !selectedBusinessId) {
-        ledgerFiltered = [];
-        updatePaginationControls();
-        return;
-      }
-      const allTxns = (data.transactions[selectedBusinessId]) || [];
-      const q = (ledgerFilterText || '').trim().toLowerCase();
-      ledgerFiltered = allTxns.filter(txn => {
+      const b = findBiz(selectedBusinessId);
+      const txns = (data.transactions[selectedBusinessId] || []).slice().sort((a,bx)=> new Date(bx.date) - new Date(a.date));
+      // apply filter
+      const q = (ledgerFilterText||'').toLowerCase().trim();
+      let filtered = txns.filter(t=>{
         if (!q) return true;
-        const author = findUser(txn.authorUserId);
-        const authorName = author ? (author.display || author.username) : '';
-        const contact = findContact(selectedBusinessId, txn.contactId);
-        const account = findAccount(selectedBusinessId, txn.accountId);
-        const contactName = contact ? contact.name : '';
-        const accountName = account ? (account.code ? account.code + ' ' + account.name : account.name) : '';
-        const parts = [ txn.date || '', txn.type || '', txn.category || '', txn.desc || '', String(txn.amount || ''), authorName, contactName, accountName ];
-        return parts.join(' ').toLowerCase().includes(q);
+        const parts = [t.date, t.type, t.category, t.desc, (t.amount||'').toString(), (t.authorUserId||''), (t.contactId||''), (t.accountId||'')].join(' ').toLowerCase();
+        return parts.indexOf(q) !== -1;
       });
-
-      const biz = findBiz(selectedBusinessId);
-      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
+      ledgerFiltered = filtered;
+      // pagination
+      const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
-      if (currentPage < 1) currentPage = 1;
-      const start = (currentPage - 1) * PAGE_SIZE;
-      const pageSlice = ledgerFiltered.slice(start, start + PAGE_SIZE);
+      const start = (currentPage-1)*PAGE_SIZE;
+      const pageItems = filtered.slice(start, start + PAGE_SIZE);
 
-      pageSlice.forEach((txn) => {
-        let vat = 0;
-        if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
-        const author = findUser(txn.authorUserId);
-        const authorName = author ? (author.display || author.username) : '(unknown)';
-        const contact = findContact(selectedBusinessId, txn.contactId);
-        const contactName = contact ? (contact.name + (contact.type ? ' ('+contact.type+')' : '')) : '';
-        const account = findAccount(selectedBusinessId, txn.accountId);
-        const accountName = account ? (account.code ? (account.code + ' - ' + account.name) : account.name) : '';
+      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+
+      pageItems.forEach(t=>{
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${txn.date}</td>
-          <td>${txn.type}</td>
-          <td>${txn.category}</td>
-          <td>${escapeHtml(txn.desc)}</td>
-          <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
-          <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
-          <td>${escapeHtml(contactName)}</td>
-          <td>${escapeHtml(accountName)}</td>
-          <td>${escapeHtml(authorName)}</td>
-          <td>
-            <div class="actions">
-              <button class="small" onclick="openEditModal('${txn.id}')">Edit</button>
-              <button class="small danger" onclick="removeTransaction('${txn.id}')">Delete</button>
-            </div>
+        const contact = findContact(selectedBusinessId, t.contactId);
+        const account = findAccount(selectedBusinessId, t.accountId);
+        const author = findUser(t.authorUserId);
+        tr.innerHTML = `<td class="nowrap">${escapeHtml(t.date)}</td>
+          <td>${escapeHtml(t.type)}</td>
+          <td>${escapeHtml(t.category)}</td>
+          <td>${escapeHtml(t.desc)}</td>
+          <td class="nowrap">${formatMoney(t.amount)}</td>
+          <td class="nowrap">${t.whtEnabled ? formatMoney(t.whtAmount) : ''}</td>
+          <td>${contact ? escapeHtml(contact.name) : ''}</td>
+          <td>${account ? escapeHtml((account.code?account.code+' - ':'')+account.name) : ''}</td>
+          <td>${author ? escapeHtml(author.display || author.username) : ''}</td>
+          <td style="white-space:nowrap">
+            <button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button>
+            <button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button>
           </td>`;
         ledgerTbody.appendChild(tr);
       });
-
-      updatePaginationControls();
     }
 
-    function updatePaginationControls() {
-      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
-      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
-      btnPrevPage.disabled = currentPage <= 1;
-      btnNextPage.disabled = currentPage >= totalPages;
-    }
-
-    btnPrevPage.addEventListener('click', () => {
-      if (currentPage > 1) {
-        currentPage--;
-        renderLedger();
-      }
-    });
-    btnNextPage.addEventListener('click', () => {
-      const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
-      if (currentPage < totalPages) {
-        currentPage++;
-        renderLedger();
-      }
-    });
-
-    btnSearch.addEventListener('click', () => {
-      ledgerFilterText = ledgerSearch.value || '';
-      currentPage = 1;
-      renderLedger();
-      calculateSummary();
-    });
-
-    btnClearSearch.addEventListener('click', () => {
-      ledgerSearch.value = '';
-      ledgerFilterText = '';
-      currentPage = 1;
-      renderLedger();
-      calculateSummary();
-    });
-
-    window.openEditModal = function(txnId) {
-      if (!selectedBusinessId) return;
+    // Expose open edit and delete for inline buttons
+    window.openEditTxn = function(txnId){
       const txns = data.transactions[selectedBusinessId] || [];
-      const idx = txns.findIndex(t => t.id === txnId);
-      if (idx === -1) return;
-      editIndex = idx;
-      const t = txns[idx];
-      editTxnDate.value = t.date;
-      editTxnType.value = t.type;
-      editTxnCategory.value = t.category;
-      editTxnDesc.value = t.desc;
-      editTxnAmount.value = t.amount;
+      const t = txns.find(x=>x.id===txnId); if (!t) return;
+      editTxnId = t.id;
+      editTxnDate.value = t.date || new Date().toISOString().slice(0,10);
+      editTxnType.value = t.type || 'Income';
+      editTxnCategory.value = t.category || 'Other';
+      editTxnDesc.value = t.desc || '';
+      editTxnAmount.value = t.amount || 0;
       populateContactSelects();
       populateAccountSelects();
       editTxnContact.value = t.contactId || '';
       editTxnAccount.value = t.accountId || '';
+      // WHT UI shown only for Expense type
+      if (t.type === 'Expense') { editWhtLabel.style.display = 'block'; editWhtRateLabel.style.display = 'block'; } else { editWhtLabel.style.display='none'; editWhtRateLabel.style.display='none'; }
+      editTxnWhtEnabled.checked = !!t.whtEnabled;
+      editTxnWhtRate.value = (typeof t.whtRate === 'number' && t.whtRate>0) ? t.whtRate : DEFAULT_WHT_RATE;
       openModal(editModal);
     };
 
-    window.removeTransaction = function(txnId) {
-      if (!selectedBusinessId) return;
-      if (!confirm('Delete this transaction?')) return;
-      const txns = data.transactions[selectedBusinessId] || [];
-      const idx = txns.findIndex(t=>t.id===txnId);
-      if (idx === -1) return;
-      txns.splice(idx,1);
-      saveData();
-      renderLedger();
-      calculateSummary();
+    window.deleteTxn = function(txnId){
+      if (!confirm('Delete transaction?')) return;
+      const arr = data.transactions[selectedBusinessId] || [];
+      data.transactions[selectedBusinessId] = arr.filter(x=>x.id !== txnId);
+      saveData(); renderLedger(); calculateSummary();
     };
 
-    function closeEditModal() {
-      closeModal(editModal);
-      editIndex = null;
-    }
-    window.closeEditModal = closeEditModal;
+    // Edit save
+    editSave.addEventListener('click', ()=>{
+      if (!editTxnId) return closeModal(editModal);
+      const txns = data.transactions[selectedBusinessId] || [];
+      const t = txns.find(x=>x.id===editTxnId); if (!t) return;
+      t.date = editTxnDate.value || new Date().toISOString().slice(0,10);
+      t.type = editTxnType.value || 'Income';
+      t.category = editTxnCategory.value || 'Other';
+      t.desc = (editTxnDesc.value||'').trim();
+      t.amount = Number(editTxnAmount.value) || 0;
+      t.contactId = editTxnContact.value || null;
+      t.accountId = editTxnAccount.value || null;
 
-    function saveEdit() {
-      if (editIndex === null) return;
-      const date = editTxnDate.value;
-      const type = editTxnType.value;
-      const category = editTxnCategory.value;
-      const desc = editTxnDesc.value.trim();
-      const amount = parseFloat(editTxnAmount.value) || 0;
-      const contactIdVal = editTxnContact.value || null;
-      const accountIdVal = editTxnAccount.value || null;
-      if (!date || !desc || amount <= 0) { alert('Fill fields and enter valid amount'); return; }
-      const txns = data.transactions[selectedBusinessId];
-      if (!txns || !txns[editIndex]) return;
-      const orig = txns[editIndex];
-      txns[editIndex] = { ...orig, date, type, category, desc, amount, contactId: contactIdVal, accountId: accountIdVal };
-      saveData();
-      closeEditModal();
-      renderLedger();
-      calculateSummary();
-    }
-    window.saveEdit = saveEdit;
+      // WHT behavior: if type Expense then allow WHT fields, else disable
+      const whtEnabledVal = !!editTxnWhtEnabled.checked && t.type === 'Expense';
+      const whtRateVal = whtEnabledVal ? (Number(editTxnWhtRate.value) || DEFAULT_WHT_RATE) : 0;
+      const whtAmountVal = whtEnabledVal ? (Math.round((t.amount * (whtRateVal/100)) * 100)/100) : 0;
+      t.whtEnabled = whtEnabledVal; t.whtRate = whtRateVal; t.whtAmount = whtAmountVal;
+      if (whtEnabledVal){
+        const b = findBiz(selectedBusinessId); if (b && !b.whtAccountId && b.whtAutoCreate) ensureBizWhtAccount(b);
+        t.whtAccountId = findBiz(selectedBusinessId) ? findBiz(selectedBusinessId).whtAccountId || null : null;
+      } else t.whtAccountId = null;
 
-    // Summaries and tax calculations
-    function calculateSummary() {
-      const biz = findBiz(selectedBusinessId);
-      const currency = (biz && biz.currency) ? biz.currency : '₦';
-      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
-      const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
-      const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
-      const vatEnabled = biz ? !!biz.vatEnabled : false;
-      const txns = ledgerFiltered && ledgerFiltered.length ? ledgerFiltered : (data.transactions[selectedBusinessId]) || [];
-
-      let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
-      let vatOutputTotal = 0, vatInputTotal = 0;
-      txns.forEach(txn => {
-        if (txn.type === 'Income') {
-          incomeTotal += txn.amount;
-          if (vatEnabled) vatOutputTotal += txn.amount * vatRate;
-        } else if (txn.type === 'Expense') {
-          expenseTotal += txn.amount;
-          if (vatEnabled) vatInputTotal += txn.amount * vatRate;
-          if (txn.category === 'Rent') rentTotal += txn.amount;
-        } else if (txn.type === 'Deduction') {
-          deductionTotal += txn.amount;
-        }
-      });
-
-      let netBalance = incomeTotal - expenseTotal;
-      let vatPayable = (vatOutputTotal - vatInputTotal);
-      let rentRelief = rentTotal * 0.20;
-      if (rentRelief > 500000) rentRelief = 500000;
-      let adjIncome = incomeTotal - deductionTotal - rentRelief;
-      if (adjIncome < 0) adjIncome = 0;
-      let tax = 0;
-      if (pitEnabled) tax = computeTax(adjIncome, biz);
-      let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
-
-      if (vatEnabled) {
-        vatSummaryDiv.style.display = '';
-        vatSummaryDiv.innerHTML =
-          `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
-           VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
-           VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
-           <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
-      } else {
-        vatSummaryDiv.style.display = 'none';
-        vatSummaryDiv.innerHTML = '';
-      }
-
-      totalsSummaryDiv.style.display = '';
-      totalsSummaryDiv.innerHTML =
-        `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
-         <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
-         <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
-         <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
-
-      if (pitEnabled) {
-        taxSummaryDiv.style.display = '';
-        taxSummaryDiv.innerHTML =
-          `<strong>Tax Calculation (PIT):</strong><br>
-           Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
-           Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
-           Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
-           <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
-           Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-           ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
-      } else {
-        taxSummaryDiv.style.display = 'none';
-        taxSummaryDiv.innerHTML = '';
-      }
-    }
-
-    function computeTax(adjIncome, biz) {
-      if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) return 0;
-      const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
-      let tax = 0;
-      if (adjIncome > (pit.threshold || DEFAULT_PIT.threshold)) {
-        let remaining = adjIncome - (pit.threshold || DEFAULT_PIT.threshold);
-        let prevUpper = (pit.threshold || DEFAULT_PIT.threshold);
-        for (let s of pit.slices) {
-          const upper = s.upTo;
-          let sliceLimit = (upper === Infinity) ? Infinity : (upper - prevUpper);
-          if (remaining <= 0) break;
-          const slice = Math.min(remaining, sliceLimit);
-          tax += slice * s.rate;
-          remaining -= slice;
-          prevUpper = upper;
-        }
-      }
-      return Math.round(tax);
-    }
-
-    // Utility helpers
-    function escapeHtml(s) {
-      if (!s) return '';
-      return String(s).replace(/[&<>"']/g, function(m) {
-        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m];
-      });
-    }
-    function formatNumber(n, decimals=2) {
-      if (typeof n !== 'number') n = Number(n) || 0;
-      return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-    }
-
-    // Export / Import
-    btnExport.addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'ntc-data.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      saveData(); closeModal(editModal); renderLedger(); calculateSummary(); refreshContactsAccountsUI();
     });
 
-    btnImport.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (ev) => {
-      const f = ev.target.files && ev.target.files[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
+    editCancel.addEventListener('click', ()=> closeModal(editModal));
+    editTxnType.addEventListener('change', ()=>{
+      const t = editTxnType.value;
+      if (t === 'Expense') { editWhtLabel.style.display='block'; editWhtRateLabel.style.display='block'; }
+      else { editWhtLabel.style.display='none'; editWhtRateLabel.style.display='none'; editTxnWhtEnabled.checked=false; }
+    });
+
+    // WHT inline visibility based on type selection
+    txnType.addEventListener('change', ()=>{
+      const t = txnType.value;
+      if (t === 'Expense'){ whtInlineLabel.style.display='inline-block'; whtRateInlineLabel.style.display='inline-block'; }
+      else { whtInlineLabel.style.display='none'; whtRateInlineLabel.style.display='none'; txnWhtEnabled.checked=false; }
+    });
+
+    // initial set visibility
+    txnType.dispatchEvent(new Event('change'));
+
+    // search & pagination
+    btnSearch.addEventListener('click', ()=>{ ledgerFilterText = ledgerSearch.value || ''; currentPage =1; renderLedger(); calculateSummary(); });
+    btnClearSearch.addEventListener('click', ()=>{ ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger(); calculateSummary(); });
+    btnPrevPage.addEventListener('click', ()=>{ if (currentPage>1) { currentPage--; renderLedger(); } });
+    btnNextPage.addEventListener('click', ()=>{ const totalPages = Math.max(1, Math.ceil((ledgerFiltered?ledgerFiltered.length:0)/PAGE_SIZE)); if (currentPage<totalPages){ currentPage++; renderLedger(); } });
+
+    // summary calculations (VAT, totals, WHT)
+    function calculateSummary(){
+      const b = findBiz(selectedBusinessId);
+      const txns = (data.transactions[selectedBusinessId] || []);
+      let totalIncome = 0, totalExpense = 0, totalWht = 0;
+      const whtByContact = {};
+      let vatCollected = 0, vatPaid = 0;
+      for (const t of txns){
+        // optionally you could filter by date range; here we summarize all for simplicity but show per selected period in report
+        if (t.type === 'Income') totalIncome += (t.amount || 0);
+        if (t.type === 'Expense') totalExpense += (t.amount || 0);
+        if (t.whtEnabled && t.whtAmount) {
+          totalWht += Number(t.whtAmount) || 0;
+          if (t.contactId) whtByContact[t.contactId] = (whtByContact[t.contactId] || 0) + Number(t.whtAmount || 0);
+        }
+        // basic VAT calc if enabled on business (assuming amounts include/exclude VAT not tracked here; kept illustrative)
+        if (b && b.vatEnabled && t.type === 'Income') { vatCollected += (t.amount || 0) * (b.vatRate/100); }
+        if (b && b.vatEnabled && t.type === 'Expense') { vatPaid += (t.amount || 0) * (b.vatRate/100); }
+      }
+
+      vatSummaryDiv.innerHTML = `<strong>VAT summary</strong><br/>Collected (est): ₦${formatMoney(vatCollected)} | Paid (est): ₦${formatMoney(vatPaid)}`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><br/>Income: ₦${formatMoney(totalIncome)} | Expense: ₦${formatMoney(totalExpense)} | Net: ₦${formatMoney(totalIncome - totalExpense)}`;
+
+      let whtHtml = `<strong>WHT</strong><br/>Total Withheld: ₦${formatMoney(totalWht)}`;
+      if (Object.keys(whtByContact).length){
+        whtHtml += '<br/><small class="muted">Breakdown by contact:</small><ul>';
+        Object.entries(whtByContact).forEach(([cid, amt])=>{
+          const c = findContact(selectedBusinessId, cid);
+          whtHtml += `<li>${c ? escapeHtml(c.name) : cid}: ₦${formatMoney(amt)}</li>`;
+        });
+        whtHtml += '</ul>';
+      }
+      taxSummaryDiv.innerHTML = whtHtml;
+    }
+
+    // Export/Import
+    btnExport.addEventListener('click', ()=>{
+      const content = JSON.stringify(data, null, 2);
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'ntc_data_export.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    btnImport.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', (e)=>{
+      const f = e.target.files[0]; if (!f) return;
+      const reader = new FileReader(); reader.onload = (ev)=>{
         try {
-          const parsed = JSON.parse(e.target.result);
-          if (parsed && typeof parsed === 'object') {
-            data = parsed;
-            saveData();
-            refreshUserBusinessSelectors();
-            ensureSelection();
-            refreshContactsAccountsUI();
-            renderLedger();
-            calculateSummary();
-            alert('Import successful');
-          } else alert('Invalid JSON');
-        } catch(err) { alert('Invalid JSON file'); }
+          const parsed = JSON.parse(ev.target.result);
+          if (!confirm('Import will replace current data. Continue?')) return;
+          data = parsed;
+          // basic migration / ensure structure
+          if (!data.transactions) data.transactions = {};
+          data.businesses = (data.businesses || []).map(b=>{ if (!Array.isArray(b.accounts)) b.accounts = []; if (!Array.isArray(b.contacts)) b.contacts = []; if (typeof b.whtAutoCreate === 'undefined') b.whtAutoCreate = true; if (!b.whtCode) b.whtCode='2300'; ensureBizWhtAccount(b); return b; });
+          saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+        } catch(err){ alert('Invalid file'); }
       };
       reader.readAsText(f);
     });
 
-    btnClearAll.addEventListener('click', () => {
-      if (!confirm('Clear all local data? This cannot be undone.')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      data = { users: [], businesses: [], transactions: {} };
-      selectedUserId = null; selectedBusinessId = null;
-      loadData();
-      refreshUserBusinessSelectors();
-      ensureSelection();
-      refreshContactsAccountsUI();
-      renderLedger();
-      calculateSummary();
+    btnClearAll.addEventListener('click', ()=>{
+      if (!confirm('Clear all data from local storage? This cannot be undone.')) return;
+      localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; location.reload();
     });
 
-    // Simple exports for contacts/accounts
-    btnExportContacts.addEventListener('click', () => {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(b.name||'business')}-contacts.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-    btnExportAccounts.addEventListener('click', () => {
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(b.name||'business')}-accounts.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-
-    // Reports (simple)
-    btnGenerateReport.addEventListener('click', () => {
+    // Reports generation with WHT inclusion
+    btnGenerateReport.addEventListener('click', ()=>{
       const type = reportType.value;
-      const from = reportDateFrom.value;
-      const to = reportDateTo.value;
-      const txns = (data.transactions[selectedBusinessId] || []).filter(t => {
-        if (from && t.date < from) return false;
-        if (to && t.date > to) return false;
+      const from = reportDateFrom.value ? new Date(reportDateFrom.value) : null;
+      const to = reportDateTo.value ? new Date(reportDateTo.value) : null;
+      const txns = (data.transactions[selectedBusinessId] || []).filter(t=>{
+        const dt = new Date(t.date);
+        if (from && dt < from) return false;
+        if (to && dt > to) return false;
         return true;
       });
-      if (type === 'vat') {
-        const b = findBiz(selectedBusinessId);
-        const vatRate = (b && typeof b.vatRate === 'number') ? (b.vatRate/100) : 0.075;
-        let out = 0, inp = 0;
-        txns.forEach(t => {
-          if (t.type === 'Income') out += t.amount * vatRate;
-          if (t.type === 'Expense') inp += t.amount * vatRate;
+      if (type === 'wht'){
+        // show WHT summary for the selected period
+        let totalWht = 0; const byContact = {};
+        txns.forEach(t=>{
+          if (t.whtEnabled && t.whtAmount) {
+            totalWht += t.whtAmount;
+            if (t.contactId) byContact[t.contactId] = (byContact[t.contactId] || 0) + t.whtAmount;
+          }
         });
-        reportOutput.innerHTML = `<strong>VAT report</strong><br>VAT Output: ${b.currency || '₦'}${formatNumber(out)}<br>VAT Input: ${b.currency || '₦'}${formatNumber(inp)}<br>VAT Payable: ${b.currency || '₦'}${formatNumber(out-inp)}`;
-      } else if (type === 'profit') {
-        let inc = 0, exp = 0;
-        txns.forEach(t => { if (t.type==='Income') inc += t.amount; if (t.type==='Expense') exp += t.amount; });
-        reportOutput.innerHTML = `<strong>Profit report</strong><br>Income: ${inc.toLocaleString()}<br>Expenses: ${exp.toLocaleString()}<br>Net: ${(inc-exp).toLocaleString()}`;
-      } else if (type === 'paye') {
-        calculateSummary();
-        reportOutput.innerHTML = `<strong>PAYE preview</strong><br/>See Tax summary panel for details.`;
+        let html = `<h3>WHT Report</h3><div>Total WHT Withheld: ₦${formatMoney(totalWht)}</div>`;
+        if (Object.keys(byContact).length){
+          html += '<h4>By contact</h4><ul>';
+          Object.entries(byContact).forEach(([cid, amt])=>{ const c = findContact(selectedBusinessId, cid); html += `<li>${c ? escapeHtml(c.name) : cid}: ₦${formatMoney(amt)}</li>`; });
+          html += '</ul>';
+        }
+        reportOutput.innerHTML = html;
+      } else {
+        reportOutput.innerHTML = `<div class="muted">Report type ${escapeHtml(type)} is not WHT-specific in this demo. Use WHT report for withholding breakdown.</div>`;
       }
     });
 
-    // Utilities used in inline onclicks
-    window.removeTransaction = window.removeTransaction;
-    window.openEditModal = window.openEditModal;
-    window.editContact = window.editContact;
-    window.deleteContact = window.deleteContact;
-    window.editAccount = window.editAccount;
-    window.deleteAccount = window.deleteAccount;
+    // Export CSV/JSON/HTML for ledger including WHT
+    btnExportJson.addEventListener('click', ()=>{
+      const txns = (data.transactions[selectedBusinessId] || []);
+      const out = txns.map(t=>({
+        id: t.id, date: t.date, type: t.type, category: t.category, desc: t.desc, amount: t.amount,
+        contactId: t.contactId, accountId: t.accountId, authorUserId: t.authorUserId,
+        whtEnabled: !!t.whtEnabled, whtRate: Number(t.whtRate)||0, whtAmount: Number(t.whtAmount)||0, whtAccountId: t.whtAccountId || null
+      }));
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
 
-    // Initial population of inline selects
-    populateContactSelects();
-    populateAccountSelects();
+    btnExportCsv.addEventListener('click', ()=>{
+      const txns = (data.transactions[selectedBusinessId] || []);
+      const headers = ['id','date','type','category','desc','amount','contactId','accountId','authorUserId','wht_enabled','wht_rate','wht_amount','wht_accountId'];
+      const lines = [headers.join(',')];
+      txns.forEach(t=>{
+        const vals = [
+          t.id,
+          t.date,
+          t.type,
+          `"${(t.category||'').replace(/"/g,'""')}"`,
+          `"${(t.desc||'').replace(/"/g,'""')}"`,
+          (t.amount||0),
+          t.contactId||'',
+          t.accountId||'',
+          t.authorUserId||'',
+          t.whtEnabled ? 'true' : 'false',
+          t.whtRate || 0,
+          t.whtAmount || 0,
+          t.whtAccountId || ''
+        ];
+        lines.push(vals.join(','));
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    btnExportHtml.addEventListener('click', ()=>{
+      const txns = (data.transactions[selectedBusinessId] || []);
+      let html = `<html><head><meta charset="utf-8"><title>Transactions</title></head><body><table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Desc</th><th>Amount</th><th>WHT</th></tr></thead><tbody>`;
+      txns.forEach(t=>{ html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.type)}</td><td>${escapeHtml(t.category)}</td><td>${escapeHtml(t.desc)}</td><td>${formatMoney(t.amount)}</td><td>${t.whtEnabled?formatMoney(t.whtAmount):''}</td></tr>`; });
+      html += `</tbody></table></body></html>`;
+      const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    // small helper exports for contacts/accounts
+    btnExportContacts.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business with contacts to export');
+      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'contacts.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+    btnExportAccounts.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business with accounts to export');
+      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'accounts.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    // populate initial selects and UI
+    refreshUserBusinessSelectors();
+    ensureSelection();
     refreshContactsAccountsUI();
+    renderLedger();
+    calculateSummary();
 
+    // make sure window functions exist for debugging (already used)
+    window.refreshContactsAccountsUI = refreshContactsAccountsUI;
+    window.renderLedger = renderLedger;
+    window.calculateSummary = calculateSummary;
+    window.ensureBizWhtAccount = ensureBizWhtAccount;
   </script>
+
   <footer>
-    <div class="muted">Built with Nigeria taxation basics in mind — demo data included. Contacts and Chart of Accounts are scoped per business. Transactions reference contact and account IDs.</div>
+    <div class="muted">Nigeria Simple Accounting & Tax — WHT added (default rate 5%). WHT toggled per Expense transaction and totals shown in tax summary. Data stored in localStorage under key: ntc_data_v2.</div>
   </footer>
 </body>
   </html>
