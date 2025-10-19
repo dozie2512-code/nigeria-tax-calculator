@@ -1136,160 +1136,110 @@
       renderMonthlyPayePitSummaries();
     }
 
-    // --- Monthly PAYE & PIT (pay-as-you-go) helpers & rendering ---
+    // --- PAYE & PIT helpers & rendering ---
     function _round2(v){ return Math.round((Number(v)||0) * 100) / 100; }
 
     /**
-     * Compute progressive tax on an annual amount using business PIT config.
-     * pit.threshold and pit.slices are expected to be annual.
+     * Compute progressive tax on taxable income using business PIT config.
+     * pit.threshold is subtracted from gross to get taxable income.
+     * pit.slices contains marginal tax bands with absolute upper bounds.
      */
-    function computeProgressiveAnnualTax(amountAnnual, pit){
-      amountAnnual = Number(amountAnnual) || 0;
+    function computeProgressiveAnnualTax(annualGross, pit){
+      annualGross = Number(annualGross) || 0;
       if (!pit || !Array.isArray(pit.slices)) return 0;
       const threshold = Number(pit.threshold) || 0;
-      const taxable = Math.max(0, amountAnnual - threshold);
+      const taxable = Math.max(0, annualGross - threshold);
       if (taxable <= 0) return 0;
-      let prev = 0;
+      
+      let previousUpTo = 0;
       let tax = 0;
-      for (const s of pit.slices){
-        const sliceTopRaw = (s.upTo === Infinity) ? Infinity : Number(s.upTo || 0);
-        // Convert slice top to taxable-space by subtracting threshold
-        const sliceTop = (sliceTopRaw === Infinity) ? Infinity : Math.max(0, sliceTopRaw - threshold);
-        const upper = (sliceTop === Infinity) ? taxable : Math.min(taxable, sliceTop);
-        const taxableInSlice = Math.max(0, upper - prev);
-        if (taxableInSlice > 0){
-          tax += taxableInSlice * (Number(s.rate) || 0);
-          prev += taxableInSlice;
+      
+      for (const slice of pit.slices){
+        const upTo = (slice.upTo === Infinity) ? Infinity : Number(slice.upTo || 0);
+        const rate = Number(slice.rate) || 0;
+        
+        if (taxable <= previousUpTo) break;
+        
+        const bandSize = (upTo === Infinity) ? (taxable - previousUpTo) : Math.min(taxable - previousUpTo, upTo - previousUpTo);
+        
+        if (bandSize > 0){
+          tax += bandSize * rate;
         }
-        if (prev >= taxable) break;
+        
+        previousUpTo = upTo;
+        if (upTo === Infinity || taxable <= upTo) break;
       }
+      
       return _round2(tax);
     }
 
     /**
-     * Build monthly summaries for a business.
-     * - Groups transactions by employee contact (contact.type === 'Employee') and by month (YYYY-MM).
-     * - For each employee-month: monthlyGross, annualizedGross = monthlyGross*12, annualTax = progressive(annualizedGross), monthlyTax = annualTax/12.
-     * Returns structures for rendering.
+     * Compute PAYE for a business for the current calendar year.
+     * Salary identification: transaction is salary if:
+     *   - contact.type === 'Employee' OR account.type === 'Expense'
+     * Aggregates for current calendar year only.
      */
-    function computeMonthlyPayePitSummariesForBusiness(bizId){
+    function computePayeForBusiness(bizId){
       const b = findBiz(bizId);
-      if (!b) return { perEmployee: {}, payeTotal: 0, pitAnnualTotal: 0 };
+      if (!b) return { annualGross: 0, annualTax: 0, monthlyTax: 0 };
 
       const txs = data.transactions[bizId] || [];
-      // map employeeId -> monthKey -> { gross }
-      const empMonthMap = {};
+      const currentYear = new Date().getFullYear();
+      let annualGross = 0;
+
       for (const t of txs){
-        if (!t) continue;
+        if (!t || !t.amount || t.amount <= 0) continue;
+        
+        // Parse transaction date
+        const txDate = t.date ? new Date(t.date) : null;
+        if (!txDate || isNaN(txDate.getTime())) continue;
+        if (txDate.getFullYear() !== currentYear) continue;
+        
+        // Check if this is a salary transaction
         const contact = t.contactId ? findContact(bizId, t.contactId) : null;
-        if (!contact || contact.type !== 'Employee') continue;
-        const contactId = contact.id;
-        const dateStr = (t.date || '').slice(0,7) || 'unknown'; // YYYY-MM
-        if (!empMonthMap[contactId]) empMonthMap[contactId] = {};
-        if (!empMonthMap[contactId][dateStr]) empMonthMap[contactId][dateStr] = { gross: 0 };
-        empMonthMap[contactId][dateStr].gross += Number(t.amount) || 0;
-      }
-
-      const perEmployee = {};
-      let payeTotal = 0;
-      let pitAnnualTotal = 0;
-
-      for (const contactId of Object.keys(empMonthMap)){
-        const contact = findContact(bizId, contactId) || { name: '(unknown)' };
-        const monthsObj = empMonthMap[contactId];
-        const months = Object.keys(monthsObj).sort();
-        let totalGross = 0;
-        let totalMonthlyWithheld = 0;
-        for (const m of months){
-          const mgross = Number(monthsObj[m].gross) || 0;
-          totalGross += mgross;
-          const annualized = mgross * 12;
-          const annualTax = computeProgressiveAnnualTax(annualized, b.pit || DEFAULT_PIT);
-          const monthlyTax = _round2(annualTax / 12);
-          monthsObj[m].monthlyTax = monthlyTax;
-          monthsObj[m].annualized = annualized;
-          monthsObj[m].annualTax = annualTax;
-          totalMonthlyWithheld += monthlyTax;
+        const account = t.accountId ? findAccount(bizId, t.accountId) : null;
+        
+        const isEmployee = contact && contact.type === 'Employee';
+        const isExpense = account && account.type === 'Expense';
+        
+        if (isEmployee || isExpense){
+          annualGross += Number(t.amount);
         }
-        const monthsCount = months.length || 0;
-        const avgMonthlyGross = monthsCount ? (totalGross / monthsCount) : 0;
-        const estAnnualized = avgMonthlyGross * 12;
-        const estAnnualTax = computeProgressiveAnnualTax(estAnnualized, b.pit || DEFAULT_PIT);
-        perEmployee[contactId] = {
-          name: contact.name || '(unknown)',
-          months: monthsObj,
-          monthsCount,
-          totalGross: _round2(totalGross),
-          totalMonthlyWithheld: _round2(totalMonthlyWithheld),
-          estimatedAnnualGross: _round2(estAnnualized),
-          estimatedAnnualTax: _round2(estAnnualTax),
-          estimatedMonthlyTax: _round2(estAnnualTax / 12)
-        };
-        payeTotal += totalMonthlyWithheld;
-        pitAnnualTotal += perEmployee[contactId].estimatedAnnualTax;
       }
 
-      payeTotal = _round2(payeTotal);
-      pitAnnualTotal = _round2(pitAnnualTotal);
+      annualGross = _round2(annualGross);
+      const pit = b.pit || DEFAULT_PIT;
+      const annualTax = computeProgressiveAnnualTax(annualGross, pit);
+      const monthlyTax = _round2(annualTax / 12);
 
-      return { perEmployee, payeTotal, pitAnnualTotal };
+      return { annualGross, annualTax, monthlyTax };
     }
 
     /**
-     * Render monthly PAYE & PIT UI.
-     * Call this at the end of calculateSummary() and after transactions change.
+     * Render PAYE summary UI showing minimal output.
      */
     function renderMonthlyPayePitSummaries(){
       const b = findBiz(selectedBusinessId);
       if (!b){
         payeSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
-        pitSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        pitSummaryDiv.innerHTML = '';
         return;
       }
 
-      if (!b.pit) b.pit = DEFAULT_PIT;
-      const { perEmployee, payeTotal, pitAnnualTotal } = computeMonthlyPayePitSummariesForBusiness(b.id);
-      const empKeys = Object.keys(perEmployee);
+      const { annualGross, annualTax, monthlyTax } = computePayeForBusiness(b.id);
 
-      // PAYE summary (monthly withholdings)
-      if (empKeys.length === 0){
-        payeSummaryDiv.innerHTML = '<div class="muted">No PAYE (no Employee transactions).</div>';
+      if (annualGross === 0){
+        payeSummaryDiv.innerHTML = '<div class="muted">No PAYE (no salary transactions in current year).</div>';
       } else {
-        let out = '<strong>PAYE withheld (monthly, per employee)</strong>';
-        out += '<table style="width:100%;margin-top:8px;border-collapse:collapse"><thead><tr style="background:#f2f6fa"><th style="padding:6px;border:1px solid #eee;text-align:left">Employee</th><th style="padding:6px;border:1px solid #eee;text-align:right">Months</th><th style="padding:6px;border:1px solid #eee;text-align:right">Total Gross (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Total PAYE Withheld (₦)</th></tr></thead><tbody>';
-        for (const k of empKeys){
-          const r = perEmployee[k];
-          out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(r.name)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">${r.monthsCount}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.totalGross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.totalMonthlyWithheld)}</td></tr>`;
-          // per-month detail
-          const monthKeys = Object.keys(r.months).sort();
-          if (monthKeys.length){
-            out += '<tr><td colspan="4" style="padding:0;border:0"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="padding:6px;border:1px solid #eee;background:#fafafa">Month</th><th style="padding:6px;border:1px solid #eee;background:#fafafa;text-align:right">Gross (₦)</th><th style="padding:6px;border:1px solid #eee;background:#fafafa;text-align:right">Monthly PAYE (₦)</th></tr></thead><tbody>';
-            for (const m of monthKeys){
-              const mm = r.months[m];
-              out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(m)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(mm.gross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(mm.monthlyTax)}</td></tr>`;
-            }
-            out += '</tbody></table></td></tr>';
-          }
-        }
-        out += `<tr style="font-weight:bold"><td style="padding:6px;border:1px solid #eee">Totals</td><td style="padding:6px;border:1px solid #eee"></td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(Object.values(perEmployee).reduce((s,x)=>s+(x.totalGross||0),0))}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(payeTotal)}</td></tr>`;
-        out += '</tbody></table>';
-        payeSummaryDiv.innerHTML = out;
+        payeSummaryDiv.innerHTML = `<strong>PAYE Summary (${new Date().getFullYear()})</strong>
+          <div style="margin-top:8px;">
+            Monthly PAYE: ₦ ${formatMoney(monthlyTax)}<br/>
+            Annual PAYE: ₦ ${formatMoney(annualTax)}
+          </div>`;
       }
-
-      // PIT summary (estimated annual liability based on observed months)
-      if (empKeys.length === 0){
-        pitSummaryDiv.innerHTML = '<div class="muted">No PIT liabilities (no Employee transactions).</div>';
-      } else {
-        let out = '<strong>PIT estimate (annual, based on observed months)</strong>';
-        out += '<table style="width:100%;margin-top:8px;border-collapse:collapse"><thead><tr style="background:#f2f6fa"><th style="padding:6px;border:1px solid #eee;text-align:left">Employee</th><th style="padding:6px;border:1px solid #eee;text-align:right">Months Observed</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Annual Gross (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Annual PIT (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Monthly PIT (₦)</th></tr></thead><tbody>';
-        for (const k of empKeys){
-          const r = perEmployee[k];
-          out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(r.name)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">${r.monthsCount}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedAnnualGross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedAnnualTax)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedMonthlyTax)}</td></tr>`;
-        }
-        out += `<tr style="font-weight:bold"><td style="padding:6px;border:1px solid #eee">Totals</td><td style="padding:6px;border:1px solid #eee"></td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(Object.values(perEmployee).reduce((s,x)=>s+(x.estimatedAnnualGross||0),0))}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(pitAnnualTotal)}</td><td style="padding:6px;border:1px solid #eee"></td></tr>`;
-        out += '</tbody></table>';
-        pitSummaryDiv.innerHTML = out;
-      }
+      
+      // Clear PIT summary as we're only showing PAYE now
+      pitSummaryDiv.innerHTML = '';
     }
 
     // Make available for debugging/testing if needed
