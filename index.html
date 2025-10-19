@@ -98,6 +98,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         </label>
         <label>Description: <input type="text" id="txnDesc" placeholder="Details" /></label>
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
+        <label><input type="checkbox" id="txnWhtEnabled" /> Withhold WHT</label>
+        <label>WHT rate (%): <input type="number" id="txnWhtRate" min="0" max="100" step="0.01" value="5" style="width:80px;" /></label>
         <label>Contact:
           <select id="txnContact"></select>
         </label>
@@ -108,7 +110,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         <button class="small" id="btnAddAccountInline">+ Account</button>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. Each transaction records its author (selected user). Business members can view/add transactions depending on membership. Contacts and Accounts are scoped per business.</small>
+      <small class="note">Transactions are saved at the business level. Each transaction records its author (selected user). Business members can view/add transactions depending on membership. Contacts and Accounts are scoped per business. WHT (Withholding Tax) applies to Expense transactions at a default rate of 5%.</small>
     </section>
 
     <section class="panel section">
@@ -129,6 +131,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
             <th>Description</th>
             <th>Amount (₦)</th>
             <th>VAT (₦)</th>
+            <th>WHT (₦)</th>
             <th>Contact</th>
             <th>Account</th>
             <th>Author</th>
@@ -267,6 +270,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     </label><br/>
     <label>Description: <input type="text" id="editTxnDesc" /></label><br/>
     <label>Amount (₦): <input type="number" id="editTxnAmount" min="0" step="0.01" /></label><br/>
+    <label><input type="checkbox" id="editTxnWhtEnabled" /> Withhold WHT</label><br/>
+    <label>WHT rate (%): <input type="number" id="editTxnWhtRate" min="0" max="100" step="0.01" value="5" style="width:80px;" /></label><br/>
     <label>Contact:
       <select id="editTxnContact"></select>
     </label><br/>
@@ -357,6 +362,30 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
 
     function uid(prefix='id') { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
 
+    function ensureWHTAccount(b) {
+      if (!b) return;
+      if (!Array.isArray(b.accounts)) b.accounts = [];
+      // Check if WHT Payable account already exists
+      if (b.whtAccountId) {
+        const existing = b.accounts.find(a => a.id === b.whtAccountId);
+        if (existing) return; // Already exists and is valid
+      }
+      // Look for existing account with code 2300
+      let whtAccount = b.accounts.find(a => a.code === '2300');
+      if (!whtAccount) {
+        // Create new WHT Payable account
+        whtAccount = {
+          id: uid('a'),
+          code: '2300',
+          name: 'WHT Payable',
+          type: 'Liability',
+          notes: 'Withholding Tax Payable'
+        };
+        b.accounts.push(whtAccount);
+      }
+      b.whtAccountId = whtAccount.id;
+    }
+
     function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
     function migrateOldTransactions(oldTxns) {
@@ -418,8 +447,23 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
               if (typeof b.pitEnabled === 'undefined') b.pitEnabled = true;
               if (!b.pit) b.pit = DEFAULT_PIT;
               if (b.ownerId && !b.members.includes(b.ownerId)) b.members.push(b.ownerId);
+              // Ensure WHT Payable account exists
+              ensureWHTAccount(b);
               return b;
             });
+            // Migrate transactions to include WHT fields if missing
+            for (const bizId of Object.keys(data.transactions)) {
+              const txns = data.transactions[bizId];
+              if (Array.isArray(txns)) {
+                data.transactions[bizId] = txns.map(t => {
+                  if (typeof t.whtEnabled === 'undefined') t.whtEnabled = false;
+                  if (typeof t.whtRate === 'undefined') t.whtRate = 5;
+                  if (typeof t.whtAmount === 'undefined') t.whtAmount = 0;
+                  if (typeof t.whtAccountId === 'undefined') t.whtAccountId = null;
+                  return t;
+                });
+              }
+            }
             return;
           }
         } catch(e) { console.error('Invalid saved data', e); }
@@ -428,6 +472,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       // default demo (new structure)
       const userId = uid('user');
       const bizId = uid('biz');
+      const whtAccId = uid('a');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
         businesses: [{
@@ -441,6 +486,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           notes: 'Sample business',
           vatEnabled: true,
           pitEnabled: true,
+          whtAccountId: whtAccId,
           contacts: [
             { id: uid('c'), name: 'ACME Co', type: 'Customer', info: 'acme@example.com', notes: '' },
             { id: uid('c'), name: 'Office Supplies Ltd', type: 'Vendor', info: '0803-xxx', notes: '' },
@@ -449,6 +495,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           accounts: [
             { id: uid('a'), code: '1000', name: 'Cash', type: 'Asset', notes: '' },
             { id: uid('a'), code: '2000', name: 'Accounts Payable', type: 'Liability', notes: '' },
+            { id: whtAccId, code: '2300', name: 'WHT Payable', type: 'Liability', notes: 'Withholding Tax Payable' },
             { id: uid('a'), code: '4000', name: 'Sales Revenue', type: 'Revenue', notes: '' },
             { id: uid('a'), code: '5000', name: 'Rent Expense', type: 'Expense', notes: '' }
           ],
@@ -457,8 +504,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         transactions: {}
       };
       data.transactions[bizId] = [
-        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts[2].id },
-        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts[3].id }
+        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts[3].id, whtEnabled: false, whtRate: 5, whtAmount: 0, whtAccountId: null },
+        { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts[4].id, whtEnabled: false, whtRate: 5, whtAmount: 0, whtAccountId: null }
       ];
       saveData();
     }
@@ -546,6 +593,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
     const editTxnCategory = document.getElementById('editTxnCategory');
     const editTxnDesc = document.getElementById('editTxnDesc');
     const editTxnAmount = document.getElementById('editTxnAmount');
+    const editTxnWhtEnabled = document.getElementById('editTxnWhtEnabled');
+    const editTxnWhtRate = document.getElementById('editTxnWhtRate');
     const editTxnContact = document.getElementById('editTxnContact');
     const editTxnAccount = document.getElementById('editTxnAccount');
 
@@ -863,9 +912,10 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         b.notes = (bizNotes.value || '').trim();
         b.vatEnabled = vatEnabledVal;
         b.pitEnabled = pitEnabledVal;
+        ensureWHTAccount(b);
       } else {
         const id = uid('biz');
-        data.businesses.push({
+        const newBiz = {
           id, name, ownerId: ownerIdVal, members,
           vatRate: isNaN(vat) ? 7.5 : vat,
           currency,
@@ -876,7 +926,9 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           contacts: [],
           accounts: [],
           pit: DEFAULT_PIT
-        });
+        };
+        ensureWHTAccount(newBiz);
+        data.businesses.push(newBiz);
         if (!data.transactions[id]) data.transactions[id] = [];
       }
       saveData();
@@ -1124,6 +1176,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       const amount = parseFloat(document.getElementById('txnAmount').value) || 0;
       const contactIdVal = txnContact.value || null;
       const accountIdVal = txnAccount.value || null;
+      const whtEnabled = document.getElementById('txnWhtEnabled').checked;
+      const whtRate = parseFloat(document.getElementById('txnWhtRate').value) || 5;
 
       if (!selectedUserId || !selectedBusinessId) {
         alert('Select user and business before adding a transaction.');
@@ -1139,7 +1193,30 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         alert('Please fill all fields and enter a valid amount.');
         return;
       }
-      const txn = { id: uid('txn'), date, type, category, desc, amount, authorUserId: selectedUserId, contactId: contactIdVal || null, accountId: accountIdVal || null };
+
+      // Calculate WHT amount
+      let whtAmount = 0;
+      let whtAccountId = null;
+      if (whtEnabled && type === 'Expense') {
+        whtAmount = amount * (whtRate / 100);
+        whtAccountId = biz.whtAccountId || null;
+      }
+
+      const txn = { 
+        id: uid('txn'), 
+        date, 
+        type, 
+        category, 
+        desc, 
+        amount, 
+        authorUserId: selectedUserId, 
+        contactId: contactIdVal || null, 
+        accountId: accountIdVal || null,
+        whtEnabled: whtEnabled && type === 'Expense',
+        whtRate: whtRate,
+        whtAmount: whtAmount,
+        whtAccountId: whtAccountId
+      };
       if (!data.transactions[selectedBusinessId]) data.transactions[selectedBusinessId] = [];
       data.transactions[selectedBusinessId].push(txn);
       saveData();
@@ -1154,6 +1231,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       document.getElementById('txnAmount').value = "";
       document.getElementById('txnType').value = "Income";
       document.getElementById('txnCategory').value = "Salary";
+      document.getElementById('txnWhtEnabled').checked = false;
+      document.getElementById('txnWhtRate').value = "5";
       if (txnContact) txnContact.value = '';
       if (txnAccount) txnAccount.value = '';
     }
@@ -1190,6 +1269,13 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       pageSlice.forEach((txn) => {
         let vat = 0;
         if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
+        
+        // Display WHT for Expense transactions where whtEnabled is true
+        let whtDisplay = '';
+        if (txn.whtEnabled && txn.type === 'Expense' && txn.whtAmount > 0) {
+          whtDisplay = (biz && biz.currency ? biz.currency : '₦') + formatNumber(txn.whtAmount);
+        }
+        
         const author = findUser(txn.authorUserId);
         const authorName = author ? (author.display || author.username) : '(unknown)';
         const contact = findContact(selectedBusinessId, txn.contactId);
@@ -1204,6 +1290,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           <td>${escapeHtml(txn.desc)}</td>
           <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
           <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
+          <td>${whtDisplay}</td>
           <td>${escapeHtml(contactName)}</td>
           <td>${escapeHtml(accountName)}</td>
           <td>${escapeHtml(authorName)}</td>
@@ -1267,6 +1354,8 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       editTxnCategory.value = t.category;
       editTxnDesc.value = t.desc;
       editTxnAmount.value = t.amount;
+      editTxnWhtEnabled.checked = t.whtEnabled || false;
+      editTxnWhtRate.value = t.whtRate || 5;
       populateContactSelects();
       populateAccountSelects();
       editTxnContact.value = t.contactId || '';
@@ -1301,11 +1390,38 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
       const amount = parseFloat(editTxnAmount.value) || 0;
       const contactIdVal = editTxnContact.value || null;
       const accountIdVal = editTxnAccount.value || null;
+      const whtEnabled = editTxnWhtEnabled.checked;
+      const whtRate = parseFloat(editTxnWhtRate.value) || 5;
+      
       if (!date || !desc || amount <= 0) { alert('Fill fields and enter valid amount'); return; }
+      
+      const biz = findBiz(selectedBusinessId);
+      
+      // Calculate WHT amount
+      let whtAmount = 0;
+      let whtAccountId = null;
+      if (whtEnabled && type === 'Expense') {
+        whtAmount = amount * (whtRate / 100);
+        whtAccountId = biz && biz.whtAccountId ? biz.whtAccountId : null;
+      }
+      
       const txns = data.transactions[selectedBusinessId];
       if (!txns || !txns[editIndex]) return;
       const orig = txns[editIndex];
-      txns[editIndex] = { ...orig, date, type, category, desc, amount, contactId: contactIdVal, accountId: accountIdVal };
+      txns[editIndex] = { 
+        ...orig, 
+        date, 
+        type, 
+        category, 
+        desc, 
+        amount, 
+        contactId: contactIdVal, 
+        accountId: accountIdVal,
+        whtEnabled: whtEnabled && type === 'Expense',
+        whtRate: whtRate,
+        whtAmount: whtAmount,
+        whtAccountId: whtAccountId
+      };
       saveData();
       closeEditModal();
       renderLedger();
@@ -1325,6 +1441,9 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
 
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
       let vatOutputTotal = 0, vatInputTotal = 0;
+      let whtTotal = 0;
+      const whtByContact = {};
+      
       txns.forEach(txn => {
         if (txn.type === 'Income') {
           incomeTotal += txn.amount;
@@ -1333,6 +1452,19 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
           expenseTotal += txn.amount;
           if (vatEnabled) vatInputTotal += txn.amount * vatRate;
           if (txn.category === 'Rent') rentTotal += txn.amount;
+          
+          // Calculate WHT for Expense transactions
+          if (txn.whtEnabled && txn.whtAmount > 0) {
+            whtTotal += txn.whtAmount;
+            if (txn.contactId) {
+              const contact = findContact(selectedBusinessId, txn.contactId);
+              const contactName = contact ? contact.name : 'Unknown Contact';
+              if (!whtByContact[contactName]) {
+                whtByContact[contactName] = 0;
+              }
+              whtByContact[contactName] += txn.whtAmount;
+            }
+          }
         } else if (txn.type === 'Deduction') {
           deductionTotal += txn.amount;
         }
@@ -1369,6 +1501,19 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
 
       if (pitEnabled) {
         taxSummaryDiv.style.display = '';
+        let whtSection = '';
+        if (whtTotal > 0) {
+          whtSection = `<br><br><strong>WHT Summary:</strong><br>
+           Total WHT withheld: ${currency}${formatNumber(whtTotal)}<br>`;
+          const contactNames = Object.keys(whtByContact).sort();
+          if (contactNames.length > 0) {
+            whtSection += '<strong>WHT by Contact:</strong><br>';
+            contactNames.forEach(name => {
+              whtSection += `  ${escapeHtml(name)}: ${currency}${formatNumber(whtByContact[name])}<br>`;
+            });
+          }
+        }
+        
         taxSummaryDiv.innerHTML =
           `<strong>Tax Calculation (PIT):</strong><br>
            Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
@@ -1376,7 +1521,7 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
            Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
            <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
            Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-           ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
+           ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}${whtSection}`;
       } else {
         taxSummaryDiv.style.display = 'none';
         taxSummaryDiv.innerHTML = '';
@@ -1513,6 +1658,149 @@ GitHub Copilot Chat Assistant — Updated index.html follows.
         calculateSummary();
         reportOutput.innerHTML = `<strong>PAYE preview</strong><br/>See Tax summary panel for details.`;
       }
+    });
+
+    // Export handlers for reports
+    btnExportHtml.addEventListener('click', () => {
+      const from = reportDateFrom.value;
+      const to = reportDateTo.value;
+      const txns = (data.transactions[selectedBusinessId] || []).filter(t => {
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        return true;
+      });
+      const biz = findBiz(selectedBusinessId);
+      const currency = (biz && biz.currency) ? biz.currency : '₦';
+      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+      
+      let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Transaction Report</title><style>
+        body{font-family:Arial;margin:20px} table{border-collapse:collapse;width:100%} 
+        th,td{border:1px solid #ddd;padding:8px;text-align:left} th{background:#f2f6fa}
+      </style></head><body><h1>Transaction Report</h1>`;
+      
+      if (from || to) {
+        html += `<p>Period: ${from || '(start)'} to ${to || '(end)'}</p>`;
+      }
+      
+      html += `<table><thead><tr>
+        <th>Date</th><th>Type</th><th>Category</th><th>Description</th>
+        <th>Amount</th><th>VAT</th><th>WHT</th><th>Contact</th><th>Account</th><th>Author</th>
+      </tr></thead><tbody>`;
+      
+      txns.forEach(t => {
+        const vat = (biz && biz.vatEnabled && (t.type === 'Income' || t.type === 'Expense')) ? t.amount * vatRate : 0;
+        const wht = (t.whtEnabled && t.whtAmount) ? t.whtAmount : 0;
+        const author = findUser(t.authorUserId);
+        const contact = findContact(selectedBusinessId, t.contactId);
+        const account = findAccount(selectedBusinessId, t.accountId);
+        
+        html += `<tr>
+          <td>${escapeHtml(t.date)}</td>
+          <td>${escapeHtml(t.type)}</td>
+          <td>${escapeHtml(t.category)}</td>
+          <td>${escapeHtml(t.desc)}</td>
+          <td>${currency}${formatNumber(t.amount)}</td>
+          <td>${vat > 0 ? currency + formatNumber(vat) : ''}</td>
+          <td>${wht > 0 ? currency + formatNumber(wht) : ''}</td>
+          <td>${contact ? escapeHtml(contact.name) : ''}</td>
+          <td>${account ? escapeHtml(account.name) : ''}</td>
+          <td>${author ? escapeHtml(author.display || author.username) : ''}</td>
+        </tr>`;
+      });
+      
+      html += `</tbody></table></body></html>`;
+      
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${new Date().toISOString().slice(0,10)}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    btnExportCsv.addEventListener('click', () => {
+      const from = reportDateFrom.value;
+      const to = reportDateTo.value;
+      const txns = (data.transactions[selectedBusinessId] || []).filter(t => {
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        return true;
+      });
+      const biz = findBiz(selectedBusinessId);
+      const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
+      
+      let csv = 'Date,Type,Category,Description,Amount,VAT,WHT_Enabled,WHT_Rate,WHT_Amount,Contact,Account,Author\n';
+      txns.forEach(t => {
+        const vat = (biz && biz.vatEnabled && (t.type === 'Income' || t.type === 'Expense')) ? t.amount * vatRate : 0;
+        const author = findUser(t.authorUserId);
+        const contact = findContact(selectedBusinessId, t.contactId);
+        const account = findAccount(selectedBusinessId, t.accountId);
+        
+        const row = [
+          t.date,
+          t.type,
+          t.category,
+          `"${(t.desc || '').replace(/"/g, '""')}"`,
+          t.amount,
+          vat.toFixed(2),
+          t.whtEnabled ? 'true' : 'false',
+          t.whtRate || 5,
+          (t.whtAmount || 0).toFixed(2),
+          contact ? `"${contact.name.replace(/"/g, '""')}"` : '',
+          account ? `"${account.name.replace(/"/g, '""')}"` : '',
+          author ? `"${(author.display || author.username).replace(/"/g, '""')}"` : ''
+        ];
+        csv += row.join(',') + '\n';
+      });
+      
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    btnExportJson.addEventListener('click', () => {
+      const from = reportDateFrom.value;
+      const to = reportDateTo.value;
+      const txns = (data.transactions[selectedBusinessId] || []).filter(t => {
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        return true;
+      });
+      
+      const exportData = txns.map(t => {
+        const author = findUser(t.authorUserId);
+        const contact = findContact(selectedBusinessId, t.contactId);
+        const account = findAccount(selectedBusinessId, t.accountId);
+        
+        return {
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          description: t.desc,
+          amount: t.amount,
+          whtEnabled: t.whtEnabled || false,
+          whtRate: t.whtRate || 5,
+          whtAmount: t.whtAmount || 0,
+          whtAccountId: t.whtAccountId || null,
+          contact: contact ? { id: contact.id, name: contact.name, type: contact.type } : null,
+          account: account ? { id: account.id, code: account.code, name: account.name } : null,
+          author: author ? { id: author.id, username: author.username, display: author.display } : null
+        };
+      });
+      
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     });
 
     // Utilities used in inline onclicks
