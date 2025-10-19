@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Nigeria Simple Accounting & Tax Software with VAT & WHT (Multi-user / Multi-business)</title>
+  <title>Nigeria Simple Accounting & Tax Software with VAT & WHT & PAYE (Multi-user / Multi-business)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --gap:12px; --muted:#666; --danger:#b00; --accent:#0077cc; --bg:#f8f9fb; }
@@ -41,7 +41,7 @@
 </head>
 <body>
   <header>
-    <h1>Nigeria Accounting & Tax (VAT & WHT) — Multi-user / Multi-business</h1>
+    <h1>Nigeria Accounting & Tax (VAT, WHT, PAYE & PIT) — Multi-user / Multi-business</h1>
     <div class="controls panel">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <label for="userSelect">User:</label>
@@ -96,7 +96,7 @@
 
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions. Default WHT rate is 5% per transaction.</small>
+      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions. Default WHT rate is 5% per transaction. PAYE is calculated monthly for Employee contacts using business PIT rules.</small>
     </section>
 
     <section class="panel section">
@@ -134,6 +134,8 @@
 
       <div class="vat-summary" id="vatSummary"></div>
       <div class="wht-summary" id="whtSummary"></div>
+      <div class="paye-summary totals" id="payeSummary" style="margin-top:10px;"></div>
+      <div class="pit-summary totals" id="pitSummary" style="margin-top:10px;"></div>
       <div class="totals" id="totalsSummary"></div>
       <div class="tax-summary" id="taxSummary"></div>
     </section>
@@ -288,7 +290,7 @@
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant — full index.html script (with WHT summary inserted after VAT summary)
+    // GitHub Copilot Chat Assistant — complete index.html script with monthly PAYE & PIT
     const STORAGE_KEY = 'ntc_data_v2';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -407,6 +409,7 @@
       data.transactions[bizId] = [
         { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: contact1.id, accountId: accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate: 0 },
         { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.type==='Expense').id, whtEnabled: true, whtRate: 5 },
+        { id: uid('txn'), date: now, desc: 'Salary - John Employee', amount: 180000, authorUserId: userId, contactId: contact3.id, accountId: accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 0 }
       ];
       saveData();
     }
@@ -439,6 +442,8 @@
     const whtSummaryDiv = document.getElementById('whtSummary');
     const totalsSummaryDiv = document.getElementById('totalsSummary');
     const taxSummaryDiv = document.getElementById('taxSummary');
+    const payeSummaryDiv = document.getElementById('payeSummary');
+    const pitSummaryDiv = document.getElementById('pitSummary');
 
     const modalOverlay = document.getElementById('modalOverlay');
 
@@ -549,6 +554,7 @@
     refreshContactsAccountsUI();
     renderLedger();
     calculateSummary();
+    renderMonthlyPayePitSummaries();
 
     // modal helpers
     function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; modal.setAttribute('aria-hidden','false'); }
@@ -652,6 +658,7 @@
       refreshUserBusinessSelectors();
       renderLedger();
       calculateSummary();
+      renderMonthlyPayePitSummaries();
     });
 
     userSave.addEventListener('click', ()=>{
@@ -675,7 +682,7 @@
       const owned = data.businesses.find(b => Array.isArray(b.members) && b.members.includes(selectedUserId));
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
-      currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary();
+      currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
     // Business actions
@@ -724,6 +731,7 @@
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderMonthlyPayePitSummaries();
     });
 
     bizSave.addEventListener('click', ()=>{
@@ -770,13 +778,13 @@
         data.businesses.push(newBiz);
         if (!data.transactions[newBiz.id]) data.transactions[newBiz.id] = [];
       }
-      saveData(); closeModal(businessModal); refreshUserBusinessSelectors(); ensureSelection(); currentPage=1; renderLedger(); calculateSummary();
+      saveData(); closeModal(businessModal); refreshUserBusinessSelectors(); ensureSelection(); currentPage=1; renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
     bizCancel.addEventListener('click', ()=> closeModal(businessModal));
 
     businessSelect.addEventListener('change', (e)=>{
-      selectedBusinessId = e.target.value; currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary(); refreshContactsAccountsUI();
+      selectedBusinessId = e.target.value; currentPage = 1; refreshUserBusinessSelectors(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); refreshContactsAccountsUI();
     });
 
     // Contacts & Accounts UI
@@ -824,7 +832,7 @@
       b.contacts = b.contacts.filter(x=>x.id!==id);
       const txs = data.transactions[b.id] || [];
       for (const t of txs) if (t.contactId === id) t.contactId = null;
-      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     };
 
     window.editAccount = function(id){
@@ -839,7 +847,7 @@
       b.accounts = b.accounts.filter(x=>x.id!==id);
       const txs = data.transactions[b.id] || [];
       for (const t of txs) if (t.accountId === id) t.accountId = null;
-      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     };
 
     btnOpenContacts.addEventListener('click', ()=>{
@@ -859,7 +867,7 @@
       } else {
         const id = uid('c'); b.contacts.push({ id, name, type, info, notes });
       }
-      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
     contactCancel.addEventListener('click', ()=> closeModal(contactModal));
 
@@ -880,7 +888,7 @@
       } else {
         const id = uid('a'); b.accounts.push({ id, code, name, type, notes });
       }
-      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
     accountCancel.addEventListener('click', ()=> closeModal(accountModal));
 
@@ -954,11 +962,11 @@
       const id = uid('txn'); const t = { id, date, desc, amount, authorUserId: selectedUserId, contactId: contactId || null, accountId: accountId || null, whtEnabled: whtEnabledVal, whtRate: whtRateVal };
       if (!data.transactions[b.id]) data.transactions[b.id] = [];
       data.transactions[b.id].unshift(t);
-      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary();
+      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
     // render ledger with pagination and search
-    function getFilteredTransactions(){ const all = data.transactions[selectedBusinessId] || []; if (!ledgerFilterText) return all; const q = ledgerFilterText.toLowerCase(); return all.filter(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? (acc.code+' '+acc.name+' '+acc.type) : ''; const contact = findContact(selectedBusinessId, t.contactId); const contactText = contact ? contact.name : ''; const author = findUser(t.authorUserId); const authorText = author ? (author.display||author.username) : ''; return (String(t.date||'').toLowerCase().includes(q) || String(t.desc||'').toLowerCase().includes(q) || String(t.amount||'').toLowerCase().includes(q) || accText.toLowerCase().includes(q) || contactText.toLowerCase().includes(q) || authorText.toLowerCase().includes(q)); }); }
+    function getFilteredTransactions(){ const all = data.transactions[selectedBusinessId] || []; if (!ledgerFilterText) return all; const q = ledgerFilterText.toLowerCase(); return all.filter(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' ('+acc.type+')') : ''; const contact = findContact(selectedBusinessId, t.contactId); const contactText = contact ? contact.name : ''; const author = findUser(t.authorUserId); const authorText = author ? (author.display||author.username) : ''; return ((t.date||'').toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q) || String(t.amount||'').toLowerCase().includes(q) || accText.toLowerCase().includes(q) || contactText.toLowerCase().includes(q) || authorText.toLowerCase().includes(q)); }); }
 
     function renderLedger(){ ledgerTbody.innerHTML=''; const b = findBiz(selectedBusinessId); if (!b){ ledgerTbody.innerHTML = '<tr><td colspan="8" class="muted">No business selected.</td></tr>'; pageIndicator.textContent = 'Page 0 / 0'; return; }
       const all = getFilteredTransactions();
@@ -999,205 +1007,302 @@
       editTxnContact.value = t.contactId || '';
       editTxnAccount.value = t.accountId || '';
       editTxnWhtEnabled.checked = !!t.whtEnabled;
-      editTxnWhtRate.value = (typeof t.whtRate === 'number' || !isNaN(t.whtRate)) ? t.whtRate : 5;
+      editTxnWhtRate.value = t.whtRate || 5;
       updateEditWhtVisibility();
       openModal(editModal);
     };
 
     window.deleteTxn = function(id){
-      const b=findBiz(selectedBusinessId); if (!b) return;
+      const b = findBiz(selectedBusinessId); if (!b) return;
       if (!confirm('Delete transaction?')) return;
-      data.transactions[b.id] = (data.transactions[b.id]||[]).filter(x=>x.id !== id);
-      saveData(); renderLedger(); calculateSummary();
-    };
-
-    editSave.addEventListener('click', ()=>{
-      if (!editTxnId) return;
-      const b=findBiz(selectedBusinessId); if (!b) return;
       const txs = data.transactions[b.id] || [];
-      const t = txs.find(x=>x.id===editTxnId); if (!t) return;
-      const date = editTxnDate.value || new Date().toISOString().slice(0,10);
-      const desc = (editTxnDesc.value||'').trim();
-      const amount = Number(editTxnAmount.value) || 0;
-      const accountId = editTxnAccount.value || null;
-      const contactId = editTxnContact.value || null;
-      const whtEnabledVal = !!editTxnWhtEnabled.checked;
-      const whtRateVal = parseFloat(editTxnWhtRate.value) || 0;
-      if (!amount || amount <= 0){ alert('Amount must be > 0'); return; }
-      t.date = date; t.desc = desc; t.amount = amount; t.accountId = accountId; t.contactId = contactId; t.whtEnabled = whtEnabledVal; t.whtRate = whtRateVal;
-      saveData(); closeModal(editModal); renderLedger(); calculateSummary();
-    });
+      data.transactions[b.id] = txs.filter(x=>x.id!==id);
+      saveData(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+    };
 
     editCancel.addEventListener('click', ()=> closeModal(editModal));
 
-    // search & pagination
-    btnSearch.addEventListener('click', ()=>{ ledgerFilterText = (ledgerSearch.value||'').trim(); currentPage = 1; renderLedger(); });
-    btnClearSearch.addEventListener('click', ()=>{ ledgerFilterText = ''; ledgerSearch.value=''; currentPage = 1; renderLedger(); });
-    btnPrevPage.addEventListener('click', ()=>{ if (currentPage>1) { currentPage--; renderLedger(); } });
-    btnNextPage.addEventListener('click', ()=>{ const all = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE)); if (currentPage < totalPages) { currentPage++; renderLedger(); } });
+    editSave.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      if (!editTxnId) { closeModal(editModal); return; }
+      const txs = data.transactions[b.id] || [];
+      const t = txs.find(x=>x.id===editTxnId); if (!t) return;
+      t.date = editTxnDate.value || t.date;
+      t.desc = (editTxnDesc.value||'').trim();
+      t.amount = Number(editTxnAmount.value) || 0;
+      t.contactId = editTxnContact.value || null;
+      t.accountId = editTxnAccount.value || null;
+      t.whtEnabled = !!editTxnWhtEnabled.checked;
+      t.whtRate = parseFloat(editTxnWhtRate.value) || 0;
+      saveData(); closeModal(editModal); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+    });
 
-    // Export / Import / Clear Data handlers
+    // search & pagination
+    btnSearch.addEventListener('click', ()=> { ledgerFilterText = ledgerSearch.value || ''; currentPage = 1; renderLedger(); });
+    btnClearSearch.addEventListener('click', ()=> { ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger(); });
+    btnPrevPage.addEventListener('click', ()=> { if (currentPage>1) { currentPage--; renderLedger(); }});
+    btnNextPage.addEventListener('click', ()=> { currentPage++; renderLedger(); });
+
+    // export/import/clear
     btnExport.addEventListener('click', ()=>{
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'ntc_data_export.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      const a = document.createElement('a'); a.href = url; a.download = 'ntc-export.json'; a.click(); URL.revokeObjectURL(url);
     });
-
     btnImport.addEventListener('click', ()=> fileInput.click());
     fileInput.addEventListener('change', (e)=>{
       const f = e.target.files && e.target.files[0];
       if (!f) return;
       const reader = new FileReader();
-      reader.onload = function(){ try { const parsed = JSON.parse(reader.result); if (confirm('Replace local data with imported data?')) { data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); } } catch(err){ alert('Invalid JSON file'); } };
+      reader.onload = (ev)=>{
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (parsed && typeof parsed === 'object'){ data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); alert('Import successful'); }
+        } catch(err){ alert('Invalid JSON file'); }
+      };
       reader.readAsText(f);
+      fileInput.value = '';
     });
-
     btnClearAll.addEventListener('click', ()=>{
-      if (!confirm('Clear all saved data? This cannot be undone.')) return;
+      if (!confirm('Clear all data? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
       data = { users: [], businesses: [], transactions: {} };
-      loadData();
-      refreshUserBusinessSelectors();
-      ensureSelection();
-      refreshContactsAccountsUI();
-      renderLedger();
-      calculateSummary();
+      loadData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
     btnExportContacts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.contacts||[], null, 2)], { type: 'application/json' });
+      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business');
+      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `${(b.name||'contacts')}_contacts.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      const a = document.createElement('a'); a.href = url; a.download = 'contacts-' + (b.name||'biz') + '.json'; a.click(); URL.revokeObjectURL(url);
     });
-
     btnExportAccounts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.accounts||[], null, 2)], { type: 'application/json' });
+      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business');
+      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `${(b.name||'accounts')}_accounts.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      const a = document.createElement('a'); a.href = url; a.download = 'accounts-' + (b.name||'biz') + '.json'; a.click(); URL.revokeObjectURL(url);
     });
 
-    // Summary calculations (VAT, WHT, totals, PIT)
+    // --- VAT / WHT / Totals summary calculation ---
     function calculateSummary(){
       const b = findBiz(selectedBusinessId);
-      if (!b){ vatSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>'; whtSummaryDiv.innerHTML=''; totalsSummaryDiv.innerHTML=''; taxSummaryDiv.innerHTML=''; return; }
+      if (!b) {
+        vatSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        whtSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        totalsSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        taxSummaryDiv.innerHTML = '';
+        return;
+      }
       const txs = data.transactions[b.id] || [];
-
-      // Simple VAT calculation:
-      // - For Income (Revenue) transactions: treat as VATable sales
-      // - For Expense transactions: treat as VATable purchases
-      // VAT inclusive flag affects how we treat amounts
-      let salesVatTotal = 0; // VAT on revenue (output VAT)
-      let purchasesVatTotal = 0; // VAT on expenses (input VAT)
+      let totalVat = 0;
+      let totalWht = 0;
       let totalIncome = 0;
       let totalExpense = 0;
-
       for (const t of txs){
         const acc = findAccount(b.id, t.accountId);
         const type = deriveTypeFromAccount(acc);
-        const amt = Number(t.amount || 0);
-        if (type === 'Income') {
-          totalIncome += amt;
-          if (b.vatEnabled) {
-            if (b.vatInclusive) {
-              // amount includes VAT: VAT = amt - (amt / (1 + r))
-              const vatRate = (b.vatRate || 0) / 100;
-              const vat = amt - (amt / (1 + vatRate));
-              salesVatTotal += vat;
-            } else {
-              const vat = amt * ((b.vatRate || 0) / 100);
-              salesVatTotal += vat;
-            }
-          }
-        } else {
-          totalExpense += amt;
-          if (b.vatEnabled) {
-            if (b.vatInclusive) {
-              const vatRate = (b.vatRate || 0) / 100;
-              const vat = amt - (amt / (1 + vatRate));
-              purchasesVatTotal += vat;
-            } else {
-              const vat = amt * ((b.vatRate || 0) / 100);
-              purchasesVatTotal += vat;
-            }
+        if (type === 'Income') totalIncome += Number(t.amount||0);
+        else totalExpense += Number(t.amount||0);
+
+        // VAT
+        if (b.vatEnabled && acc && acc.type === 'Revenue'){
+          if (b.vatInclusive){
+            // amount includes VAT -> extract VAT portion
+            const rate = (Number(b.vatRate)||0)/100;
+            const vatPart = Number(t.amount) - (Number(t.amount) / (1 + rate));
+            totalVat += vatPart;
+          } else {
+            // VAT added on top
+            totalVat += (Number(t.amount||0) * ((Number(b.vatRate)||0)/100));
           }
         }
-      }
 
-      const netVat = salesVatTotal - purchasesVatTotal;
-
-      // WHT total (sum of withheld amounts across transactions)
-      const totalWht = (txs || []).reduce((acc, t) => {
-        if (!t) return acc;
-        const enabled = !!t.whtEnabled;
-        const rate = Number(t.whtRate || 0);
-        const amt = Number(t.amount || 0);
-        return acc + (enabled ? (amt * (rate/100)) : 0);
-      }, 0);
-
-      // Totals: net income (income - expense)
-      const net = totalIncome - totalExpense;
-
-      // PIT (simple progressive calculation based on business.pit slices)
-      let pitDue = 0;
-      if (b.pitEnabled && b.pit && b.pit.slices){
-        const threshold = (typeof b.threshold === 'number') ? b.threshold : (b.pit.threshold || DEFAULT_PIT.threshold);
-        let taxable = net - threshold;
-        if (taxable < 0) taxable = 0;
-        let remaining = taxable;
-        let lastUpTo = 0;
-        for (const slice of b.pit.slices){
-          const upto = slice.upTo;
-          const band = Math.min(remaining, upto - lastUpTo);
-          if (band <= 0) { lastUpTo = upto; continue; }
-          pitDue += band * slice.rate;
-          remaining -= band;
-          lastUpTo = upto;
-          if (remaining <= 0) break;
+        // WHT - apply only to expense transactions where whtEnabled true
+        if (acc && acc.type === 'Expense' && t.whtEnabled){
+          const w = Number(t.amount||0) * ((Number(t.whtRate)||0)/100);
+          totalWht += w;
         }
       }
+      totalVat = Math.round(totalVat * 100) / 100;
+      totalWht = Math.round(totalWht * 100) / 100;
 
-      // render
-      vatSummaryDiv.innerHTML = `<strong>VAT Summary</strong>
-        <div class="muted">VAT rate: ${b.vatRate}% (${b.vatInclusive ? 'inclusive' : 'exclusive'})</div>
-        <div>Output VAT (sales): ₦ ${formatMoney(Math.round(salesVatTotal * 100)/100)}</div>
-        <div>Input VAT (purchases): ₦ ${formatMoney(Math.round(purchasesVatTotal * 100)/100)}</div>
-        <div><strong>Net VAT payable (Output - Input): ₦ ${formatMoney(Math.round(netVat * 100)/100)}</strong></div>`;
+      vatSummaryDiv.innerHTML = `<strong>VAT Summary</strong><div style="margin-top:8px;">${b.vatEnabled ? `VAT rate: ${b.vatRate}% — Calculated VAT: ₦ ${formatMoney(totalVat)}` : '<span class="muted">VAT disabled for this business.</span>'}</div>`;
+      whtSummaryDiv.innerHTML = `<strong>WHT Summary</strong><div style="margin-top:8px;">Total WHT withheld (from expenses): ₦ ${formatMoney(totalWht)}</div>`;
 
-      whtSummaryDiv.innerHTML = `<strong>WHT Summary</strong>
-        <div class="muted">Sum of withheld tax on transactions (per selected business)</div>
-        <div>Total WHT withheld: ₦ ${formatMoney(Math.round(totalWht * 100)/100)}</div>
-        <div class="muted">WHT is normally applicable to certain expense payments. Individual transactions show WHT amounts in the ledger.</div>`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div style="margin-top:8px;">Total Income: ₦ ${formatMoney(totalIncome)} | Total Expense: ₦ ${formatMoney(totalExpense)} | Net: ₦ ${formatMoney(totalIncome - totalExpense)}</div>`;
 
-      totalsSummaryDiv.innerHTML = `<strong>Totals</strong>
-        <div>Total income: ₦ ${formatMoney(Math.round(totalIncome * 100)/100)}</div>
-        <div>Total expense: ₦ ${formatMoney(Math.round(totalExpense * 100)/100)}</div>
-        <div><strong>Net: ₦ ${formatMoney(Math.round(net * 100)/100)}</strong></div>`;
-
-      taxSummaryDiv.innerHTML = `<strong>Tax Summary (PIT)</strong>
-        <div class="muted">Tax-free threshold: ₦ ${formatMoney(b.threshold || (b.pit && b.pit.threshold) || DEFAULT_PIT.threshold)}</div>
-        <div>Taxable income (net - threshold): ₦ ${formatMoney(Math.max(0, Math.round((net - (b.threshold || (b.pit && b.pit.threshold) || DEFAULT_PIT.threshold)) * 100)/100))}</div>
-        <div>PIT due (approx): ₦ ${formatMoney(Math.round(pitDue * 100)/100)}</div>`;
-
-      saveData(); // persist any changes that might have been made
+      taxSummaryDiv.innerHTML = `<div class="muted">Threshold (PIT): ₦ ${formatMoney(b.pit && b.pit.threshold ? b.pit.threshold : DEFAULT_PIT.threshold)}</div>`;
+      // after VAT/WHT/totals, render monthly PAYE/PIT summaries
+      renderMonthlyPayePitSummaries();
     }
 
-    // initial handlers for account selection WHT visibility
-    updateWhtInlineVisibility();
+    // --- Monthly PAYE & PIT (pay-as-you-go) helpers & rendering ---
+    function _round2(v){ return Math.round((Number(v)||0) * 100) / 100; }
 
-    // initial UI populate
+    /**
+     * Compute progressive tax on an annual amount using business PIT config.
+     * pit.threshold and pit.slices are expected to be annual.
+     */
+    function computeProgressiveAnnualTax(amountAnnual, pit){
+      amountAnnual = Number(amountAnnual) || 0;
+      if (!pit || !Array.isArray(pit.slices)) return 0;
+      const threshold = Number(pit.threshold) || 0;
+      const taxable = Math.max(0, amountAnnual - threshold);
+      if (taxable <= 0) return 0;
+      let prev = 0;
+      let tax = 0;
+      for (const s of pit.slices){
+        const sliceTopRaw = (s.upTo === Infinity) ? Infinity : Number(s.upTo || 0);
+        // Convert slice top to taxable-space by subtracting threshold
+        const sliceTop = (sliceTopRaw === Infinity) ? Infinity : Math.max(0, sliceTopRaw - threshold);
+        const upper = (sliceTop === Infinity) ? taxable : Math.min(taxable, sliceTop);
+        const taxableInSlice = Math.max(0, upper - prev);
+        if (taxableInSlice > 0){
+          tax += taxableInSlice * (Number(s.rate) || 0);
+          prev += taxableInSlice;
+        }
+        if (prev >= taxable) break;
+      }
+      return _round2(tax);
+    }
+
+    /**
+     * Build monthly summaries for a business.
+     * - Groups transactions by employee contact (contact.type === 'Employee') and by month (YYYY-MM).
+     * - For each employee-month: monthlyGross, annualizedGross = monthlyGross*12, annualTax = progressive(annualizedGross), monthlyTax = annualTax/12.
+     * Returns structures for rendering.
+     */
+    function computeMonthlyPayePitSummariesForBusiness(bizId){
+      const b = findBiz(bizId);
+      if (!b) return { perEmployee: {}, payeTotal: 0, pitAnnualTotal: 0 };
+
+      const txs = data.transactions[bizId] || [];
+      // map employeeId -> monthKey -> { gross }
+      const empMonthMap = {};
+      for (const t of txs){
+        if (!t) continue;
+        const contact = t.contactId ? findContact(bizId, t.contactId) : null;
+        if (!contact || contact.type !== 'Employee') continue;
+        const contactId = contact.id;
+        const dateStr = (t.date || '').slice(0,7) || 'unknown'; // YYYY-MM
+        if (!empMonthMap[contactId]) empMonthMap[contactId] = {};
+        if (!empMonthMap[contactId][dateStr]) empMonthMap[contactId][dateStr] = { gross: 0 };
+        empMonthMap[contactId][dateStr].gross += Number(t.amount) || 0;
+      }
+
+      const perEmployee = {};
+      let payeTotal = 0;
+      let pitAnnualTotal = 0;
+
+      for (const contactId of Object.keys(empMonthMap)){
+        const contact = findContact(bizId, contactId) || { name: '(unknown)' };
+        const monthsObj = empMonthMap[contactId];
+        const months = Object.keys(monthsObj).sort();
+        let totalGross = 0;
+        let totalMonthlyWithheld = 0;
+        for (const m of months){
+          const mgross = Number(monthsObj[m].gross) || 0;
+          totalGross += mgross;
+          const annualized = mgross * 12;
+          const annualTax = computeProgressiveAnnualTax(annualized, b.pit || DEFAULT_PIT);
+          const monthlyTax = _round2(annualTax / 12);
+          monthsObj[m].monthlyTax = monthlyTax;
+          monthsObj[m].annualized = annualized;
+          monthsObj[m].annualTax = annualTax;
+          totalMonthlyWithheld += monthlyTax;
+        }
+        const monthsCount = months.length || 0;
+        const avgMonthlyGross = monthsCount ? (totalGross / monthsCount) : 0;
+        const estAnnualized = avgMonthlyGross * 12;
+        const estAnnualTax = computeProgressiveAnnualTax(estAnnualized, b.pit || DEFAULT_PIT);
+        perEmployee[contactId] = {
+          name: contact.name || '(unknown)',
+          months: monthsObj,
+          monthsCount,
+          totalGross: _round2(totalGross),
+          totalMonthlyWithheld: _round2(totalMonthlyWithheld),
+          estimatedAnnualGross: _round2(estAnnualized),
+          estimatedAnnualTax: _round2(estAnnualTax),
+          estimatedMonthlyTax: _round2(estAnnualTax / 12)
+        };
+        payeTotal += totalMonthlyWithheld;
+        pitAnnualTotal += perEmployee[contactId].estimatedAnnualTax;
+      }
+
+      payeTotal = _round2(payeTotal);
+      pitAnnualTotal = _round2(pitAnnualTotal);
+
+      return { perEmployee, payeTotal, pitAnnualTotal };
+    }
+
+    /**
+     * Render monthly PAYE & PIT UI.
+     * Call this at the end of calculateSummary() and after transactions change.
+     */
+    function renderMonthlyPayePitSummaries(){
+      const b = findBiz(selectedBusinessId);
+      if (!b){
+        payeSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        pitSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>';
+        return;
+      }
+
+      if (!b.pit) b.pit = DEFAULT_PIT;
+      const { perEmployee, payeTotal, pitAnnualTotal } = computeMonthlyPayePitSummariesForBusiness(b.id);
+      const empKeys = Object.keys(perEmployee);
+
+      // PAYE summary (monthly withholdings)
+      if (empKeys.length === 0){
+        payeSummaryDiv.innerHTML = '<div class="muted">No PAYE (no Employee transactions).</div>';
+      } else {
+        let out = '<strong>PAYE withheld (monthly, per employee)</strong>';
+        out += '<table style="width:100%;margin-top:8px;border-collapse:collapse"><thead><tr style="background:#f2f6fa"><th style="padding:6px;border:1px solid #eee;text-align:left">Employee</th><th style="padding:6px;border:1px solid #eee;text-align:right">Months</th><th style="padding:6px;border:1px solid #eee;text-align:right">Total Gross (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Total PAYE Withheld (₦)</th></tr></thead><tbody>';
+        for (const k of empKeys){
+          const r = perEmployee[k];
+          out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(r.name)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">${r.monthsCount}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.totalGross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.totalMonthlyWithheld)}</td></tr>`;
+          // per-month detail
+          const monthKeys = Object.keys(r.months).sort();
+          if (monthKeys.length){
+            out += '<tr><td colspan="4" style="padding:0;border:0"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="padding:6px;border:1px solid #eee;background:#fafafa">Month</th><th style="padding:6px;border:1px solid #eee;background:#fafafa;text-align:right">Gross (₦)</th><th style="padding:6px;border:1px solid #eee;background:#fafafa;text-align:right">Monthly PAYE (₦)</th></tr></thead><tbody>';
+            for (const m of monthKeys){
+              const mm = r.months[m];
+              out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(m)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(mm.gross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(mm.monthlyTax)}</td></tr>`;
+            }
+            out += '</tbody></table></td></tr>';
+          }
+        }
+        out += `<tr style="font-weight:bold"><td style="padding:6px;border:1px solid #eee">Totals</td><td style="padding:6px;border:1px solid #eee"></td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(Object.values(perEmployee).reduce((s,x)=>s+(x.totalGross||0),0))}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(payeTotal)}</td></tr>`;
+        out += '</tbody></table>';
+        payeSummaryDiv.innerHTML = out;
+      }
+
+      // PIT summary (estimated annual liability based on observed months)
+      if (empKeys.length === 0){
+        pitSummaryDiv.innerHTML = '<div class="muted">No PIT liabilities (no Employee transactions).</div>';
+      } else {
+        let out = '<strong>PIT estimate (annual, based on observed months)</strong>';
+        out += '<table style="width:100%;margin-top:8px;border-collapse:collapse"><thead><tr style="background:#f2f6fa"><th style="padding:6px;border:1px solid #eee;text-align:left">Employee</th><th style="padding:6px;border:1px solid #eee;text-align:right">Months Observed</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Annual Gross (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Annual PIT (₦)</th><th style="padding:6px;border:1px solid #eee;text-align:right">Estimated Monthly PIT (₦)</th></tr></thead><tbody>';
+        for (const k of empKeys){
+          const r = perEmployee[k];
+          out += `<tr><td style="padding:6px;border:1px solid #eee">${escapeHtml(r.name)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">${r.monthsCount}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedAnnualGross)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedAnnualTax)}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(r.estimatedMonthlyTax)}</td></tr>`;
+        }
+        out += `<tr style="font-weight:bold"><td style="padding:6px;border:1px solid #eee">Totals</td><td style="padding:6px;border:1px solid #eee"></td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(Object.values(perEmployee).reduce((s,x)=>s+(x.estimatedAnnualGross||0),0))}</td><td style="padding:6px;border:1px solid #eee;text-align:right">₦ ${formatMoney(pitAnnualTotal)}</td><td style="padding:6px;border:1px solid #eee"></td></tr>`;
+        out += '</tbody></table>';
+        pitSummaryDiv.innerHTML = out;
+      }
+    }
+
+    // Make available for debugging/testing if needed
+    window.calculateSummary = calculateSummary;
+    window.renderMonthlyPayePitSummaries = renderMonthlyPayePitSummaries;
+
+    // finalize initial UI population
+    populateAccountSelects();
+    populateContactSelects();
     refreshContactsAccountsUI();
-
-    // Expose some functions for console convenience
-    window._ntc_data = data;
-    window.recalc = () => { calculateSummary(); renderLedger(); };
+    renderLedger();
+    calculateSummary();
+    renderMonthlyPayePitSummaries();
   </script>
-
-  <footer>
-    Built for simple local accounting and tax estimates (VAT & WHT). Data is stored in your browser localStorage. Export/Import to move data between devices.
-  </footer>
 </body>
-               </html>
+  </html>
