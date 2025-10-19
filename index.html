@@ -380,6 +380,112 @@
     function escapeHtml(s){ if (!s && s!==0) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function saveData(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
+    // Helper function to compute VAT summary for a business and its transactions
+    function computeVatSummary(biz, transactions, dateFrom, dateTo){
+      if (!biz || !biz.vatEnabled) {
+        return { collected: 0, paid: 0, net: 0 };
+      }
+      
+      const filteredTxns = transactions.filter(t => {
+        if (!dateFrom && !dateTo) return true;
+        const dt = new Date(t.date);
+        if (dateFrom && dt < new Date(dateFrom)) return false;
+        if (dateTo && dt > new Date(dateTo)) return false;
+        return true;
+      });
+      
+      let collected = 0;
+      let paid = 0;
+      
+      for (const t of filteredTxns) {
+        if (t.type === 'Income') {
+          collected += (t.amount || 0) * (biz.vatRate / 100);
+        } else if (t.type === 'Expense') {
+          paid += (t.amount || 0) * (biz.vatRate / 100);
+        }
+      }
+      
+      return {
+        collected: collected,
+        paid: paid,
+        net: collected - paid
+      };
+    }
+
+    // Helper function to compute PIT summary for a business and its transactions
+    function computePitSummary(biz, transactions, dateFrom, dateTo){
+      if (!biz || !biz.pitEnabled) {
+        return { 
+          taxableIncome: 0, 
+          totalTax: 0, 
+          slices: [] 
+        };
+      }
+      
+      const filteredTxns = transactions.filter(t => {
+        if (!dateFrom && !dateTo) return true;
+        const dt = new Date(t.date);
+        if (dateFrom && dt < new Date(dateFrom)) return false;
+        if (dateTo && dt > new Date(dateTo)) return false;
+        return true;
+      });
+      
+      // Calculate taxable income from Income transactions that are:
+      // - Category is 'Salary' or 'Bonus', OR
+      // - Contact is an Employee type
+      let taxableIncome = 0;
+      
+      for (const t of filteredTxns) {
+        if (t.type !== 'Income') continue;
+        
+        const isSalaryOrBonus = (t.category === 'Salary' || t.category === 'Bonus');
+        let isEmployeeContact = false;
+        
+        if (t.contactId) {
+          const contact = findContact(biz.id, t.contactId);
+          if (contact && contact.type === 'Employee') {
+            isEmployeeContact = true;
+          }
+        }
+        
+        if (isSalaryOrBonus || isEmployeeContact) {
+          taxableIncome += (t.amount || 0);
+        }
+      }
+      
+      // Use business PIT or DEFAULT_PIT
+      const pit = biz.pit || DEFAULT_PIT;
+      const slices = [];
+      let totalTax = 0;
+      let remainingIncome = taxableIncome;
+      let previousUpTo = 0;
+      
+      for (const slice of pit.slices) {
+        if (remainingIncome <= 0) break;
+        
+        // Handle Infinity for top tax bracket
+        const sliceMax = slice.upTo === Infinity ? Infinity : (slice.upTo - previousUpTo);
+        const taxableInSlice = Math.min(remainingIncome, sliceMax);
+        const taxForSlice = taxableInSlice * slice.rate;
+        
+        slices.push({
+          sliceRangeLabel: `${formatMoney(previousUpTo)} - ${slice.upTo === Infinity ? 'above' : formatMoney(slice.upTo)}`,
+          taxableInSlice: taxableInSlice,
+          taxForSlice: taxForSlice
+        });
+        
+        totalTax += taxForSlice;
+        remainingIncome -= taxableInSlice;
+        previousUpTo = slice.upTo === Infinity ? previousUpTo : slice.upTo;
+      }
+      
+      return {
+        taxableIncome: taxableIncome,
+        totalTax: totalTax,
+        slices: slices
+      };
+    }
+
     function migrateOldTransactions(oldTxns){
       // oldTxns might be nested by user/biz; we convert to { bizId: [txns...] }
       const newTxns = {};
@@ -1247,19 +1353,54 @@
       localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; location.reload();
     });
 
-    // Reports generation with WHT inclusion
+    // Reports generation with WHT, VAT and PIT inclusion
     btnGenerateReport.addEventListener('click', ()=>{
       const type = reportType.value;
       const from = reportDateFrom.value ? new Date(reportDateFrom.value) : null;
       const to = reportDateTo.value ? new Date(reportDateTo.value) : null;
+      const fromStr = reportDateFrom.value || null;
+      const toStr = reportDateTo.value || null;
+      
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) {
+        reportOutput.innerHTML = '<div class="muted">No business selected.</div>';
+        return;
+      }
+      
       const txns = (data.transactions[selectedBusinessId] || []).filter(t=>{
         const dt = new Date(t.date);
         if (from && dt < from) return false;
         if (to && dt > to) return false;
         return true;
       });
-      if (type === 'wht'){
-        // show WHT summary for the selected period
+      
+      // Compute VAT and PIT summaries
+      const vatSummary = computeVatSummary(biz, data.transactions[selectedBusinessId] || [], fromStr, toStr);
+      const pitSummary = computePitSummary(biz, data.transactions[selectedBusinessId] || [], fromStr, toStr);
+      
+      let html = '';
+      
+      if (type === 'profit'){
+        // Profit report with income, expense breakdown
+        let totalIncome = 0, totalExpense = 0;
+        txns.forEach(t=>{
+          if (t.type === 'Income') totalIncome += (t.amount || 0);
+          if (t.type === 'Expense') totalExpense += (t.amount || 0);
+        });
+        html = `<h3>Profit Report</h3>`;
+        html += `<div><strong>Total Income:</strong> ₦${formatMoney(totalIncome)}</div>`;
+        html += `<div><strong>Total Expense:</strong> ₦${formatMoney(totalExpense)}</div>`;
+        html += `<div><strong>Net Profit:</strong> ₦${formatMoney(totalIncome - totalExpense)}</div>`;
+      } else if (type === 'vat'){
+        // VAT report with basic summary
+        html = `<h3>VAT Report</h3>`;
+        html += `<div class="muted">Detailed VAT calculation shown below.</div>`;
+      } else if (type === 'paye'){
+        // PAYE report with basic summary
+        html = `<h3>PAYE Report</h3>`;
+        html += `<div class="muted">Personal Income Tax (PAYE) calculation shown below.</div>`;
+      } else if (type === 'wht'){
+        // WHT report - existing logic
         let totalWht = 0; const byContact = {};
         txns.forEach(t=>{
           if (t.whtEnabled && t.whtAmount) {
@@ -1267,32 +1408,94 @@
             if (t.contactId) byContact[t.contactId] = (byContact[t.contactId] || 0) + t.whtAmount;
           }
         });
-        let html = `<h3>WHT Report</h3><div>Total WHT Withheld: ₦${formatMoney(totalWht)}</div>`;
+        html = `<h3>WHT Report</h3><div><strong>Total WHT Withheld:</strong> ₦${formatMoney(totalWht)}</div>`;
         if (Object.keys(byContact).length){
           html += '<h4>By contact</h4><ul>';
           Object.entries(byContact).forEach(([cid, amt])=>{ const c = findContact(selectedBusinessId, cid); html += `<li>${c ? escapeHtml(c.name) : cid}: ₦${formatMoney(amt)}</li>`; });
           html += '</ul>';
         }
-        reportOutput.innerHTML = html;
-      } else {
-        reportOutput.innerHTML = `<div class="muted">Report type ${escapeHtml(type)} is not WHT-specific in this demo. Use WHT report for withholding breakdown.</div>`;
       }
+      
+      // Add VAT summary section
+      html += '<div class="vat-summary" style="margin-top:16px;">';
+      html += '<h4>VAT Summary</h4>';
+      if (biz.vatEnabled) {
+        html += `<div><strong>VAT Collected:</strong> ₦${formatMoney(vatSummary.collected)}</div>`;
+        html += `<div><strong>VAT Paid:</strong> ₦${formatMoney(vatSummary.paid)}</div>`;
+        html += `<div><strong>VAT Net:</strong> ₦${formatMoney(vatSummary.net)}</div>`;
+      } else {
+        html += '<div class="muted">VAT: Disabled for this business</div>';
+      }
+      html += '</div>';
+      
+      // Add PIT summary section
+      html += '<div class="tax-summary" style="margin-top:16px;">';
+      html += '<h4>PIT (Personal Income Tax) Summary</h4>';
+      if (biz.pitEnabled) {
+        html += `<div><strong>Taxable Income:</strong> ₦${formatMoney(pitSummary.taxableIncome)}</div>`;
+        html += `<div><strong>Total PIT:</strong> ₦${formatMoney(pitSummary.totalTax)}</div>`;
+        if (pitSummary.slices.length > 0) {
+          html += '<h5>Tax Breakdown by Slice:</h5><ul>';
+          pitSummary.slices.forEach(slice => {
+            html += `<li>Range: ${escapeHtml(slice.sliceRangeLabel)} — Taxable: ₦${formatMoney(slice.taxableInSlice)} — Tax: ₦${formatMoney(slice.taxForSlice)}</li>`;
+          });
+          html += '</ul>';
+        }
+      } else {
+        html += '<div class="muted">PIT: Disabled for this business</div>';
+      }
+      html += '</div>';
+      
+      reportOutput.innerHTML = html;
     });
 
-    // Export CSV/JSON/HTML for ledger including WHT
+    // Export CSV/JSON/HTML for ledger including WHT, VAT and PIT
     btnExportJson.addEventListener('click', ()=>{
+      const biz = findBiz(selectedBusinessId);
       const txns = (data.transactions[selectedBusinessId] || []);
-      const out = txns.map(t=>({
-        id: t.id, date: t.date, type: t.type, category: t.category, desc: t.desc, amount: t.amount,
-        contactId: t.contactId, accountId: t.accountId, authorUserId: t.authorUserId,
-        whtEnabled: !!t.whtEnabled, whtRate: Number(t.whtRate)||0, whtAmount: Number(t.whtAmount)||0, whtAccountId: t.whtAccountId || null
-      }));
+      
+      // Get current date range from report filters
+      const fromStr = reportDateFrom.value || null;
+      const toStr = reportDateTo.value || null;
+      
+      // Compute VAT and PIT summaries
+      const vatSummary = biz ? computeVatSummary(biz, txns, fromStr, toStr) : { collected: 0, paid: 0, net: 0 };
+      const pitSummary = biz ? computePitSummary(biz, txns, fromStr, toStr) : { taxableIncome: 0, totalTax: 0, slices: [] };
+      
+      const out = {
+        transactions: txns.map(t=>({
+          id: t.id, date: t.date, type: t.type, category: t.category, desc: t.desc, amount: t.amount,
+          contactId: t.contactId, accountId: t.accountId, authorUserId: t.authorUserId,
+          whtEnabled: !!t.whtEnabled, whtRate: Number(t.whtRate)||0, whtAmount: Number(t.whtAmount)||0, whtAccountId: t.whtAccountId || null
+        })),
+        vatSummary: {
+          collected: vatSummary.collected,
+          paid: vatSummary.paid,
+          net: vatSummary.net
+        },
+        pitSummary: {
+          taxableIncome: pitSummary.taxableIncome,
+          totalTax: pitSummary.totalTax,
+          slices: pitSummary.slices
+        }
+      };
+      
       const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     });
 
     btnExportCsv.addEventListener('click', ()=>{
+      const biz = findBiz(selectedBusinessId);
       const txns = (data.transactions[selectedBusinessId] || []);
+      
+      // Get current date range from report filters
+      const fromStr = reportDateFrom.value || null;
+      const toStr = reportDateTo.value || null;
+      
+      // Compute VAT and PIT summaries
+      const vatSummary = biz ? computeVatSummary(biz, txns, fromStr, toStr) : { collected: 0, paid: 0, net: 0 };
+      const pitSummary = biz ? computePitSummary(biz, txns, fromStr, toStr) : { taxableIncome: 0, totalTax: 0, slices: [] };
+      
       const headers = ['id','date','type','category','desc','amount','contactId','accountId','authorUserId','wht_enabled','wht_rate','wht_amount','wht_accountId'];
       const lines = [headers.join(',')];
       txns.forEach(t=>{
@@ -1313,15 +1516,83 @@
         ];
         lines.push(vals.join(','));
       });
+      
+      // Add VAT summary footer rows
+      lines.push('');
+      lines.push('VAT Summary');
+      lines.push(`VAT Collected,${vatSummary.collected}`);
+      lines.push(`VAT Paid,${vatSummary.paid}`);
+      lines.push(`VAT Net,${vatSummary.net}`);
+      
+      // Add PIT summary footer rows
+      lines.push('');
+      lines.push('PIT Summary');
+      lines.push(`Taxable Income,${pitSummary.taxableIncome}`);
+      lines.push(`Total PIT,${pitSummary.totalTax}`);
+      
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     });
 
     btnExportHtml.addEventListener('click', ()=>{
+      const biz = findBiz(selectedBusinessId);
       const txns = (data.transactions[selectedBusinessId] || []);
-      let html = `<html><head><meta charset="utf-8"><title>Transactions</title></head><body><table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Desc</th><th>Amount</th><th>WHT</th></tr></thead><tbody>`;
-      txns.forEach(t=>{ html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.type)}</td><td>${escapeHtml(t.category)}</td><td>${escapeHtml(t.desc)}</td><td>${formatMoney(t.amount)}</td><td>${t.whtEnabled?formatMoney(t.whtAmount):''}</td></tr>`; });
-      html += `</tbody></table></body></html>`;
+      
+      // Get current date range from report filters
+      const fromStr = reportDateFrom.value || null;
+      const toStr = reportDateTo.value || null;
+      
+      // Compute VAT and PIT summaries
+      const vatSummary = biz ? computeVatSummary(biz, txns, fromStr, toStr) : { collected: 0, paid: 0, net: 0 };
+      const pitSummary = biz ? computePitSummary(biz, txns, fromStr, toStr) : { taxableIncome: 0, totalTax: 0, slices: [] };
+      
+      let html = `<html><head><meta charset="utf-8"><title>Transactions Report</title><style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f6fa; }
+        .summary { background: #f7f9fc; padding: 15px; margin: 20px 0; border-radius: 6px; border: 1px solid #eef2f6; }
+        h2, h3 { margin-top: 10px; }
+      </style></head><body>`;
+      
+      html += '<h1>Transaction Report</h1>';
+      html += '<table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Desc</th><th>Amount</th><th>WHT</th></tr></thead><tbody>';
+      txns.forEach(t=>{ 
+        html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.type)}</td><td>${escapeHtml(t.category)}</td><td>${escapeHtml(t.desc)}</td><td>₦${formatMoney(t.amount)}</td><td>${t.whtEnabled?'₦'+formatMoney(t.whtAmount):''}</td></tr>`; 
+      });
+      html += '</tbody></table>';
+      
+      // Add VAT summary
+      html += '<div class="summary">';
+      html += '<h2>VAT Summary</h2>';
+      if (biz && biz.vatEnabled) {
+        html += `<p><strong>VAT Collected:</strong> ₦${formatMoney(vatSummary.collected)}</p>`;
+        html += `<p><strong>VAT Paid:</strong> ₦${formatMoney(vatSummary.paid)}</p>`;
+        html += `<p><strong>VAT Net:</strong> ₦${formatMoney(vatSummary.net)}</p>`;
+      } else {
+        html += '<p>VAT: Disabled for this business</p>';
+      }
+      html += '</div>';
+      
+      // Add PIT summary
+      html += '<div class="summary">';
+      html += '<h2>PIT (Personal Income Tax) Summary</h2>';
+      if (biz && biz.pitEnabled) {
+        html += `<p><strong>Taxable Income:</strong> ₦${formatMoney(pitSummary.taxableIncome)}</p>`;
+        html += `<p><strong>Total PIT:</strong> ₦${formatMoney(pitSummary.totalTax)}</p>`;
+        if (pitSummary.slices.length > 0) {
+          html += '<h3>Tax Breakdown by Slice:</h3><ul>';
+          pitSummary.slices.forEach(slice => {
+            html += `<li>Range: ${escapeHtml(slice.sliceRangeLabel)} — Taxable: ₦${formatMoney(slice.taxableInSlice)} — Tax: ₦${formatMoney(slice.taxForSlice)}</li>`;
+          });
+          html += '</ul>';
+        }
+      } else {
+        html += '<p>PIT: Disabled for this business</p>';
+      }
+      html += '</div>';
+      
+      html += '</body></html>';
       const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     });
 
