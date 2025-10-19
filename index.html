@@ -1,10 +1,7 @@
 <!-- GitHub Copilot Chat Assistant
-Updated index.html — adds per-employee PAYE summary using statutory deductions (RENT, PENSION, NHF, NHIS, LIFE ASSURANCE, INTEREST ON LOAN FOR OWNER OCCUPIED HOUSE).
-Default behavior:
-- Per-employee summary
-- Calendar year
-- Deductions matched by account.name containing any of the keywords (case-insensitive, normalized)
-- Tax computed using business.pit (falls back to DEFAULT_PIT)
+Updated index.html — full file with PAYE gross calculation updated to include transactions posted to either Revenue or Expense accounts.
+Also added optional explicit "Salary/Payroll account" flag on accounts (checkbox) so users can precisely mark salary accounts.
+Default behavior: if account.isSalary is true OR account.type is 'Expense' OR account.type is 'Revenue', the transaction amount is treated as gross salary for PAYE calculations.
 -->
 
 <!DOCTYPE html>
@@ -108,7 +105,7 @@ Default behavior:
 
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions. Default WHT rate is 5% per transaction. PAYE is calculated monthly based on annual taxable income and statutory deductions (RENT, PENSION, NHF, NHIS, LIFE ASSURANCE, INTEREST ON LOAN FOR OWNER OCCUPIED HOUSE) for employees (contacts with type "Employee").</small>
+      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions. Default WHT rate is 5% per transaction. PAYE is calculated monthly for employees (contacts with type "Employee"). Gross salary includes transactions posted to Expense or Revenue accounts, or accounts explicitly marked as Salary/Payroll.</small>
     </section>
 
     <section class="panel section">
@@ -296,6 +293,9 @@ Default behavior:
       </label>
       <label>Notes: <input type="text" id="accountNotes" placeholder="Optional" /></label>
     </div>
+    <div class="row">
+      <label><input type="checkbox" id="accountIsSalary" /> Salary/Payroll account (include in gross)</label>
+    </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="accountCancel">Cancel</button>
       <button class="primary" id="accountSave">Save</button>
@@ -303,7 +303,7 @@ Default behavior:
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant — complete index.html script with monthly PAYE & PIT and statutory deductions per defaults
+    // GitHub Copilot Chat Assistant — full index.html script
     const STORAGE_KEY = 'ntc_data_v2';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -376,6 +376,8 @@ Default behavior:
               if (!Array.isArray(b.members)) b.members = [];
               if (!Array.isArray(b.contacts)) b.contacts = [];
               if (!Array.isArray(b.accounts)) b.accounts = [];
+              // normalize legacy accounts: ensure account.isSalary exists
+              b.accounts = b.accounts.map(a => ({ ...a, isSalary: !!a.isSalary }));
               if (typeof b.vatRate !== 'number') b.vatRate = 7.5;
               if (typeof b.vatEnabled === 'undefined') b.vatEnabled = true;
               if (typeof b.pitEnabled === 'undefined') b.pitEnabled = true;
@@ -399,12 +401,12 @@ Default behavior:
       const contact2 = { id: uid('c'), name: 'Office Supplies Ltd', type: 'Vendor', info: '0803-xxx', notes: '' };
       const contact3 = { id: uid('c'), name: 'John Employee', type: 'Employee', info: 'john@demo', notes: '' };
       const accounts = [
-        { id: uid('a'), code: '1000', name: 'Cash', type: 'Asset', notes: '' },
-        { id: uid('a2'), code: '2000', name: 'Accounts Payable', type: 'Liability', notes: '' },
-        { id: uid('a3'), code: '4000', name: 'Sales Revenue', type: 'Revenue', notes: '' },
-        { id: uid('a4'), code: '5000', name: 'Rent Expense', type: 'Expense', notes: '' },
+        { id: uid('a'), code: '1000', name: 'Cash', type: 'Asset', notes: '', isSalary: false },
+        { id: uid('a2'), code: '2000', name: 'Accounts Payable', type: 'Liability', notes: '', isSalary: false },
+        { id: uid('a3'), code: '4000', name: 'Sales Revenue', type: 'Revenue', notes: '', isSalary: false },
+        { id: uid('a4'), code: '5000', name: 'Rent Expense', type: 'Expense', notes: '', isSalary: false },
       ];
-      accounts.push({ id: whtAccountId, code: '2300', name: 'WHT Payable', type: 'Liability', notes: 'Auto-created' });
+      accounts.push({ id: whtAccountId, code: '2300', name: 'WHT Payable', type: 'Liability', notes: 'Auto-created', isSalary: false });
 
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
@@ -433,7 +435,7 @@ Default behavior:
       data.transactions[bizId] = [
         { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: contact1.id, accountId: accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate: 0 },
         { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.type==='Expense').id, whtEnabled: true, whtRate: 5 },
-        { id: uid('txn'), date: now, desc: 'Salary - John Employee', amount: 180000, authorUserId: userId, contactId: contact3.id, accountId: accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 0 }
+        { id: uid('txn'), date: now, desc: 'Salary - John Employee', amount: 180000, authorUserId: userId, contactId: contact3.id, accountId: accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 0 },
       ];
       saveData();
     }
@@ -514,6 +516,7 @@ Default behavior:
     const accountName = document.getElementById('accountName');
     const accountType = document.getElementById('accountType');
     const accountNotes = document.getElementById('accountNotes');
+    const accountIsSalary = document.getElementById('accountIsSalary');
     const accountSave = document.getElementById('accountSave');
     const accountCancel = document.getElementById('accountCancel');
 
@@ -633,14 +636,16 @@ Default behavior:
       const results = [];
 
       for (const emp of employees){
-        // gross salary: sum of Expense transactions for this contact in calendar year (conservative approach)
+        // gross salary: sum of transactions for this contact in calendar year where:
+        // - account.isSalary === true OR account.type is Expense OR Revenue
         const gross = txs.reduce((sum,t)=>{
           if (!t.contactId || t.contactId !== emp.id) return sum;
           if (!t.date) return sum;
           if (t.date.slice(0,4) !== String(year)) return sum;
           const acc = findAccount(biz.id, t.accountId);
-          // consider as salary payment if account.type === 'Expense'
-          if (acc && acc.type === 'Expense') return sum + Number(t.amount || 0);
+          if (!acc) return sum;
+          const treatAsSalary = !!acc.isSalary || acc.type === 'Expense' || acc.type === 'Revenue';
+          if (treatAsSalary) return sum + Number(t.amount || 0);
           return sum;
         }, 0);
 
@@ -731,7 +736,7 @@ Default behavior:
 
     // modal helpers
     function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; modal.setAttribute('aria-hidden','false'); }
-    function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; accountEditingId=null; }
+    function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; accountEditingId=null; editTxnId=null; }
     modalOverlay.addEventListener('click', () => {
       const modals = [userModal, businessModal, editModal, contactModal, accountModal];
       modals.forEach(m=>{ if (m && m.style.display === 'block') closeModal(m); });
@@ -822,7 +827,11 @@ Default behavior:
       const ownedBizIds = data.businesses.filter(b=>b.ownerId===u.id).map(b=>b.id);
       data.businesses = data.businesses.filter(b=>b.ownerId !== u.id);
       for (const bid of ownedBizIds){ if (data.transactions[bid]) delete data.transactions[bid]; }
-      for (const b of data.businesses){ if (Array.isArray(b.members)) b.members = b.members.filter(mid=>mid!==u.id); const txs = data.transactions[b.id]||[]; data.transactions[b.id] = txs.filter(t=>t.authorUserId !== u.id); }
+      for (const b of data.businesses){
+        if (Array.isArray(b.members)) b.members = b.members.filter(mid=>mid!==u.id);
+        const txs = data.transactions[b.id]||[];
+        data.transactions[b.id] = txs.filter(t=>t.authorUserId !== u.id);
+      }
       data.users = data.users.filter(x=>x.id !== u.id);
       if (!data.users.length) { data = { users: [], businesses: [], transactions: {} }; }
       saveData();
@@ -983,7 +992,8 @@ Default behavior:
         b.accounts.forEach(a=>{
           const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
           const isWht = (b.whtAccountId && a.id === b.whtAccountId);
-          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span></div>
+          const salaryTag = a.isSalary ? '<span class="muted"> (Salary)</span>' : '';
+          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''}${salaryTag} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span><br/><small class="muted">${escapeHtml(a.notes||'')}</small></div>
             <div style="display:flex;gap:6px"><button class="small" onclick="window.editAccount('${a.id}')">Edit</button><button class="small danger" onclick="window.deleteAccount('${a.id}')">Delete</button></div>`;
           accountsListDiv.appendChild(d);
         });
@@ -996,290 +1006,384 @@ Default behavior:
     window.editContact = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
       const c = b.contacts.find(x=>x.id===id); if (!c) return;
-      contactModalTitle.textContent = 'Edit Contact'; contactName.value = c.name||''; contactType.value = c.type||'Customer'; contactInfo.value = c.info||''; contactNotes.value = c.notes||''; contactEditingId = c.id;
+      contactModalTitle.textContent = 'Edit Contact'; contactName.value = c.name||''; contactType.value = c.type||'Customer'; contactInfo.value = c.info||''; contactNotes.value = c.notes||'';
+      contactEditingId = c.id;
       openModal(contactModal);
     };
+
     window.deleteContact = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
-      if (!confirm('Delete contact?')) return;
+      const c = b.contacts.find(x=>x.id===id); if (!c) return;
+      if (!confirm(`Delete contact "${c.name}"? This will not remove transactions.`)) return;
       b.contacts = b.contacts.filter(x=>x.id!==id);
-      const txs = data.transactions[b.id] || [];
-      for (const t of txs) if (t.contactId === id) t.contactId = null;
-      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      saveData();
+      refreshContactsAccountsUI();
+      renderLedger();
+      renderMonthlyPayePitSummaries();
     };
 
     window.editAccount = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
       const a = b.accounts.find(x=>x.id===id); if (!a) return;
-      accountModalTitle.textContent = 'Edit Account'; accountCode.value = a.code||''; accountName.value = a.name||''; accountType.value = a.type||'Asset'; accountNotes.value = a.notes||''; accountEditingId = a.id;
+      accountModalTitle.textContent = 'Edit Account'; accountCode.value = a.code||''; accountName.value = a.name||''; accountType.value = a.type||'Asset'; accountNotes.value = a.notes||''; accountIsSalary.checked = !!a.isSalary;
+      accountEditingId = a.id;
       openModal(accountModal);
     };
+
     window.deleteAccount = function(id){
       const b = findBiz(selectedBusinessId); if (!b) return;
-      if (b.whtAccountId === id) { if (!confirm('This is the WHT Payable account. Deleting will unset the WHT account. Continue?')) return; b.whtAccountId = null; }
+      const a = b.accounts.find(x=>x.id===id); if (!a) return;
+      if (!confirm(`Delete account "${a.code} - ${a.name}"? This will not remove transactions.`)) return;
       b.accounts = b.accounts.filter(x=>x.id!==id);
-      const txs = data.transactions[b.id] || [];
-      for (const t of txs) if (t.accountId === id) t.accountId = null;
-      saveData(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      if (b.whtAccountId && b.whtAccountId === id) b.whtAccountId = null;
+      saveData();
+      refreshContactsAccountsUI();
+      renderLedger();
+      renderMonthlyPayePitSummaries();
     };
 
+    // Contact modal actions
     btnOpenContacts.addEventListener('click', ()=>{
-      contactModalTitle.textContent = 'Add Contact'; contactName.value=''; contactType.value='Customer'; contactInfo.value=''; contactNotes.value=''; contactEditingId = null; openModal(contactModal);
+      contactModalTitle.textContent = 'Add Contact';
+      contactName.value=''; contactType.value='Customer'; contactInfo.value=''; contactNotes.value=''; contactEditingId=null;
+      openModal(contactModal);
     });
+
     btnAddContactInline.addEventListener('click', ()=>{
-      contactModalTitle.textContent = 'Add Contact'; contactName.value=''; contactType.value='Vendor'; contactInfo.value=''; contactNotes.value=''; contactEditingId = null; openModal(contactModal);
+      contactModalTitle.textContent = 'Add Contact';
+      contactName.value=''; contactType.value='Customer'; contactInfo.value=''; contactNotes.value=''; contactEditingId=null;
+      openModal(contactModal);
     });
 
     contactSave.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
-      const name = (contactName.value||'').trim(); if (!name) { alert('Contact name required'); return; }
-      const info = (contactInfo.value||'').trim(); const notes = (contactNotes.value||'').trim(); const type = contactType.value || 'Customer';
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const name = (contactName.value||'').trim();
+      if (!name) { alert('Name required'); return; }
+      const type = contactType.value || 'Customer';
+      const info = (contactInfo.value||'').trim();
+      const notes = (contactNotes.value||'').trim();
       if (contactEditingId){
         const c = b.contacts.find(x=>x.id===contactEditingId); if (!c) return;
         c.name = name; c.type = type; c.info = info; c.notes = notes;
       } else {
-        const id = uid('c'); b.contacts.push({ id, name, type, info, notes });
+        const id = uid('c');
+        b.contacts.push({ id, name, type, info, notes });
       }
-      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); renderMonthlyPayePitSummaries();
     });
     contactCancel.addEventListener('click', ()=> closeModal(contactModal));
 
+    // Account modal actions
     btnOpenAccounts.addEventListener('click', ()=>{
-      accountModalTitle.textContent = 'Add Account'; accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountEditingId = null; openModal(accountModal);
+      accountModalTitle.textContent = 'Add Account';
+      accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountIsSalary.checked = false; accountEditingId=null;
+      openModal(accountModal);
     });
+
     btnAddAccountInline.addEventListener('click', ()=>{
-      accountModalTitle.textContent = 'Add Account'; accountCode.value=''; accountName.value=''; accountType.value='Expense'; accountNotes.value=''; accountEditingId = null; openModal(accountModal);
+      accountModalTitle.textContent = 'Add Account';
+      accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountIsSalary.checked = false; accountEditingId=null;
+      openModal(accountModal);
     });
 
     accountSave.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
-      const code = (accountCode.value||'').trim(); const name = (accountName.value||'').trim(); const type = accountType.value || 'Asset'; const notes = (accountNotes.value||'').trim();
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const code = (accountCode.value||'').trim();
+      const name = (accountName.value||'').trim();
+      const type = accountType.value || 'Asset';
+      const notes = (accountNotes.value||'').trim();
+      const isSalary = !!accountIsSalary.checked;
+      if (!code) { alert('Account code required'); return; }
       if (!name) { alert('Account name required'); return; }
       if (accountEditingId){
         const a = b.accounts.find(x=>x.id===accountEditingId); if (!a) return;
-        a.code = code; a.name = name; a.type = type; a.notes = notes;
+        a.code = code; a.name = name; a.type = type; a.notes = notes; a.isSalary = isSalary;
       } else {
-        const id = uid('a'); b.accounts.push({ id, code, name, type, notes });
+        const id = uid('a');
+        b.accounts.push({ id, code, name, type, notes, isSalary });
       }
-      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      ensureBizWhtAccount(b);
+      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); renderMonthlyPayePitSummaries();
     });
     accountCancel.addEventListener('click', ()=> closeModal(accountModal));
 
-    // populate selects
+    // populate contact/account selects
     function populateContactSelects(){
-      [txnContact, editTxnContact].forEach(sel=>{
-        if (!sel) return;
-        const prev = sel.value;
-        sel.innerHTML = '<option value="">(none)</option>';
-        const b = findBiz(selectedBusinessId);
-        if (!b || !Array.isArray(b.contacts)) return;
-        b.contacts.forEach(c=>{ const o = document.createElement('option'); o.value = c.id; o.textContent = c.name + ' (' + c.type + ')'; sel.appendChild(o); });
-        if (prev) sel.value = prev;
+      txnContact.innerHTML = ''; editTxnContact.innerHTML = '';
+      const b = findBiz(selectedBusinessId);
+      const emptyOpt = document.createElement('option'); emptyOpt.value=''; emptyOpt.textContent='(none)'; txnContact.appendChild(emptyOpt); editTxnContact.appendChild(emptyOpt.cloneNode(true));
+      if (!b) return;
+      (b.contacts || []).forEach(c=>{
+        const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} (${c.type||''})`; txnContact.appendChild(o);
+        const o2 = o.cloneNode(true); editTxnContact.appendChild(o2);
       });
     }
 
     function populateAccountSelects(){
-      [txnAccount, editTxnAccount].forEach(sel=>{
-        if (!sel) return;
-        const prev = sel.value;
-        sel.innerHTML = '<option value="">(none)</option>';
-        const b = findBiz(selectedBusinessId);
-        if (!b || !Array.isArray(b.accounts)) return;
-        b.accounts.forEach(a=>{ const o = document.createElement('option'); o.value = a.id; o.textContent = (a.code ? a.code + ' - ' : '') + a.name + ' (' + displayAccountType(a.type) + ')'; sel.appendChild(o); });
-        if (prev) sel.value = prev;
+      txnAccount.innerHTML = ''; editTxnAccount.innerHTML = '';
+      const b = findBiz(selectedBusinessId);
+      if (!b) return;
+      (b.accounts || []).forEach(a=>{
+        const label = `${a.code || ''} - ${a.name || ''} (${displayAccountType(a.type)})${a.isSalary ? ' [Salary]' : ''}`;
+        const o = document.createElement('option'); o.value = a.id; o.textContent = label; txnAccount.appendChild(o);
+        const o2 = o.cloneNode(true); editTxnAccount.appendChild(o2);
       });
-      // ensure WHT inline visibility updates when add/account select changes
-      updateWhtInlineVisibility();
-    }
 
-    // derive transaction type from account type
-    function deriveTypeFromAccount(account){
-      if (!account) return 'Income';
-      if (account.type === 'Revenue') return 'Income';
-      if (account.type === 'Expense') return 'Expense';
-      return 'Income';
+      // show/hide WHT inline controls depending on whether biz has WHT enabled or not
+      if (b && b.whtAutoCreate) {
+        whtInlineLabel.style.display = 'inline-block';
+        whtRateInlineLabel.style.display = 'inline-block';
+        editWhtLabel.style.display = 'inline-block';
+        editWhtRateLabel.style.display = 'inline-block';
+      } else {
+        whtInlineLabel.style.display = 'none';
+        whtRateInlineLabel.style.display = 'none';
+        editWhtLabel.style.display = 'none';
+        editWhtRateLabel.style.display = 'none';
+      }
     }
-
-    // update WHT inline visibility (shown when selected account is Expense)
-    function updateWhtInlineVisibility(){
-      const acc = findAccount(selectedBusinessId, txnAccount.value);
-      const isExpense = acc && acc.type === 'Expense';
-      whtInlineLabel.style.display = isExpense ? 'inline-block' : 'none';
-      whtRateInlineLabel.style.display = isExpense ? 'inline-block' : 'none';
-      if (!isExpense) { txnWhtEnabled.checked = false; txnWhtRate.value = 5; }
-    }
-    txnAccount.addEventListener('change', updateWhtInlineVisibility);
-
-    // update edit modal WHT visibility when account changes
-    function updateEditWhtVisibility(){
-      const acc = findAccount(selectedBusinessId, editTxnAccount.value);
-      const isExpense = acc && acc.type === 'Expense';
-      editWhtLabel.style.display = isExpense ? 'inline-block' : 'none';
-      editWhtRateLabel.style.display = isExpense ? 'inline-block' : 'none';
-      if (!isExpense) { editTxnWhtEnabled.checked = false; editTxnWhtRate.value = 5; }
-    }
-    editTxnAccount.addEventListener('change', updateEditWhtVisibility);
 
     // Add transaction
     btnAddTxn.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business first'); return; }
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select a business'); return; }
       const date = txnDate.value || new Date().toISOString().slice(0,10);
+      const accountId = txnAccount.value || '';
       const desc = (txnDesc.value||'').trim();
-      const amount = Number(txnAmount.value) || 0;
-      const accountId = txnAccount.value || null;
-      const contactId = txnContact.value || null;
-      const whtEnabledVal = !!txnWhtEnabled.checked;
-      const whtRateVal = parseFloat(txnWhtRate.value) || 0;
-      if (!accountId){ if (!confirm('No account selected. Add transaction without account?')) return; }
-      if (!amount || amount <= 0){ alert('Amount must be > 0'); return; }
-      const id = uid('txn'); const t = { id, date, desc, amount, authorUserId: selectedUserId, contactId: contactId || null, accountId: accountId || null, whtEnabled: whtEnabledVal, whtRate: whtRateVal };
-      if (!data.transactions[b.id]) data.transactions[b.id] = [];
-      data.transactions[b.id].unshift(t);
-      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); refreshContactsAccountsUI();
+      const amount = Number(txnAmount.value || 0);
+      const contactId = txnContact.value || '';
+      const whtEnabled = !!txnWhtEnabled.checked;
+      const whtRate = parseFloat(txnWhtRate.value) || 0;
+      if (!accountId) { alert('Select an account'); return; }
+      if (!amount || amount <= 0) { alert('Enter an amount'); return; }
+      const id = uid('txn');
+      const tx = { id, date, desc, amount, authorUserId: selectedUserId, contactId, accountId, whtEnabled, whtRate };
+      if (!Array.isArray(data.transactions[b.id])) data.transactions[b.id] = [];
+      data.transactions[b.id].push(tx);
+      saveData();
+      txnDesc.value=''; txnAmount.value=''; txnContact.value=''; txnAccount.value='';
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
     });
 
-    // render ledger with pagination and search
-    function getFilteredTransactions(){
-      const all = data.transactions[selectedBusinessId] || [];
-      if (!ledgerFilterText) return all;
-      const q = ledgerFilterText.toLowerCase();
-      return all.filter(t=>{
-        const acc = findAccount(selectedBusinessId, t.accountId);
-        const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' (' + displayAccountType(acc.type) + ')') : '';
-        const contact = findContact(selectedBusinessId, t.contactId);
-        const contactText = contact ? contact.name : '';
-        const author = findUser(t.authorUserId);
-        const authorText = author ? (author.display||author.username) : '';
-        return (t.date && t.date.toLowerCase().includes(q)) ||
-               (t.desc && t.desc.toLowerCase().includes(q)) ||
-               (String(t.amount||'').toLowerCase().includes(q)) ||
-               (accText && accText.toLowerCase().includes(q)) ||
-               (contactText && contactText.toLowerCase().includes(q)) ||
-               (authorText && authorText.toLowerCase().includes(q));
-      });
-    }
-
+    // Render ledger (with pagination & search)
     function renderLedger(){
       ledgerTbody.innerHTML = '';
-      const all = getFilteredTransactions();
-      const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+      const b = findBiz(selectedBusinessId);
+      if (!b) return;
+      const txs = (data.transactions[b.id] || []).slice().sort((a,bx)=> (bx.date || '').localeCompare(a.date || ''));
+      // apply search filter
+      const filter = (ledgerSearch.value || ledgerFilterText || '').trim().toLowerCase();
+      const filtered = txs.filter(t=>{
+        if (!filter) return true;
+        const acc = findAccount(b.id, t.accountId);
+        const contact = findContact(b.id, t.contactId);
+        const author = findUser(t.authorUserId);
+        return [
+          t.date || '',
+          t.desc || '',
+          String(t.amount || ''),
+          acc ? (acc.name + ' ' + acc.code) : '',
+          contact ? contact.name : '',
+          author ? (author.display || author.username) : ''
+        ].join(' ').toLowerCase().includes(filter);
+      });
+
+      const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
       const start = (currentPage - 1) * PAGE_SIZE;
-      const pageItems = all.slice(start, start + PAGE_SIZE);
+      const pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+
       pageItems.forEach(t=>{
-        const tr = document.createElement('tr');
-        const acc = findAccount(selectedBusinessId, t.accountId);
-        const contact = findContact(selectedBusinessId, t.contactId);
+        const acc = findAccount(b.id, t.accountId);
+        const contact = findContact(b.id, t.contactId);
         const author = findUser(t.authorUserId);
-        const whtAmount = (t.whtEnabled && t.whtRate) ? ((t.amount || 0) * (t.whtRate/100)) : 0;
+        const whtAmount = (t.whtEnabled && t.whtRate) ? (Number(t.amount || 0) * Number(t.whtRate || 0) / 100) : 0;
+        const tr = document.createElement('tr');
         tr.innerHTML = `<td>${escapeHtml(t.date || '')}</td>
           <td>${escapeHtml(t.desc || '')}</td>
-          <td>${escapeHtml(acc ? ((acc.code?acc.code+' - ':'')+acc.name) : '(none)')}</td>
-          <td class="nowrap">${formatMoney(t.amount || 0)}</td>
+          <td>${escapeHtml(acc ? (acc.code + ' - ' + acc.name) : '(no account)')}</td>
+          <td class="nowrap">${formatMoney(t.amount)}</td>
           <td class="nowrap">${formatMoney(whtAmount)}</td>
           <td>${escapeHtml(contact ? contact.name : '')}</td>
-          <td>${escapeHtml(author ? (author.display||author.username) : '')}</td>
-          <td><div class="actions"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`;
+          <td>${escapeHtml(author ? (author.display || author.username) : '')}</td>
+          <td><div style="display:flex;gap:6px"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`;
         ledgerTbody.appendChild(tr);
       });
-      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
     }
 
-    // expose edit & delete tx
-    window.openEditTxn = function(id){
+    window.openEditTxn = function(txnId){
       const b = findBiz(selectedBusinessId); if (!b) return;
-      const txs = data.transactions[b.id] || [];
-      const t = txs.find(x=>x.id===id); if (!t) return;
-      editTxnId = t.id;
-      editTxnDate.value = t.date || '';
-      editTxnDesc.value = t.desc || '';
-      editTxnAmount.value = t.amount || 0;
-      editTxnContact.value = t.contactId || '';
-      editTxnAccount.value = t.accountId || '';
-      editTxnWhtEnabled.checked = !!t.whtEnabled;
-      editTxnWhtRate.value = t.whtRate || 5;
+      const tx = (data.transactions[b.id] || []).find(x=>x.id===txnId); if (!tx) return;
+      editTxnId = tx.id;
+      editTxnDate.value = tx.date || '';
+      editTxnDesc.value = tx.desc || '';
+      editTxnAmount.value = tx.amount || 0;
+      editTxnAccount.value = tx.accountId || '';
+      editTxnContact.value = tx.contactId || '';
+      editTxnWhtEnabled.checked = !!tx.whtEnabled;
+      editTxnWhtRate.value = tx.whtRate || 0;
       openModal(editModal);
-      updateEditWhtVisibility();
     };
-    window.deleteTxn = function(id){
+
+    window.deleteTxn = function(txnId){
       const b = findBiz(selectedBusinessId); if (!b) return;
       if (!confirm('Delete transaction?')) return;
-      data.transactions[b.id] = (data.transactions[b.id] || []).filter(x=>x.id !== id);
-      saveData(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      data.transactions[b.id] = (data.transactions[b.id] || []).filter(x=>x.id !== txnId);
+      saveData();
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
     };
 
-    editCancel.addEventListener('click', ()=> closeModal(editModal));
     editSave.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId); if (!b) return;
+      if (!editTxnId) return closeModal(editModal);
       const txs = data.transactions[b.id] || [];
-      const t = txs.find(x=>x.id===editTxnId); if (!t) return;
-      t.date = editTxnDate.value || t.date;
-      t.desc = (editTxnDesc.value||'').trim();
-      t.amount = Number(editTxnAmount.value) || 0;
-      t.contactId = editTxnContact.value || null;
-      t.accountId = editTxnAccount.value || null;
-      t.whtEnabled = !!editTxnWhtEnabled.checked;
-      t.whtRate = parseFloat(editTxnWhtRate.value) || 0;
-      saveData(); closeModal(editModal); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); refreshContactsAccountsUI();
+      const tx = txs.find(x=>x.id===editTxnId); if (!tx) return;
+      tx.date = editTxnDate.value || new Date().toISOString().slice(0,10);
+      tx.desc = (editTxnDesc.value||'').trim();
+      tx.amount = Number(editTxnAmount.value || 0);
+      tx.accountId = editTxnAccount.value || '';
+      tx.contactId = editTxnContact.value || '';
+      tx.whtEnabled = !!editTxnWhtEnabled.checked;
+      tx.whtRate = parseFloat(editTxnWhtRate.value) || 0;
+      saveData();
+      closeModal(editModal);
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
+    });
+    editCancel.addEventListener('click', ()=> closeModal(editModal));
+
+    // Search & pagination
+    btnSearch.addEventListener('click', ()=>{
+      ledgerFilterText = ledgerSearch.value || '';
+      currentPage = 1;
+      renderLedger();
+    });
+    btnClearSearch.addEventListener('click', ()=>{
+      ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger();
+    });
+    btnPrevPage.addEventListener('click', ()=>{
+      if (currentPage > 1) { currentPage--; renderLedger(); }
+    });
+    btnNextPage.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const txs = (data.transactions[b.id] || []).filter(()=>true);
+      const totalPages = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
+      if (currentPage < totalPages) { currentPage++; renderLedger(); }
     });
 
-    // search & pagination controls
-    btnSearch.addEventListener('click', ()=> { ledgerFilterText = ledgerSearch.value || ''; currentPage = 1; renderLedger(); });
-    btnClearSearch.addEventListener('click', ()=> { ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger(); });
-    btnPrevPage.addEventListener('click', ()=> { if (currentPage > 1) currentPage--; renderLedger(); });
-    btnNextPage.addEventListener('click', ()=> { const all = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE)); if (currentPage < totalPages) currentPage++; renderLedger(); });
-
-    // export/import/clear
-    btnExport.addEventListener('click', ()=>{
-      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'ntc_data_export.json'; a.click(); URL.revokeObjectURL(url);
-    });
-    btnImport.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', (e)=>{
-      const f = e.target.files && e.target.files[0]; if (!f) return;
-      const reader = new FileReader(); reader.onload = (ev)=>{
-        try {
-          const parsed = JSON.parse(ev.target.result);
-          if (confirm('Replace current data with imported data?')) { data = parsed; saveData(); loadData(); refreshUserBusinessSelectors(); ensureSelection(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); }
-        } catch(err){ alert('Invalid JSON'); }
-      }; reader.readAsText(f);
-    });
-    btnClearAll.addEventListener('click', ()=> { if (!confirm('Clear all data? This cannot be undone.')) return; localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; loadData(); refreshUserBusinessSelectors(); ensureSelection(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); });
-
-    // contacts/accounts export
-    btnExportContacts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${b.name || 'contacts'}_contacts.json`; a.click(); URL.revokeObjectURL(url);
-    });
-    btnExportAccounts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first');
-      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${b.name || 'accounts'}_accounts.json`; a.click(); URL.revokeObjectURL(url);
-    });
-
-    // totals & tax summaries (minimal, kept for compatibility)
+    // summaries: VAT, WHT, totals
     function calculateSummary(){
       const b = findBiz(selectedBusinessId);
-      // simple totals: revenue, expenses, wht
-      const txs = (data.transactions[b ? b.id : ''] || []);
-      let revenue = 0, expenses = 0, whtTotal = 0;
-      for (const t of txs){
-        const acc = findAccount(selectedBusinessId, t.accountId);
-        if (acc && acc.type === 'Revenue') revenue += Number(t.amount || 0);
-        if (acc && acc.type === 'Expense') expenses += Number(t.amount || 0);
-        if (t.whtEnabled && t.whtRate) whtTotal += ((Number(t.amount||0) * (t.whtRate/100)));
-      }
-      totalsSummaryDiv.innerHTML = `<div><strong>Totals</strong><br/>Revenue: ₦${formatMoney(revenue)} — Expenses: ₦${formatMoney(expenses)} — WHT withheld: ₦${formatMoney(whtTotal)}</div>`;
-      // render PAYE summary as well
-      renderPayeSummary(b);
+      vatSummaryDiv.innerHTML = ''; whtSummaryDiv.innerHTML = ''; totalsSummaryDiv.innerHTML = ''; taxSummaryDiv.innerHTML = '';
+      if (!b) return;
+      const txs = data.transactions[b.id] || [];
+      let vatTotal = 0, whtTotal = 0, incomeTotal = 0, expenseTotal = 0;
+      txs.forEach(t=>{
+        const acc = findAccount(b.id, t.accountId);
+        if (acc && acc.type === 'Revenue') incomeTotal += Number(t.amount || 0);
+        if (acc && acc.type === 'Expense') expenseTotal += Number(t.amount || 0);
+        if (t.whtEnabled && typeof t.whtRate === 'number' && t.whtRate > 0){
+          whtTotal += (Number(t.amount || 0) * Number(t.whtRate || 0) / 100);
+        }
+        // VAT estimation (very simple): if business.vatEnabled and account not VAT exempt we won't try to be perfect here
+      });
+      vatSummaryDiv.innerHTML = `<div><strong>Income:</strong> ₦${formatMoney(incomeTotal)} — <strong>Expenses:</strong> ₦${formatMoney(expenseTotal)}</div>`;
+      whtSummaryDiv.innerHTML = `<div><strong>Total WHT Withheld:</strong> ₦${formatMoney(whtTotal)}</div>`;
+      totalsSummaryDiv.innerHTML = `<div><strong>Net (approx):</strong> ₦${formatMoney(incomeTotal - expenseTotal)}</div>`;
     }
 
-    // helper functions for editing contacts/accounts via onclick buttons were referenced earlier:
-    window.editAccount = window.editAccount || window.editAccount;
-    window.editContact = window.editContact || window.editContact;
+    // Export / Import
+    btnExport.addEventListener('click', ()=>{
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'ntc_data.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
 
+    btnExportContacts.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select business first'); return; }
+      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'contacts.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    btnExportAccounts.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select business first'); return; }
+      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'accounts.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    btnImport.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = function(ev){
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (!parsed) throw new Error('Invalid JSON');
+          if (confirm('This will replace local data. Continue?')) {
+            data = parsed;
+            saveData();
+            loadData();
+            refreshUserBusinessSelectors();
+            ensureSelection();
+            refreshContactsAccountsUI();
+            renderLedger();
+            calculateSummary();
+            renderMonthlyPayePitSummaries();
+            alert('Import successful');
+          }
+        } catch(err){ alert('Import failed: ' + (err && err.message)); }
+      };
+      reader.readAsText(f);
+      fileInput.value = '';
+    });
+
+    btnClearAll.addEventListener('click', ()=>{
+      if (!confirm('Clear all local data? This cannot be undone.')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      data = { users: [], businesses: [], transactions: {} };
+      selectedUserId = null; selectedBusinessId = null;
+      loadData();
+      refreshUserBusinessSelectors();
+      ensureSelection();
+      refreshContactsAccountsUI();
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
+    });
+
+    // initial population helpers invoked earlier
+    function renderLedgerAndSummaries(){
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
+    }
+
+    // keep functions available
+    window.renderLedger = renderLedger;
+    window.calculateSummary = calculateSummary;
+    window.renderMonthlyPayePitSummaries = renderMonthlyPayePitSummaries;
+
+    // ensure UI initial population
+    populateContactSelects();
+    populateAccountSelects();
+    renderLedger();
+    calculateSummary();
+    renderMonthlyPayePitSummaries();
   </script>
+  <footer>
+    <small class="muted">Simple client-side accounting & tax demo. Data stored in local browser storage. Use Export/Import to backup.</small>
+  </footer>
 </body>
   </html>
