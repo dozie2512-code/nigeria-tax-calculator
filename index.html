@@ -1162,25 +1162,262 @@
       const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first'); const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='accounts.json'; a.click(); URL.revokeObjectURL(url);
     });
 
+    // Helper function: compute progressive tax using slices
+    function computeProgressiveTax(taxable, slices) {
+      if (taxable <= 0) return 0;
+      let tax = 0;
+      let prevUpTo = 0;
+      for (const slice of slices) {
+        const bracket = slice.upTo - prevUpTo;
+        const portion = Math.min(taxable - prevUpTo, bracket);
+        if (portion <= 0) break;
+        tax += portion * slice.rate;
+        if (taxable <= slice.upTo) break;
+        prevUpTo = slice.upTo;
+      }
+      return Math.round(tax * 100) / 100;
+    }
+
+    // Helper function: calculate days between two dates
+    function daysBetween(date1, date2) {
+      const d1 = new Date(date1);
+      const d2 = new Date(date2);
+      const diffMs = d2 - d1;
+      return Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end dates
+    }
+
+    // Store last generated report data for exports
+    let lastReportData = null;
+    let lastReportType = null;
+
     // reports (very basic)
     btnGenerateReport.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first');
       const from = reportDateFrom.value || '0000-01-01';
       const to = reportDateTo.value || '9999-12-31';
-      const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to);
-      let html = `<h4>Report: ${escapeHtml(reportType.value || '')}</h4><div>From ${escapeHtml(from)} to ${escapeHtml(to)}</div>`;
-      html += '<table style="width:100%;border-collapse:collapse;"><tr><th>Date</th><th>Description</th><th>Account</th><th>Amount</th><th>WHT</th></tr>';
-      for (const t of txs) {
-        const account = findAccount(b.id, t.accountId);
-        html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.desc)}</td><td>${escapeHtml(account ? account.name : '')}</td><td>${formatMoney(t.amount)}</td><td>${formatMoney(t.whtAmount||0)}</td></tr>`;
+      const rType = reportType.value;
+      lastReportType = rType;
+
+      if (rType === 'paye') {
+        // PAYE Report Implementation
+        const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to);
+        
+        // Get threshold - use business.threshold, or business.pit.threshold, or DEFAULT_PIT.threshold
+        const threshold = (typeof b.threshold === 'number') ? b.threshold : 
+                         (b.pit && typeof b.pit.threshold === 'number') ? b.pit.threshold : 
+                         DEFAULT_PIT.threshold;
+        
+        // Prorate threshold for date range
+        const daysInRange = (from === '0000-01-01' && to === '9999-12-31') ? 365 : daysBetween(from, to);
+        const proratedThreshold = Math.round((threshold * (daysInRange / 365)) * 100) / 100;
+        
+        // Get PIT slices
+        const slices = (b.pit && Array.isArray(b.pit.slices)) ? b.pit.slices : DEFAULT_PIT.slices;
+        
+        // Get employee contacts
+        const employees = (b.contacts || []).filter(c => c.type === 'Employee');
+        
+        if (employees.length === 0) {
+          reportOutput.innerHTML = '<div class="muted">No employee contacts in this business. Add contacts with type "Employee" first.</div>';
+          lastReportData = null;
+          return;
+        }
+        
+        // Build map of contactId to employee
+        const employeeMap = {};
+        employees.forEach(e => { employeeMap[e.id] = e; });
+        
+        // Aggregate wages per employee (all transactions with employee contactId)
+        const employeeData = {};
+        for (const t of txs) {
+          if (t.contactId && employeeMap[t.contactId]) {
+            if (!employeeData[t.contactId]) {
+              employeeData[t.contactId] = {
+                employeeName: employeeMap[t.contactId].name,
+                employeeId: t.contactId,
+                gross: 0
+              };
+            }
+            employeeData[t.contactId].gross += Number(t.amount) || 0;
+          }
+        }
+        
+        const rows = Object.values(employeeData);
+        
+        if (rows.length === 0) {
+          reportOutput.innerHTML = '<div class="muted">No employee payroll transactions in range.</div>';
+          lastReportData = null;
+          return;
+        }
+        
+        // Calculate taxable, PAYE, and net for each employee
+        rows.forEach(row => {
+          row.proratedThreshold = proratedThreshold;
+          row.taxable = Math.max(0, row.gross - proratedThreshold);
+          row.paye = computeProgressiveTax(row.taxable, slices);
+          row.net = row.gross - row.paye;
+        });
+        
+        // Calculate totals
+        const totals = rows.reduce((acc, row) => {
+          acc.gross += row.gross;
+          acc.taxable += row.taxable;
+          acc.paye += row.paye;
+          acc.net += row.net;
+          return acc;
+        }, { gross: 0, taxable: 0, paye: 0, net: 0 });
+        
+        // Render HTML table
+        let html = `<h4>PAYE Report</h4>`;
+        html += `<div class="muted" style="margin-bottom:8px;">Period: ${from === '0000-01-01' ? 'All time' : escapeHtml(from)} to ${to === '9999-12-31' ? 'present' : escapeHtml(to)} (${daysInRange} days)</div>`;
+        html += '<table class="ledger-table">';
+        html += '<thead><tr><th>Employee</th><th>Gross (₦)</th><th>Prorated threshold (₦)</th><th>Taxable (₦)</th><th>PAYE (₦)</th><th>Net pay (₦)</th></tr></thead>';
+        html += '<tbody>';
+        
+        for (const row of rows) {
+          html += '<tr>';
+          html += `<td>${escapeHtml(row.employeeName)}</td>`;
+          html += `<td class="nowrap">${formatMoney(row.gross)}</td>`;
+          html += `<td class="nowrap">${formatMoney(row.proratedThreshold)}</td>`;
+          html += `<td class="nowrap">${formatMoney(row.taxable)}</td>`;
+          html += `<td class="nowrap">${formatMoney(row.paye)}</td>`;
+          html += `<td class="nowrap">${formatMoney(row.net)}</td>`;
+          html += '</tr>';
+        }
+        
+        // Totals row
+        html += '<tr style="font-weight:bold;background:#f7f9fc;">';
+        html += '<td>TOTAL</td>';
+        html += `<td class="nowrap">${formatMoney(totals.gross)}</td>`;
+        html += '<td>—</td>';
+        html += `<td class="nowrap">${formatMoney(totals.taxable)}</td>`;
+        html += `<td class="nowrap">${formatMoney(totals.paye)}</td>`;
+        html += `<td class="nowrap">${formatMoney(totals.net)}</td>`;
+        html += '</tr>';
+        
+        html += '</tbody></table>';
+        html += `<small class="note" style="margin-top:8px;display:block;">Note: Annual threshold of ₦${formatMoney(threshold)} prorated to ₦${formatMoney(proratedThreshold)} for ${daysInRange} days. All transactions with employee contacts are included as wages. Progressive PIT applied using ${slices.length} tax brackets.</small>`;
+        
+        reportOutput.innerHTML = html;
+        
+        // Store data for export
+        lastReportData = {
+          type: 'paye',
+          businessId: b.id,
+          businessName: b.name,
+          dateFrom: from,
+          dateTo: to,
+          daysInRange: daysInRange,
+          threshold: threshold,
+          proratedThreshold: proratedThreshold,
+          rows: rows,
+          totals: totals
+        };
+      } else {
+        // Original basic report for other types
+        const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to);
+        let html = `<h4>Report: ${escapeHtml(rType || '')}</h4><div>From ${escapeHtml(from)} to ${escapeHtml(to)}</div>`;
+        html += '<table style="width:100%;border-collapse:collapse;"><tr><th>Date</th><th>Description</th><th>Account</th><th>Amount</th><th>WHT</th></tr>';
+        for (const t of txs) {
+          const account = findAccount(b.id, t.accountId);
+          html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.desc)}</td><td>${escapeHtml(account ? account.name : '')}</td><td>${formatMoney(t.amount)}</td><td>${formatMoney(t.whtAmount||0)}</td></tr>`;
+        }
+        html += '</table>';
+        reportOutput.innerHTML = html;
+        lastReportData = { type: rType, txs: txs, from: from, to: to };
       }
-      html += '</table>';
-      reportOutput.innerHTML = html;
     });
 
-    btnExportHtml.addEventListener('click', ()=> { const h = reportOutput.innerHTML; if (!h) return alert('Generate a report first'); const blob = new Blob([h],{type:'text/html'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.html'; a.click(); URL.revokeObjectURL(url); });
-    btnExportCsv.addEventListener('click', ()=> { const b = findBiz(selectedBusinessId); if (!b) return; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); let csv = 'Date,Description,Account,Amount,WHT\\n'; for (const t of txs){ const acc=findAccount(b.id,t.accountId); csv += `"${t.date}","${t.desc.replace(/"/g,'""')}","${(acc?acc.name:'')}",${t.amount || 0},${t.whtAmount || 0}\\n`; } const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.csv'; a.click(); URL.revokeObjectURL(url); });
-    btnExportJson.addEventListener('click', ()=> { const b = findBiz(selectedBusinessId); if (!b) return; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); const blob=new Blob([JSON.stringify(txs,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.json'; a.click(); URL.revokeObjectURL(url); });
+    btnExportHtml.addEventListener('click', ()=> { 
+      const h = reportOutput.innerHTML; 
+      if (!h) return alert('Generate a report first'); 
+      const blob = new Blob([h],{type:'text/html'}); 
+      const url=URL.createObjectURL(blob); 
+      const a=document.createElement('a'); 
+      a.href=url; 
+      a.download='report.html'; 
+      a.click(); 
+      URL.revokeObjectURL(url); 
+    });
+
+    btnExportCsv.addEventListener('click', ()=> { 
+      const b = findBiz(selectedBusinessId); 
+      if (!b) return; 
+      
+      if (lastReportType === 'paye' && lastReportData && lastReportData.type === 'paye') {
+        // Export PAYE report as CSV
+        let csv = 'Employee,Gross (₦),Prorated threshold (₦),Taxable (₦),PAYE (₦),Net pay (₦)\n';
+        for (const row of lastReportData.rows) {
+          csv += `"${(row.employeeName || '').replace(/"/g, '""')}",${row.gross},${row.proratedThreshold},${row.taxable},${row.paye},${row.net}\n`;
+        }
+        // Add totals row
+        csv += `"TOTAL",${lastReportData.totals.gross},-,${lastReportData.totals.taxable},${lastReportData.totals.paye},${lastReportData.totals.net}\n`;
+        const blob = new Blob([csv], {type:'text/csv'}); 
+        const url = URL.createObjectURL(blob); 
+        const a = document.createElement('a'); 
+        a.href = url; 
+        a.download = 'paye_report.csv'; 
+        a.click(); 
+        URL.revokeObjectURL(url);
+      } else {
+        // Original CSV export for other reports
+        const from = reportDateFrom.value || '0000-01-01'; 
+        const to = reportDateTo.value || '9999-12-31'; 
+        const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); 
+        let csv = 'Date,Description,Account,Amount,WHT\n'; 
+        for (const t of txs){ 
+          const acc=findAccount(b.id,t.accountId); 
+          csv += `"${t.date}","${(t.desc || '').replace(/"/g,'""')}","${(acc?acc.name:'')}",${t.amount || 0},${t.whtAmount || 0}\n`; 
+        } 
+        const blob=new Blob([csv],{type:'text/csv'}); 
+        const url=URL.createObjectURL(blob); 
+        const a=document.createElement('a'); 
+        a.href=url; 
+        a.download='report.csv'; 
+        a.click(); 
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    btnExportJson.addEventListener('click', ()=> { 
+      const b = findBiz(selectedBusinessId); 
+      if (!b) return; 
+      
+      if (lastReportType === 'paye' && lastReportData && lastReportData.type === 'paye') {
+        // Export PAYE report as JSON with metadata
+        const exportData = {
+          reportType: 'PAYE',
+          businessId: lastReportData.businessId,
+          businessName: lastReportData.businessName,
+          dateFrom: lastReportData.dateFrom,
+          dateTo: lastReportData.dateTo,
+          daysInRange: lastReportData.daysInRange,
+          annualThreshold: lastReportData.threshold,
+          proratedThreshold: lastReportData.proratedThreshold,
+          rows: lastReportData.rows,
+          totals: lastReportData.totals
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'}); 
+        const url = URL.createObjectURL(blob); 
+        const a = document.createElement('a'); 
+        a.href = url; 
+        a.download = 'paye_report.json'; 
+        a.click(); 
+        URL.revokeObjectURL(url);
+      } else {
+        // Original JSON export for other reports
+        const from = reportDateFrom.value || '0000-01-01'; 
+        const to = reportDateTo.value || '9999-12-31'; 
+        const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); 
+        const blob=new Blob([JSON.stringify(txs,null,2)],{type:'application/json'}); 
+        const url=URL.createObjectURL(blob); 
+        const a=document.createElement('a'); 
+        a.href=url; 
+        a.download='report.json'; 
+        a.click(); 
+        URL.revokeObjectURL(url);
+      }
+    });
 
     // initial UI wiring
     refreshUserBusinessSelectors();
