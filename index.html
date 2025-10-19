@@ -37,9 +37,6 @@
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
     pre.small { font-size:0.85rem; white-space:pre-wrap; }
     .nowrap { white-space:nowrap; }
-    table.report { border-collapse:collapse; width:100%; }
-    table.report th, table.report td { border:1px solid #ddd; padding:8px; text-align:left; }
-    table.report th { background:#f2f6fa; }
   </style>
 </head>
 <body>
@@ -77,7 +74,6 @@
       <div class="form-inline">
         <label>Date: <input type="date" id="txnDate" /></label>
 
-        <!-- Account FIRST (moved before description) -->
         <label>Account:
           <select id="txnAccount"></select>
         </label>
@@ -86,7 +82,6 @@
         <label>Description: <input type="text" id="txnDesc" placeholder="Details" /></label>
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
 
-        <!-- WHT inline controls (shown/enabled when selected account is Expense by JS) -->
         <label id="whtInlineLabel" style="display:none;">
           <input type="checkbox" id="txnWhtEnabled" /> Withhold WHT
         </label>
@@ -160,27 +155,6 @@
         <div id="accountsList" style="max-height:220px;overflow:auto;border:1px solid #eef2f6;padding:8px;border-radius:6px;background:#fbfcff;"></div>
       </div>
     </section>
-
-    <section class="panel section" id="reportsPanel">
-      <h2 style="margin:0 0 8px 0;">Reports</h2>
-      <div class="form-inline" style="margin-bottom:8px;">
-        <label>Report Type:
-          <select id="reportType">
-            <option value="profit">Profit</option>
-            <option value="vat">VAT</option>
-            <option value="paye">PAYE</option>
-            <option value="wht">WHT</option>
-          </select>
-        </label>
-        <label>Date From: <input type="date" id="reportDateFrom" /></label>
-        <label>Date To: <input type="date" id="reportDateTo" /></label>
-        <button class="primary" id="btnGenerateReport">Generate Report</button>
-        <button id="btnExportHtml" class="small">Export HTML</button>
-        <button id="btnExportCsv" class="small">Export CSV</button>
-        <button id="btnExportJson" class="small">Export JSON</button>
-      </div>
-      <div id="reportOutput" style="margin-top:12px;"></div>
-    </section>
   </main>
 
   <!-- Modals -->
@@ -240,7 +214,6 @@
     <h3>Edit Transaction</h3>
     <label>Date: <input type="date" id="editTxnDate" /></label><br/>
 
-    <!-- Account before Description in edit modal -->
     <label>Account:
       <select id="editTxnAccount"></select>
     </label><br/>
@@ -248,7 +221,6 @@
     <label>Description: <input type="text" id="editTxnDesc" /></label><br/>
     <label>Amount (₦): <input type="number" id="editTxnAmount" min="0" step="0.01" /></label><br/>
 
-    <!-- WHT fields in edit modal -->
     <label id="editWhtLabel" style="display:none;">
       <input type="checkbox" id="editTxnWhtEnabled" /> Withhold WHT
     </label><br/>
@@ -314,7 +286,7 @@
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant - repaired index.html script
+    // GitHub Copilot Chat Assistant — edited index.html script (reports removed; summary added)
     const STORAGE_KEY = 'ntc_data_v2';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -338,12 +310,12 @@
     let currentPage = 1;
     let ledgerFilterText = '';
 
-    // last generated report cache (used by export buttons)
-    let lastReport = null;
-
     function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
     function formatMoney(v){ return (Number(v)||0).toLocaleString('en-NG', {maximumFractionDigits:2, minimumFractionDigits:0}); }
-    function escapeHtml(s){ if (s === undefined || s === null) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function escapeHtml(s){
+      if (s === undefined || s === null) return '';
+      return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
     function saveData(){ try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) { console.error('Save failed', e); alert('Saving failed: ' + (e && e.message)); } }
 
     function ensureBizWhtAccount(b){
@@ -426,7 +398,7 @@
       const now = new Date().toISOString().slice(0,10);
       data.transactions[bizId] = [
         { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate: 0 },
-        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 5 }
+        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Expense').id, whtEnabled: false, whtRate: 0 }
       ];
       saveData();
     }
@@ -552,15 +524,6 @@
     const btnImport = document.getElementById('btnImport');
     const fileInput = document.getElementById('fileInput');
     const btnClearAll = document.getElementById('btnClearAll');
-
-    const reportType = document.getElementById('reportType');
-    const reportDateFrom = document.getElementById('reportDateFrom');
-    const reportDateTo = document.getElementById('reportDateTo');
-    const btnGenerateReport = document.getElementById('btnGenerateReport');
-    const btnExportHtml = document.getElementById('btnExportHtml');
-    const btnExportCsv = document.getElementById('btnExportCsv');
-    const btnExportJson = document.getElementById('btnExportJson');
-    const reportOutput = document.getElementById('reportOutput');
 
     // temp editing ids
     let userEditingId = null;
@@ -976,79 +939,110 @@
       const id = uid('txn'); const t = { id, date, desc, amount, authorUserId: selectedUserId, contactId: contactId || null, accountId: accountId || null, whtEnabled: whtEnabledVal, whtRate: whtRateVal };
       if (!data.transactions[b.id]) data.transactions[b.id] = [];
       data.transactions[b.id].unshift(t);
-      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary(); refreshContactsAccountsUI();
+      saveData(); txnDesc.value=''; txnAmount.value=''; txnDate.value=''; txnAccount.value=''; txnContact.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; currentPage=1; renderLedger(); calculateSummary();
     });
 
     // render ledger with pagination and search
-    function getFilteredTransactions(){ const all = data.transactions[selectedBusinessId] || []; if (!ledgerFilterText) return all; const q = ledgerFilterText.toLowerCase(); return all.filter(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); const accName = acc ? ((acc.code?acc.code+' - ':'')+acc.name) : ''; const contact = findContact(selectedBusinessId, t.contactId); const contactName = contact ? contact.name : ''; const author = findUser(t.authorUserId); const authorName = author ? (author.display || author.username) : ''; return (t.date||'').toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q) || String(t.amount||'').toLowerCase().includes(q) || accName.toLowerCase().includes(q) || contactName.toLowerCase().includes(q) || authorName.toLowerCase().includes(q); }); }
+    function getFilteredTransactions(){ const all = data.transactions[selectedBusinessId] || []; if (!ledgerFilterText) return all; const q = ledgerFilterText.toLowerCase(); return all.filter(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' (' + acc.type + ')') : ''; const contact = findContact(selectedBusinessId, t.contactId); return (t.date||'').toString().toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q) || String(t.amount).toLowerCase().includes(q) || (contact && (contact.name||'').toLowerCase().includes(q)) || accText.toLowerCase().includes(q); }); }
 
-    function renderLedger(){ ledgerTbody.innerHTML=''; const b = findBiz(selectedBusinessId); if (!b){ ledgerTbody.innerHTML = '<tr><td colspan="8" class="muted">No business selected.</td></tr>'; return; } const filtered = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); if (currentPage > totalPages) currentPage = totalPages; const start = (currentPage-1)*PAGE_SIZE; const pageTx = filtered.slice(start, start+PAGE_SIZE);
-      pageTx.forEach(t=>{ const tr=document.createElement('tr'); const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' ('+acc.type+')') : '(none)'; const contact = findContact(selectedBusinessId, t.contactId); const contactText = contact ? contact.name+' ('+contact.type+')' : ''; const author = findUser(t.authorUserId); const authorText = author ? (author.display || author.username) : ''; const whtAmt = (t.whtEnabled && t.whtRate) ? (Number(t.amount||0) * (Number(t.whtRate||0)/100)) : 0; tr.innerHTML = `<td>${escapeHtml(t.date||'')}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(accText)}</td><td class="nowrap">${formatMoney(t.amount)}</td><td class="nowrap">${whtAmt?formatMoney(whtAmt):'-'}</td><td>${escapeHtml(contactText)}</td><td>${escapeHtml(authorText)}</td><td><div class="actions"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`; ledgerTbody.appendChild(tr); });
+    function renderLedger(){ ledgerTbody.innerHTML=''; const b = findBiz(selectedBusinessId); if (!b){ ledgerTbody.innerHTML = '<tr><td colspan="8" class="muted">No business selected.</td></tr>'; return; }
+      const all = getFilteredTransactions();
+      const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+      const start = (currentPage-1)*PAGE_SIZE;
+      const pageTx = all.slice(start, start+PAGE_SIZE);
+      if (pageTx.length === 0) ledgerTbody.innerHTML = '<tr><td colspan="8" class="muted">No transactions.</td></tr>';
+      pageTx.forEach(t=>{ const tr=document.createElement('tr'); const acc = findAccount(selectedBusinessId, t.accountId); const accText = acc ? ((acc.code?acc.code+' - ':'') + acc.name + ' ('+acc.type+')') : '(none)'; const contact = findContact(selectedBusinessId, t.contactId); const author = findUser(t.authorUserId); const whtAmt = (t.whtEnabled && acc && acc.type==='Expense') ? (t.amount * (Number(t.whtRate)||0) / 100) : 0; tr.innerHTML = `<td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(accText)}</td><td class="nowrap">${formatMoney(t.amount)}</td><td class="nowrap">${formatMoney(whtAmt)}</td><td>${escapeHtml(contact?contact.name:'')}</td><td>${escapeHtml(author? (author.display||author.username): '')}</td><td><div class="actions"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`; ledgerTbody.appendChild(tr); });
       pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
     }
 
-    window.openEditTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id]||[]; const t = txs.find(x=>x.id===id); if (!t) return; editTxnId = t.id; editTxnDate.value = t.date || ''; editTxnDesc.value = t.desc || ''; editTxnAmount.value = t.amount || 0; editTxnAccount.value = t.accountId || ''; editTxnContact.value = t.contactId || ''; editTxnWhtEnabled.checked = !!t.whtEnabled; editTxnWhtRate.value = t.whtRate || 5; updateEditWhtVisibility(); openModal(editModal); };
+    window.openEditTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id]||[]; const t = txs.find(x=>x.id===id); if (!t) return; editTxnId = t.id; editTxnDate.value = t.date || ''; editTxnDesc.value = t.desc || ''; editTxnAmount.value = t.amount || 0; populateAccountSelects(); populateContactSelects(); editTxnAccount.value = t.accountId || ''; updateEditWhtVisibility(); editTxnWhtEnabled.checked = !!t.whtEnabled; editTxnWhtRate.value = t.whtRate || 5; editTxnContact.value = t.contactId || ''; openModal(editModal); }
 
-    window.deleteTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; if (!confirm('Delete transaction?')) return; data.transactions[b.id] = (data.transactions[b.id]||[]).filter(x=>x.id!==id); saveData(); renderLedger(); calculateSummary(); };
+    window.deleteTxn = function(id){ const b=findBiz(selectedBusinessId); if (!b) return; if (!confirm('Delete transaction?')) return; data.transactions[b.id] = (data.transactions[b.id]||[]).filter(x=>x.id!==id); saveData(); renderLedger(); calculateSummary(); }
 
-    editSave.addEventListener('click', ()=>{ if (!editTxnId) return; const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id] || []; const t = txs.find(x=>x.id===editTxnId); if (!t) return; t.date = editTxnDate.value || new Date().toISOString().slice(0,10); t.desc = (editTxnDesc.value||'').trim(); t.amount = Number(editTxnAmount.value) || 0; t.accountId = editTxnAccount.value || null; t.contactId = editTxnContact.value || null; t.whtEnabled = !!editTxnWhtEnabled.checked; t.whtRate = parseFloat(editTxnWhtRate.value) || 0; saveData(); closeModal(editModal); renderLedger(); calculateSummary(); });
+    editSave.addEventListener('click', ()=>{ if (!editTxnId) return; const b=findBiz(selectedBusinessId); if (!b) return; const txs = data.transactions[b.id] || []; const t = txs.find(x=>x.id===editTxnId); if (!t) return; t.date = editTxnDate.value || ''; t.desc = (editTxnDesc.value||'').trim(); t.amount = Number(editTxnAmount.value) || 0; t.accountId = editTxnAccount.value || null; t.contactId = editTxnContact.value || ''; t.whtEnabled = !!editTxnWhtEnabled.checked; t.whtRate = parseFloat(editTxnWhtRate.value) || 0; saveData(); closeModal(editModal); renderLedger(); calculateSummary(); });
     editCancel.addEventListener('click', ()=> closeModal(editModal));
 
     // search & pagination
     btnSearch.addEventListener('click', ()=>{ ledgerFilterText = (ledgerSearch.value||'').trim(); currentPage = 1; renderLedger(); });
     btnClearSearch.addEventListener('click', ()=>{ ledgerFilterText = ''; ledgerSearch.value=''; currentPage = 1; renderLedger(); });
     btnPrevPage.addEventListener('click', ()=>{ if (currentPage>1) { currentPage--; renderLedger(); } });
-    btnNextPage.addEventListener('click', ()=>{ const filtered = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(filtered.length/PAGE_SIZE)); if (currentPage < totalPages){ currentPage++; renderLedger(); } });
+    btnNextPage.addEventListener('click', ()=>{ const all = getFilteredTransactions(); const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE)); if (currentPage < totalPages) { currentPage++; renderLedger(); } });
 
-    // summaries
-    function calculateSummary(){ const b=findBiz(selectedBusinessId); if (!b){ vatSummaryDiv.innerHTML=''; totalsSummaryDiv.innerHTML=''; taxSummaryDiv.innerHTML=''; return; } const txs = data.transactions[b.id] || []; let totalIncome=0, totalExpense=0, totalWht=0, vatCollected=0; txs.forEach(t=>{ const acc = findAccount(b.id, t.accountId); const type = acc ? acc.type : null; if (type === 'Revenue') { totalIncome += Number(t.amount || 0); if (b.vatEnabled) vatCollected += Number(t.amount || 0) * (Number(b.vatRate||0)/100); } else if (type === 'Expense'){ totalExpense += Number(t.amount || 0); if (t.whtEnabled) totalWht += Number(t.amount || 0) * (Number(t.whtRate||0)/100); } else { /* other types treated as income by default */ totalIncome += Number(t.amount || 0); } });
-      const net = totalIncome - totalExpense;
-      vatSummaryDiv.innerHTML = `<strong>VAT summary</strong><div class="muted">VAT enabled: ${b.vatEnabled ? 'Yes' : 'No'} — Rate: ${b.vatRate}%</div><div>Total VAT (approx): ${formatMoney(vatCollected)}</div>`;
-      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div>Total income: ${formatMoney(totalIncome)}</div><div>Total expenses: ${formatMoney(totalExpense)}</div><div>Net: ${formatMoney(net)}</div>`;
-      // PIT calculation (simple annualized approach using slices on income minus threshold)
-      let taxHtml = '<strong>Tax summary</strong>';
-      if (b.pitEnabled){
-        const taxable = Math.max(0, totalIncome - (b.threshold || DEFAULT_PIT.threshold));
-        let pitTotal = 0;
-        let remaining = taxable;
-        if (remaining > 0){
-          const slices = b.pit && b.pit.slices ? b.pit.slices : DEFAULT_PIT.slices;
-          let prev = 0;
-          for (const s of slices){
-            const upto = s.upTo;
-            const band = Math.max(0, Math.min(remaining, upto - prev));
-            if (band <= 0) { prev = upto; continue; }
-            pitTotal += band * s.rate;
-            remaining -= band;
-            prev = upto;
-            if (remaining <= 0) break;
-          }
-        }
-        taxHtml += `<div>Taxable income (approx): ${formatMoney(taxable)}</div><div>Estimated PIT (approx): ${formatMoney(pitTotal)}</div>`;
-      } else { taxHtml += '<div class="muted">PIT disabled for this business.</div>'; }
-      taxHtml += `<div>Withheld WHT: ${formatMoney(totalWht)}</div>`;
-      taxSummaryDiv.innerHTML = taxHtml;
+    // Export / Import / Clear Data handlers
+    btnExport.addEventListener('click', ()=>{ const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc_data.json'; a.click(); URL.revokeObjectURL(url); });
+    btnImport.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', (e)=>{ const f = e.target.files && e.target.files[0]; if (!f) return; const reader = new FileReader(); reader.onload = (ev)=>{ try { const parsed = JSON.parse(ev.target.result); if (parsed) { data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); renderLedger(); calculateSummary(); alert('Import successful'); } } catch(err){ alert('Invalid JSON'); } }; reader.readAsText(f); });
+    btnClearAll.addEventListener('click', ()=>{ if (!confirm('Clear all data? This cannot be undone.')) return; localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; selectedUserId = null; selectedBusinessId = null; saveData(); refreshUserBusinessSelectors(); renderLedger(); calculateSummary(); });
+
+    // helper: compute PIT on taxable income using pit.slices
+    function computePitForTaxable(taxable, pit) {
+      if (!pit || !Array.isArray(pit.slices)) return 0;
+      let prev = 0;
+      let tax = 0;
+      for (const s of pit.slices) {
+        const upper = (typeof s.upTo === 'number') ? s.upTo : Infinity;
+        const rate = s.rate || 0;
+        const portion = Math.max(0, Math.min(taxable, upper - prev));
+        tax += portion * rate;
+        prev = upper;
+        if (taxable <= prev) break;
+      }
+      return tax;
     }
 
-    // export / import / clear
-    btnExport.addEventListener('click', ()=>{ const payload = JSON.stringify(data, null, 2); const blob = new Blob([payload], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc_export_'+(new Date().toISOString().slice(0,10))+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
-    btnImport.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', (e)=>{ const f = e.target.files && e.target.files[0]; if (!f) return; const reader = new FileReader(); reader.onload = (ev)=>{ try{ const parsed = JSON.parse(ev.target.result); if (!confirm('Import will replace current data. Continue?')) return; data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); alert('Import complete'); } catch(err){ alert('Import failed: '+err.message); } }; reader.readAsText(f); fileInput.value=''; });
-    btnClearAll.addEventListener('click', ()=>{ if (!confirm('Clear all data and reset to demo?')) return; localStorage.removeItem(STORAGE_KEY); loadData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); alert('Data reset to demo'); });
+    // Summary calculation: VAT, WHT, PAYE/PIT, Net Profit (sales - expenses)
+    function calculateSummary(){
+      const b = findBiz(selectedBusinessId);
+      if (!b){
+        vatSummaryDiv.innerHTML = '';
+        totalsSummaryDiv.innerHTML = '';
+        taxSummaryDiv.innerHTML = '';
+        return;
+      }
+      const txs = data.transactions[b.id] || [];
 
-    // simple report generator and exports
-    btnGenerateReport.addEventListener('click', ()=>{ const type = reportType.value; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const b = findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const txs = (data.transactions[b.id]||[]).filter(t => (t.date||'') >= from && (t.date||'') <= to); lastReport = { business: b.name, type, from, to, txs }; renderReport(lastReport); });
-    function renderReport(r){ if (!r){ reportOutput.innerHTML='No report generated'; return; } if (r.type === 'vat'){ let html=`<h3>VAT report for ${escapeHtml(r.business)}</h3>`; let totalVat=0; r.txs.forEach(t=>{ const acc=findAccount(selectedBusinessId, t.accountId); if (acc && acc.type==='Revenue' && findBiz(selectedBusinessId).vatEnabled){ const vat = Number(t.amount||0) * (Number(findBiz(selectedBusinessId).vatRate||0)/100); totalVat += vat; } }); html += `<div>Total VAT (approx): ${formatMoney(totalVat)}</div>`; reportOutput.innerHTML = html; } else if (r.type === 'wht'){ let html=`<h3>WHT report for ${escapeHtml(r.business)}</h3>`; let totalWht=0; r.txs.forEach(t=>{ if (t.whtEnabled) totalWht += Number(t.amount||0) * (Number(t.whtRate||0)/100); }); html += `<div>Total WHT withheld: ${formatMoney(totalWht)}</div>`; reportOutput.innerHTML = html; } else { let html=`<h3>${escapeHtml(r.type.toUpperCase())} report for ${escapeHtml(r.business)}</h3>`; html += `<div>Transactions: ${r.txs.length}</div>`; html += '<table class="report"><thead><tr><th>Date</th><th>Desc</th><th>Account</th><th>Amount</th></tr></thead><tbody>'; r.txs.forEach(t=>{ const acc=findAccount(selectedBusinessId, t.accountId); html += `<tr><td>${escapeHtml(t.date||'')}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(acc ? (acc.code?acc.code+' - ':'')+acc.name : '(none)')}</td><td>${formatMoney(t.amount)}</td></tr>`; }); html += '</tbody></table>'; reportOutput.innerHTML = html; } }
-    btnExportHtml.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const html = reportOutput.innerHTML; const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'report.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
-    btnExportCsv.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const rows = [['Date','Desc','Account','Amount']]; lastReport.txs.forEach(t=>{ const acc = findAccount(selectedBusinessId, t.accountId); rows.push([t.date||'', t.desc||'', acc ? ((acc.code?acc.code+' - ':'')+acc.name) : '', String(t.amount||'')]); }); const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
-    btnExportJson.addEventListener('click', ()=>{ if (!lastReport){ alert('Generate a report first'); return; } const blob=new Blob([JSON.stringify(lastReport, null, 2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+      let totalRevenue = 0;
+      let totalExpenses = 0;
+      let totalWht = 0;
+      let payrollGross = 0;
 
-    // export contacts/accounts
-    btnExportContacts.addEventListener('click', ()=>{ const b=findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const blob=new Blob([JSON.stringify(b.contacts||[],null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='contacts_'+(b.name||'biz')+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
-    btnExportAccounts.addEventListener('click', ()=>{ const b=findBiz(selectedBusinessId); if (!b){ alert('Select a business'); return; } const blob=new Blob([JSON.stringify(b.accounts||[],null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='accounts_'+(b.name||'biz')+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+      for (const t of txs) {
+        const acc = findAccount(b.id, t.accountId);
+        const type = acc ? acc.type : null;
 
-    // initial focus defaults
-    window.addEventListener('load', ()=>{ if (!txnDate.value) txnDate.value = new Date().toISOString().slice(0,10); });
+        if (type === 'Revenue') totalRevenue += Number(t.amount) || 0;
+        else if (type === 'Expense') totalExpenses += Number(t.amount) || 0;
+
+        if (t.whtEnabled && acc && acc.type === 'Expense') {
+          totalWht += (Number(t.amount) || 0) * (Number(t.whtRate) || 0) / 100;
+        }
+
+        const contact = findContact(b.id, t.contactId);
+        if (contact && contact.type === 'Employee') {
+          payrollGross += Number(t.amount) || 0;
+        }
+      }
+
+      const vatAmount = (b.vatEnabled ? (totalRevenue * (Number(b.vatRate)||0) / 100) : 0);
+
+      let pitAmount = 0;
+      if (b.pitEnabled && payrollGross > 0){
+        const threshold = (b.pit && typeof b.pit.threshold === 'number') ? b.pit.threshold : DEFAULT_PIT.threshold;
+        const taxable = Math.max(0, payrollGross - threshold);
+        pitAmount = computePitForTaxable(taxable, b.pit || DEFAULT_PIT);
+      }
+
+      const netProfit = totalRevenue - totalExpenses; // per instruction: sales minus expenses only
+
+      vatSummaryDiv.innerHTML = `<strong>VAT</strong><br/>VAT on sales: ₦ ${formatMoney(vatAmount)} ${b.vatEnabled ? '' : '(VAT disabled)'}`;
+      taxSummaryDiv.innerHTML = `<strong>Tax Summary</strong><br/>WHT withheld: ₦ ${formatMoney(totalWht)}<br/>PAYE / PIT (employees): ₦ ${formatMoney(pitAmount)}`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><br/>Total Sales: ₦ ${formatMoney(totalRevenue)}<br/>Total Expenses: ₦ ${formatMoney(totalExpenses)}<br/><strong>Net Profit (Sales - Expenses): ₦ ${formatMoney(netProfit)}</strong>`;
+    }
+
+    // ensure summary updates are triggered by actions already in the app:
+    // - after add/edit/delete tx, after business selection, after account/contact changes, loadData() calls calculateSummary()
+
   </script>
 </body>
-        </html>
+  </html>
