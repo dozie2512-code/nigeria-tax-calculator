@@ -26,7 +26,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:76vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -37,6 +37,9 @@
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
     pre.small { font-size:0.85rem; white-space:pre-wrap; }
     .nowrap { white-space:nowrap; }
+    table.report { border-collapse:collapse; width:100%; }
+    table.report th, table.report td { border:1px solid #ddd; padding:8px; text-align:left; }
+    table.report th { background:#f2f6fa; }
   </style>
 </head>
 <body>
@@ -335,6 +338,9 @@
     let currentPage = 1;
     let ledgerFilterText = '';
 
+    // last generated report cache (used by export buttons)
+    let lastReport = null;
+
     function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
     function formatMoney(v){ return (Number(v)||0).toLocaleString('en-NG', {maximumFractionDigits:2, minimumFractionDigits:0}); }
     function escapeHtml(s){ if (s === undefined || s === null) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -419,8 +425,8 @@
       };
       const now = new Date().toISOString().slice(0,10);
       data.transactions[bizId] = [
-        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Revenue').id, whtEnabled:false, whtRate:0, whtAmount:0, whtAccountId: data.businesses[0].whtAccountId, type: 'Income', category: 'Sales' },
-        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Expense').id, whtEnabled:true, whtRate:5, whtAmount:10000, whtAccountId: data.businesses[0].whtAccountId, type: 'Expense', category: 'Rent' }
+        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: data.businesses[0].contacts[0].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Revenue').id, whtEnabled:false, whtRate:0, whtAmount:0 },
+        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: data.businesses[0].contacts[1].id, accountId: data.businesses[0].accounts.find(a=>a.type==='Expense').id, whtEnabled:false, whtRate:0, whtAmount:0 }
       ];
       saveData();
     }
@@ -574,7 +580,6 @@
     // modal helpers
     function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; modal.setAttribute('aria-hidden','false'); }
     function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; modal.setAttribute('aria-hidden','true'); userEditingId=null; bizEditingId=null; contactEditingId=null; accountEditingId=null; editTxnId=null; }
-
     modalOverlay.addEventListener('click', () => {
       const modals = [userModal, businessModal, editModal, contactModal, accountModal];
       modals.forEach(m=>{ if (m && m.style.display === 'block') closeModal(m); });
@@ -994,202 +999,348 @@
       currentPage = 1; renderLedger(); calculateSummary();
     });
 
-    // Render ledger
+    // Render ledger (minimal implementation)
     function renderLedger(){
       ledgerTbody.innerHTML = '';
       const b = findBiz(selectedBusinessId);
-      const txs = (b && data.transactions[b.id]) ? data.transactions[b.id].slice() : [];
-      // filter/search
-      const q = (ledgerFilterText || '').toLowerCase().trim();
+      const txs = (b && data.transactions[b.id]) ? data.transactions[b.id] : [];
       const filtered = txs.filter(t=>{
-        if (!q) return true;
-        const author = findUser(t.authorUserId);
+        if (!ledgerFilterText) return true;
+        const s = ledgerFilterText.toLowerCase();
         const contact = findContact(b ? b.id : null, t.contactId);
         const account = findAccount(b ? b.id : null, t.accountId);
-        return String(t.date || '').toLowerCase().includes(q) ||
-               String(t.desc || '').toLowerCase().includes(q) ||
-               String(t.amount || '').toLowerCase().includes(q) ||
-               (author && ((author.username||'') + ' ' + (author.display||'')).toLowerCase().includes(q)) ||
-               (contact && ((contact.name||'') + ' ' + (contact.type||'')).toLowerCase().includes(q)) ||
-               (account && ((account.name||'') + ' ' + (account.code||'')).toLowerCase().includes(q));
+        return (t.date||'').toLowerCase().includes(s) ||
+               (t.desc||'').toLowerCase().includes(s) ||
+               String(t.amount||'').toLowerCase().includes(s) ||
+               (contact && (contact.name||'').toLowerCase().includes(s)) ||
+               (account && (account.name||'').toLowerCase().includes(s));
       });
-
       const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
+      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
       const start = (currentPage - 1) * PAGE_SIZE;
       const pageItems = filtered.slice(start, start + PAGE_SIZE);
-
-      pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
-
-      for (const t of pageItems){
+      pageItems.forEach(t=>{
         const tr = document.createElement('tr');
-        const account = findAccount(selectedBusinessId, t.accountId);
-        const contact = findContact(selectedBusinessId, t.contactId);
-        const author = findUser(t.authorUserId);
-        tr.innerHTML = `
-          <td>${escapeHtml(t.date || '')}</td>
-          <td>${escapeHtml(t.desc || '')}</td>
-          <td>${escapeHtml(account ? ((account.code?account.code + ' - ':'') + account.name) : '(none)')}</td>
-          <td class="nowrap">${formatMoney(t.amount)}</td>
-          <td class="nowrap">${formatMoney(t.whtAmount || 0)}</td>
-          <td>${escapeHtml(contact ? contact.name : '')}</td>
-          <td>${escapeHtml(author ? (author.display || author.username) : '')}</td>
-          <td class="actions">
-            <button class="small" data-id="${t.id}" data-action="edit">Edit</button>
-            <button class="small danger" data-id="${t.id}" data-action="delete">Delete</button>
-          </td>
-        `;
+        const contact = findContact(b ? b.id : null, t.contactId);
+        const account = findAccount(b ? b.id : null, t.accountId);
+        tr.innerHTML = `<td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.desc)}</td><td>${escapeHtml(account ? (account.code ? account.code + ' - ' : '') + account.name : '(none)')}</td>
+          <td class="nowrap">${formatMoney(t.amount)}</td><td class="nowrap">${formatMoney(t.whtAmount)}</td><td>${escapeHtml(contact ? contact.name : '')}</td>
+          <td>${escapeHtml(findUser(t.authorUserId) ? (findUser(t.authorUserId).display || findUser(t.authorUserId).username) : '')}</td>
+          <td><div class="actions"><button class="small" onclick="window.openEditTxn('${t.id}')">Edit</button><button class="small danger" onclick="window.deleteTxn('${t.id}')">Delete</button></div></td>`;
         ledgerTbody.appendChild(tr);
-      }
+      });
     }
 
-    // ledger actions (edit/delete)
-    ledgerTbody.addEventListener('click', (e)=>{
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      const id = btn.getAttribute('data-id');
-      const action = btn.getAttribute('data-action');
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      const txs = data.transactions[b.id] || [];
-      const idx = txs.findIndex(x=>x.id===id);
-      if (idx === -1) return;
-      if (action === 'delete'){
-        if (!confirm('Delete transaction?')) return;
-        txs.splice(idx,1);
-        saveData(); renderLedger(); calculateSummary();
-      } else if (action === 'edit'){
-        const t = txs[idx];
-        editTxnId = t.id;
-        editTxnDate.value = t.date || '';
-        editTxnAmount.value = t.amount || '';
-        editTxnDesc.value = t.desc || '';
-        editTxnContact.value = t.contactId || '';
-        editTxnAccount.value = t.accountId || '';
-        editTxnWhtEnabled.checked = !!t.whtEnabled;
-        editTxnWhtRate.value = t.whtRate || 5;
-        updateEditWhtVisibility();
-        openModal(editModal);
-      }
-    });
+    window.openEditTxn = function(txnId){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      const tx = (data.transactions[b.id]||[]).find(x=>x.id===txnId);
+      if (!tx) return;
+      editTxnId = tx.id;
+      editTxnDate.value = tx.date || '';
+      editTxnDesc.value = tx.desc || '';
+      editTxnAmount.value = tx.amount || '';
+      editTxnContact.value = tx.contactId || '';
+      editTxnAccount.value = tx.accountId || '';
+      editTxnWhtEnabled.checked = !!tx.whtEnabled;
+      editTxnWhtRate.value = tx.whtRate || 5;
+      updateEditWhtVisibility();
+      openModal(editModal);
+    };
+    window.deleteTxn = function(txnId){
+      const b = findBiz(selectedBusinessId); if (!b) return;
+      if (!confirm('Delete transaction?')) return;
+      data.transactions[b.id] = (data.transactions[b.id]||[]).filter(x=>x.id!==txnId);
+      saveData(); renderLedger(); calculateSummary();
+    };
 
+    editCancel.addEventListener('click', ()=> closeModal(editModal));
     editSave.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId); if (!b) return;
-      if (!editTxnId) return;
+      if (!editTxnId) return closeModal(editModal);
       const txs = data.transactions[b.id] || [];
-      const t = txs.find(x=>x.id===editTxnId); if (!t) return;
-      const date = editTxnDate.value || new Date().toISOString().slice(0,10);
-      const amount = Number(editTxnAmount.value) || 0;
-      const accountId = editTxnAccount.value || null;
-      const account = findAccount(selectedBusinessId, accountId);
-      const desc = (editTxnDesc.value||'').trim();
-      const contactId = editTxnContact.value || null;
-      const whtEnabled = !!editTxnWhtEnabled.checked;
-      const whtRate = Number(editTxnWhtRate.value) || 0;
-      const type = deriveTypeFromAccount(account);
-      const category = account ? account.name : 'Other';
-      t.date = date;
-      t.amount = amount;
-      t.accountId = accountId;
-      t.desc = desc;
-      t.contactId = contactId;
-      t.type = type;
-      t.category = category;
-      t.whtEnabled = whtEnabled && type === 'Expense';
-      t.whtRate = t.whtEnabled ? whtRate : 0;
-      t.whtAmount = (t.whtEnabled && amount > 0) ? Math.round((amount * (t.whtRate/100)) * 100) / 100 : 0;
-      t.whtAccountId = b.whtAccountId || null;
+      const tx = txs.find(x=>x.id===editTxnId); if (!tx) return;
+      tx.date = editTxnDate.value || tx.date;
+      tx.desc = (editTxnDesc.value||'').trim();
+      tx.amount = Number(editTxnAmount.value) || 0;
+      tx.contactId = editTxnContact.value || null;
+      tx.accountId = editTxnAccount.value || null;
+      tx.whtEnabled = !!editTxnWhtEnabled.checked;
+      tx.whtRate = Number(editTxnWhtRate.value) || 0;
+      tx.whtAmount = (tx.whtEnabled && tx.whtRate) ? Math.round((tx.amount * (tx.whtRate/100)) * 100)/100 : 0;
       saveData(); closeModal(editModal); renderLedger(); calculateSummary();
     });
 
-    editCancel.addEventListener('click', ()=> closeModal(editModal));
-
-    // search & pagination
-    btnSearch.addEventListener('click', ()=> { ledgerFilterText = ledgerSearch.value || ''; currentPage = 1; renderLedger(); });
-    btnClearSearch.addEventListener('click', ()=> { ledgerSearch.value=''; ledgerFilterText=''; currentPage = 1; renderLedger(); });
-    btnPrevPage.addEventListener('click', ()=> { if (currentPage>1) { currentPage--; renderLedger(); } });
+    // Searching & pagination
+    btnSearch.addEventListener('click', ()=>{
+      ledgerFilterText = ledgerSearch.value || '';
+      currentPage = 1;
+      renderLedger();
+    });
+    btnClearSearch.addEventListener('click', ()=>{
+      ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger();
+    });
+    btnPrevPage.addEventListener('click', ()=> { if (currentPage>1) { currentPage--; renderLedger(); }});
     btnNextPage.addEventListener('click', ()=> { currentPage++; renderLedger(); });
 
-    // summary calculations (simple)
-    function calculateSummary(){
-      const b = findBiz(selectedBusinessId);
-      const txs = (b && data.transactions[b.id]) ? data.transactions[b.id] : [];
-      let totalIncome = 0, totalExpense = 0, totalWht = 0, totalVatOut = 0, totalVatIn = 0;
-      for (const t of txs){
-        const acc = findAccount(b ? b.id : null, t.accountId);
-        const type = t.type || deriveTypeFromAccount(acc);
-        if (type === 'Income') totalIncome += Number(t.amount) || 0;
-        else if (type === 'Expense') totalExpense += Number(t.amount) || 0;
-        totalWht += Number(t.whtAmount) || 0;
-        // simplistic VAT handling omitted for brevity; could be added later
-      }
-      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><br/>Income: ₦${formatMoney(totalIncome)}<br/>Expense: ₦${formatMoney(totalExpense)}<br/>Net: ₦${formatMoney(totalIncome - totalExpense)}`;
-      taxSummaryDiv.innerHTML = `<strong>WHT</strong><br/>Withheld: ₦${formatMoney(totalWht)}`;
-      vatSummaryDiv.innerHTML = `<strong>VAT</strong><br/><span class="muted">VAT summary not shown (business-level setting)</span>`;
-    }
-
-    // export/import/clear
+    // basic exports/imports/clear
     btnExport.addEventListener('click', ()=>{
       const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'ntc_data.json'; a.click(); URL.revokeObjectURL(url);
+      const a = document.createElement('a'); a.href = url; a.download = 'ntc_export.json'; a.click(); URL.revokeObjectURL(url);
     });
     btnImport.addEventListener('click', ()=> fileInput.click());
     fileInput.addEventListener('change', (e)=>{
       const f = e.target.files && e.target.files[0];
       if (!f) return;
-      const r = new FileReader();
-      r.onload = ()=> {
+      const reader = new FileReader();
+      reader.onload = () => {
         try {
-          const parsed = JSON.parse(r.result);
-          if (confirm('Replace current data with imported data?')) { data = parsed; saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); }
-        } catch(err){ alert('Invalid JSON file'); }
+          const parsed = JSON.parse(reader.result);
+          if (confirm('Replace current data with imported data?')) {
+            data = parsed;
+            saveData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+            alert('Imported.');
+          }
+        } catch(err){ alert('Invalid JSON: ' + err.message); }
       };
-      r.readAsText(f);
+      reader.readAsText(f);
+      e.target.value = '';
     });
     btnClearAll.addEventListener('click', ()=>{
-      if (!confirm('Clear all saved data? This cannot be undone.')) return;
+      if (!confirm('Clear all data? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
       data = { users: [], businesses: [], transactions: {} };
-      saveData(); loadData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
+      selectedUserId = null; selectedBusinessId = null;
+      loadData(); refreshUserBusinessSelectors(); ensureSelection(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
     });
 
-    // export contacts/accounts simple
-    btnExportContacts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first'); const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='contacts.json'; a.click(); URL.revokeObjectURL(url);
-    });
-    btnExportAccounts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first'); const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='accounts.json'; a.click(); URL.revokeObjectURL(url);
-    });
+    // calculate summary (minimal placeholder)
+    function calculateSummary(){
+      const b = findBiz(selectedBusinessId);
+      totalsSummaryDiv.innerHTML = '';
+      vatSummaryDiv.innerHTML = '';
+      taxSummaryDiv.innerHTML = '';
+      if (!b) return;
+      const txs = data.transactions[b.id] || [];
+      const total = txs.reduce((s,t)=>s+(Number(t.amount)||0),0);
+      totalsSummaryDiv.innerHTML = `<strong>Total (all txns):</strong> ₦${formatMoney(total)}`;
+    }
 
-    // reports (very basic)
-    btnGenerateReport.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select a business first');
-      const from = reportDateFrom.value || '0000-01-01';
-      const to = reportDateTo.value || '9999-12-31';
-      const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to);
-      let html = `<h4>Report: ${escapeHtml(reportType.value || '')}</h4><div>From ${escapeHtml(from)} to ${escapeHtml(to)}</div>`;
-      html += '<table style="width:100%;border-collapse:collapse;"><tr><th>Date</th><th>Description</th><th>Account</th><th>Amount</th><th>WHT</th></tr>';
-      for (const t of txs) {
-        const account = findAccount(b.id, t.accountId);
-        html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.desc)}</td><td>${escapeHtml(account ? account.name : '')}</td><td>${formatMoney(t.amount)}</td><td>${formatMoney(t.whtAmount||0)}</td></tr>`;
+    // ------------------------------
+    // PAYE report implementation
+    // ------------------------------
+
+    // compute progressive tax on a taxable amount using slices: [{ upTo, rate }, ...]
+    function computeProgressiveTax(taxable, slices){
+      if (!taxable || taxable <= 0) return 0;
+      let remaining = taxable;
+      let prevUpTo = 0;
+      let tax = 0;
+      for (const sl of slices){
+        const upTo = (typeof sl.upTo === 'number' && isFinite(sl.upTo)) ? sl.upTo : Infinity;
+        const bracketSize = Math.max(0, upTo - prevUpTo);
+        const taxableInBracket = Math.min(remaining, bracketSize);
+        if (taxableInBracket > 0) {
+          tax += taxableInBracket * (sl.rate || 0);
+          remaining -= taxableInBracket;
+        }
+        prevUpTo = upTo;
+        if (remaining <= 0) break;
       }
-      html += '</table>';
+      return Math.round(tax * 100) / 100;
+    }
+
+    function parseDateISO(s){
+      if (!s) return null;
+      const d = new Date(s + 'T00:00:00');
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function daysBetweenInclusive(a, b){
+      if (!a || !b) return 0;
+      const msPerDay = 24*60*60*1000;
+      const diff = Math.floor((b.getTime() - a.getTime()) / msPerDay) + 1;
+      return Math.max(0, diff);
+    }
+
+    // Generate PAYE report
+    function generatePayEReport(bizId, dateFromStr, dateToStr){
+      const b = findBiz(bizId);
+      if (!b) return { rows: [], totals: {}, message: 'No business selected.' };
+
+      const txs = (data.transactions[b.id] || []).slice(); // clone
+      // parse dates
+      let from = parseDateISO(dateFromStr);
+      let to = parseDateISO(dateToStr);
+      if (!from && !to) {
+        // use all txns
+        from = null; to = null;
+      } else {
+        if (!from) from = new Date('1970-01-01T00:00:00');
+        if (!to) to = new Date(); // up to today
+      }
+
+      const inRange = (tDateStr) => {
+        if (!tDateStr) return false;
+        const d = parseDateISO(tDateStr);
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      };
+
+      // find employee contacts
+      const employees = (b.contacts || []).filter(c => c.type === 'Employee');
+      if (!employees.length) return { rows: [], totals: {}, message: 'No employee contacts for this business.' };
+
+      // group transactions by employee (contactId) within date range
+      const map = {};
+      for (const t of txs){
+        if (!inRange(t.date)) continue;
+        if (!t.contactId) continue;
+        const contact = b.contacts.find(c=>c.id===t.contactId);
+        if (!contact || contact.type !== 'Employee') continue;
+        if (!map[t.contactId]) map[t.contactId] = { contactId: t.contactId, name: contact.name, gross: 0 };
+        map[t.contactId].gross += Number(t.amount) || 0;
+      }
+
+      const rows = [];
+      // calculate days in range for prorating threshold
+      let daysInRange = 0;
+      if (from && to) daysInRange = daysBetweenInclusive(from, to);
+      else {
+        // if no date range provided, treat as full year for threshold (365 days)
+        daysInRange = 365;
+      }
+      const prorateFactor = Math.max(0, Math.min(1, daysInRange / 365));
+
+      const baseThreshold = (typeof b.threshold === 'number' && b.threshold > 0) ? b.threshold : (b.pit && b.pit.threshold ? b.pit.threshold : DEFAULT_PIT.threshold);
+      const slices = (b.pit && Array.isArray(b.pit.slices) && b.pit.slices.length) ? b.pit.slices : DEFAULT_PIT.slices;
+
+      let totals = { gross:0, proratedThreshold:0, taxable:0, paye:0, net:0 };
+
+      for (const emp of employees){
+        const gross = (map[emp.id] && map[emp.id].gross) ? Math.round(map[emp.id].gross * 100)/100 : 0;
+        const proratedThreshold = Math.round((baseThreshold * prorateFactor) * 100)/100;
+        const taxable = Math.max(0, Math.round((gross - proratedThreshold) * 100)/100);
+        const paye = computeProgressiveTax(taxable, slices);
+        const net = Math.round((gross - paye) * 100)/100;
+        if (gross === 0) {
+          // include employees with zero gross? We'll include with zeros to make report complete.
+        }
+        rows.push({
+          employeeId: emp.id,
+          employeeName: emp.name,
+          gross,
+          proratedThreshold,
+          taxable,
+          paye,
+          net
+        });
+        totals.gross += gross;
+        totals.proratedThreshold += proratedThreshold;
+        totals.taxable += taxable;
+        totals.paye += paye;
+        totals.net += net;
+      }
+
+      // round totals
+      totals.gross = Math.round(totals.gross * 100)/100;
+      totals.proratedThreshold = Math.round(totals.proratedThreshold * 100)/100;
+      totals.taxable = Math.round(totals.taxable * 100)/100;
+      totals.paye = Math.round(totals.paye * 100)/100;
+      totals.net = Math.round(totals.net * 100)/100;
+
+      return { rows, totals, meta: { businessId: b.id, businessName: b.name, dateFrom: dateFromStr || null, dateTo: dateToStr || null, daysInRange, baseThreshold, prorateFactor }, message: rows.length ? null : 'No employee payroll transactions in range.' };
+    }
+
+    function renderPayEReport(report){
+      if (!report) { reportOutput.innerHTML = '<div class="muted">No report data.</div>'; return; }
+      if (report.message) { reportOutput.innerHTML = `<div class="muted">${escapeHtml(report.message)}</div>`; return; }
+      const rows = report.rows || [];
+      const totals = report.totals || {};
+      let html = `<div><strong>PAYE Report — ${escapeHtml(report.meta.businessName)}</strong><br/><small class="muted">Period: ${escapeHtml(report.meta.dateFrom||'All')} to ${escapeHtml(report.meta.dateTo||'All')} (days: ${report.meta.daysInRange})</small></div>`;
+      html += `<table class="report" aria-live="polite" style="margin-top:8px;"><thead><tr><th>Employee</th><th>Gross (₦)</th><th>Prorated threshold (₦)</th><th>Taxable (₦)</th><th>PAYE (₦)</th><th>Net pay (₦)</th></tr></thead><tbody>`;
+      for (const r of rows){
+        html += `<tr><td>${escapeHtml(r.employeeName)}</td><td class="nowrap">${formatMoney(r.gross)}</td><td class="nowrap">${formatMoney(r.proratedThreshold)}</td><td class="nowrap">${formatMoney(r.taxable)}</td><td class="nowrap">${formatMoney(r.paye)}</td><td class="nowrap">${formatMoney(r.net)}</td></tr>`;
+      }
+      html += `<tr style="font-weight:bold;background:#f7f9fc;"><td>Totals</td><td class="nowrap">${formatMoney(totals.gross)}</td><td class="nowrap">${formatMoney(totals.proratedThreshold)}</td><td class="nowrap">${formatMoney(totals.taxable)}</td><td class="nowrap">${formatMoney(totals.paye)}</td><td class="nowrap">${formatMoney(totals.net)}</td></tr>`;
+      html += `</tbody></table>`;
+      html += `<small class="note">Notes: Threshold prorated by days in selected range. Employee transactions are any transaction linked to a contact of type 'Employee'. Progressive PIT rates applied using business.pit slices or defaults.</small>`;
       reportOutput.innerHTML = html;
+    }
+
+    // exports for PAYE report
+    btnExportHtml.addEventListener('click', ()=>{
+      if (!lastReport || lastReport.type !== 'paye') { alert('Please generate a PAYE report first.'); return; }
+      const w = window.open('', '_blank');
+      const header = `<h2>PAYE Report — ${escapeHtml(lastReport.meta.businessName)}</h2><div><small>Period: ${escapeHtml(lastReport.meta.dateFrom||'All')} to ${escapeHtml(lastReport.meta.dateTo||'All')}</small></div><br/>`;
+      const content = header + reportOutput.innerHTML;
+      w.document.write(`<html><head><title>PAYE Report</title><meta charset="utf-8"></head><body>${content}</body></html>`);
+      w.document.close();
     });
 
-    btnExportHtml.addEventListener('click', ()=> { const h = reportOutput.innerHTML; if (!h) return alert('Generate a report first'); const blob = new Blob([h],{type:'text/html'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.html'; a.click(); URL.revokeObjectURL(url); });
-    btnExportCsv.addEventListener('click', ()=> { const b = findBiz(selectedBusinessId); if (!b) return; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); let csv = 'Date,Description,Account,Amount,WHT\\n'; for (const t of txs){ const acc=findAccount(b.id,t.accountId); csv += `"${t.date}","${t.desc.replace(/"/g,'""')}","${(acc?acc.name:'')}",${t.amount || 0},${t.whtAmount || 0}\\n`; } const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.csv'; a.click(); URL.revokeObjectURL(url); });
-    btnExportJson.addEventListener('click', ()=> { const b = findBiz(selectedBusinessId); if (!b) return; const from = reportDateFrom.value || '0000-01-01'; const to = reportDateTo.value || '9999-12-31'; const txs = (data.transactions[b.id] || []).filter(t => t.date >= from && t.date <= to); const blob=new Blob([JSON.stringify(txs,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='report.json'; a.click(); URL.revokeObjectURL(url); });
+    btnExportCsv.addEventListener('click', ()=>{
+      if (!lastReport || lastReport.type !== 'paye') { alert('Please generate a PAYE report first.'); return; }
+      const rows = lastReport.rows || [];
+      const totals = lastReport.totals || {};
+      const lines = [];
+      lines.push(['Employee','Gross (₦)','Prorated threshold (₦)','Taxable (₦)','PAYE (₦)','Net pay (₦)'].join(','));
+      for (const r of rows){
+        lines.push([`"${(r.employeeName||'').replace(/"/g,'""')}"`, r.gross, r.proratedThreshold, r.taxable, r.paye, r.net].join(','));
+      }
+      lines.push([`"Totals"`, totals.gross, totals.proratedThreshold, totals.taxable, totals.paye, totals.net].join(','));
+      const csv = lines.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `paye_report_${lastReport.meta.businessId}_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url);
+    });
 
-    // initial UI wiring
-    refreshUserBusinessSelectors();
-    ensureSelection();
-    populateContactSelects();
-    populateAccountSelects();
-    renderLedger();
-    calculateSummary();
+    btnExportJson.addEventListener('click', ()=>{
+      if (!lastReport || lastReport.type !== 'paye') { alert('Please generate a PAYE report first.'); return; }
+      const payload = {
+        meta: lastReport.meta,
+        rows: lastReport.rows,
+        totals: lastReport.totals,
+        generatedAt: new Date().toISOString()
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `paye_report_${lastReport.meta.businessId}_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+    });
 
+    // Generate report button - handle paye (others left as placeholder)
+    btnGenerateReport.addEventListener('click', ()=>{
+      const type = reportType.value;
+      const dateFromVal = reportDateFrom.value || '';
+      const dateToVal = reportDateTo.value || '';
+      if (type === 'paye'){
+        const r = generatePayEReport(selectedBusinessId, dateFromVal, dateToVal);
+        // cache for exports
+        lastReport = { type: 'paye', rows: r.rows, totals: r.totals, meta: r.meta, message: r.message };
+        renderPayEReport(r);
+      } else {
+        // fallback: keep behavior for other reports minimal / informative
+        lastReport = null;
+        reportOutput.innerHTML = `<div class="muted">Report type "${escapeHtml(type)}" not implemented by this patch. Generate PAYE to see the new report.</div>`;
+      }
+    });
+
+    // initial safety: clear lastReport on data changes that would invalidate it
+    function invalidateLastReport(){
+      lastReport = null;
+    }
+    // call invalidate where data changes: after saveData in many locations already - but ensure here on key operations:
+    [btnAddTxn, userSave, bizSave, accountSave, contactSave].forEach(el=>{
+      if (el) el.addEventListener('click', invalidateLastReport);
+    });
+
+    // End script
   </script>
+
+  <footer>
+    Built for demo — data stored in browser localStorage.
+  </footer>
 </body>
   </html>
