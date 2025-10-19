@@ -1247,110 +1247,111 @@
       localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; location.reload();
     });
 
-    // Reports generation with WHT inclusion
-    btnGenerateReport.addEventListener('click', ()=>{
-      const type = reportType.value;
-      const from = reportDateFrom.value ? new Date(reportDateFrom.value) : null;
-      const to = reportDateTo.value ? new Date(reportDateTo.value) : null;
-      const txns = (data.transactions[selectedBusinessId] || []).filter(t=>{
-        const dt = new Date(t.date);
-        if (from && dt < from) return false;
-        if (to && dt > to) return false;
-        return true;
-      });
-      if (type === 'wht'){
-        // show WHT summary for the selected period
-        let totalWht = 0; const byContact = {};
-        txns.forEach(t=>{
-          if (t.whtEnabled && t.whtAmount) {
-            totalWht += t.whtAmount;
-            if (t.contactId) byContact[t.contactId] = (byContact[t.contactId] || 0) + t.whtAmount;
-          }
-        });
-        let html = `<h3>WHT Report</h3><div>Total WHT Withheld: ₦${formatMoney(totalWht)}</div>`;
-        if (Object.keys(byContact).length){
-          html += '<h4>By contact</h4><ul>';
-          Object.entries(byContact).forEach(([cid, amt])=>{ const c = findContact(selectedBusinessId, cid); html += `<li>${c ? escapeHtml(c.name) : cid}: ₦${formatMoney(amt)}</li>`; });
-          html += '</ul>';
-        }
-        reportOutput.innerHTML = html;
-      } else {
-        reportOutput.innerHTML = `<div class="muted">Report type ${escapeHtml(type)} is not WHT-specific in this demo. Use WHT report for withholding breakdown.</div>`;
+    // Reports generation (VAT, PIT and CIT @30% included, WHT preserved)
+btnGenerateReport.addEventListener('click', ()=>{
+  const type = reportType.value;
+  const from = reportDateFrom.value ? new Date(reportDateFrom.value) : null;
+  const to = reportDateTo.value ? new Date(reportDateTo.value) : null;
+  const txns = (data.transactions[selectedBusinessId] || []).filter(t=>{
+    const dt = new Date(t.date);
+    if (from && dt < from) return false;
+    if (to && dt > to) return false;
+    return true;
+  });
+  const b = findBiz(selectedBusinessId) || {};
+
+  // helper: compute PIT from progressive slices (pit.threshold is tax-free portion)
+  function computePITFromSlices(baseAmount, pitConfig){
+    if (!pitConfig) return 0;
+    const threshold = Number(pitConfig.threshold) || 0;
+    let taxable = Number(baseAmount || 0) - threshold;
+    if (taxable <= 0) return 0;
+    let tax = 0;
+    let remaining = taxable;
+    let prevUpTo = 0;
+    for (const slice of (pitConfig.slices || [])){
+      const upTo = (slice.upTo === Infinity) ? Infinity : Number(slice.upTo || Infinity);
+      const rate = Number(slice.rate || 0);
+      const sliceRange = upTo - prevUpTo;
+      const sliceAmt = Math.max(0, Math.min(remaining, sliceRange));
+      if (sliceAmt > 0) tax += sliceAmt * rate;
+      remaining -= sliceAmt;
+      prevUpTo = upTo;
+      if (remaining <= 0) break;
+    }
+    return tax;
+  }
+
+  if (type === 'wht'){
+    // existing WHT report behaviour (preserve)
+    let totalWht = 0; const byContact = {};
+    txns.forEach(t=>{
+      if (t.whtEnabled && t.whtAmount) {
+        totalWht += Number(t.whtAmount) || 0;
+        if (t.contactId) byContact[t.contactId] = (byContact[t.contactId] || 0) + (Number(t.whtAmount) || 0);
       }
     });
+    let html = `<h3>WHT Report</h3><div>Total WHT Withheld: ₦${formatMoney(totalWht)}</div>`;
+    if (Object.keys(byContact).length){
+      html += '<h4>By contact</h4><ul>';
+      Object.entries(byContact).forEach(([cid, amt])=>{ const c = findContact(selectedBusinessId, cid); html += `<li>${c ? escapeHtml(c.name) : cid}: ₦${formatMoney(amt)}</li>`; });
+      html += '</ul>';
+    }
+    reportOutput.innerHTML = html;
+    return;
+  }
 
-    // Export CSV/JSON/HTML for ledger including WHT
-    btnExportJson.addEventListener('click', ()=>{
-      const txns = (data.transactions[selectedBusinessId] || []);
-      const out = txns.map(t=>({
-        id: t.id, date: t.date, type: t.type, category: t.category, desc: t.desc, amount: t.amount,
-        contactId: t.contactId, accountId: t.accountId, authorUserId: t.authorUserId,
-        whtEnabled: !!t.whtEnabled, whtRate: Number(t.whtRate)||0, whtAmount: Number(t.whtAmount)||0, whtAccountId: t.whtAccountId || null
-      }));
-      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
+  if (type === 'profit'){
+    // totals
+    const totalIncome = txns.reduce((s,t)=> s + ((t.type === 'Income') ? Number(t.amount || 0) : 0), 0);
+    const totalExpenses = txns.reduce((s,t)=> s + ((t.type === 'Expense') ? Number(t.amount || 0) : 0), 0);
+    const totalWht = txns.reduce((s,t)=> s + ((t.whtEnabled && t.whtAmount) ? Number(t.whtAmount || 0) : 0), 0);
 
-    btnExportCsv.addEventListener('click', ()=>{
-      const txns = (data.transactions[selectedBusinessId] || []);
-      const headers = ['id','date','type','category','desc','amount','contactId','accountId','authorUserId','wht_enabled','wht_rate','wht_amount','wht_accountId'];
-      const lines = [headers.join(',')];
-      txns.forEach(t=>{
-        const vals = [
-          t.id,
-          t.date,
-          t.type,
-          `"${(t.category||'').replace(/"/g,'""')}"`,
-          `"${(t.desc||'').replace(/"/g,'""')}"`,
-          (t.amount||0),
-          t.contactId||'',
-          t.accountId||'',
-          t.authorUserId||'',
-          t.whtEnabled ? 'true' : 'false',
-          t.whtRate || 0,
-          t.whtAmount || 0,
-          t.whtAccountId || ''
-        ];
-        lines.push(vals.join(','));
-      });
-      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
+    // VAT: output = income * rate (if enabled). Input VAT defaulted to 0 (no explicit flag in UI).
+    const outputVAT = (b.vatEnabled) ? (totalIncome * (Number(b.vatRate || 0) / 100)) : 0;
+    const inputVAT = 0;
+    const netVAT = outputVAT - inputVAT;
 
-    btnExportHtml.addEventListener('click', ()=>{
-      const txns = (data.transactions[selectedBusinessId] || []);
-      let html = `<html><head><meta charset="utf-8"><title>Transactions</title></head><body><table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Desc</th><th>Amount</th><th>WHT</th></tr></thead><tbody>`;
-      txns.forEach(t=>{ html += `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.type)}</td><td>${escapeHtml(t.category)}</td><td>${escapeHtml(t.desc)}</td><td>${formatMoney(t.amount)}</td><td>${t.whtEnabled?formatMoney(t.whtAmount):''}</td></tr>`; });
-      html += `</tbody></table></body></html>`;
-      const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'transactions.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
+    // PIT: base is sum of transactions with category === 'Salary'
+    const pitBase = txns.reduce((s,t)=> s + ((String(t.category||'').toLowerCase() === 'salary') ? Number(t.amount || 0) : 0), 0);
+    const pitAmount = (b.pitEnabled === false) ? 0 : computePITFromSlices(pitBase, b.pit || DEFAULT_PIT);
 
-    // small helper exports for contacts/accounts
-    btnExportContacts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business with contacts to export');
-      const blob = new Blob([JSON.stringify(b.contacts || [], null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'contacts.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
-    btnExportAccounts.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if (!b) return alert('Select business with accounts to export');
-      const blob = new Blob([JSON.stringify(b.accounts || [], null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'accounts.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
+    // CIT: taxable profit = income - expenses (exclude PIT and WHT amounts)
+    const taxableProfit = totalIncome - totalExpenses;
+    const citRate = 0.30;
+    const citAmount = (taxableProfit > 0) ? (taxableProfit * citRate) : 0;
 
-    // populate initial selects and UI
-    refreshUserBusinessSelectors();
-    ensureSelection();
-    refreshContactsAccountsUI();
-    renderLedger();
-    calculateSummary();
+    // net profit after PIT & CIT (note: VAT and WHT treatments depend on accounting choices; here we show a simple "after-tax" figure)
+    const netProfitBeforeTax = taxableProfit;
+    const netAfterTaxes = netProfitBeforeTax - pitAmount - citAmount;
 
-    // make sure window functions exist for debugging (already used)
-    window.refreshContactsAccountsUI = refreshContactsAccountsUI;
-    window.renderLedger = renderLedger;
-    window.calculateSummary = calculateSummary;
-    window.ensureBizWhtAccount = ensureBizWhtAccount;
-  </script>
+    let html = `<h3>Profit Report</h3>`;
+    html += `<div>Total Income: ₦${formatMoney(totalIncome)}</div>`;
+    html += `<div>Total Expenses: ₦${formatMoney(totalExpenses)}</div>`;
+    html += `<div>Gross Profit: ₦${formatMoney(totalIncome - totalExpenses)}</div>`;
+    html += `<hr/>`;
+    html += `<h4>VAT (business rate ${b.vatRate || 0}%)</h4>`;
+    html += `<div>Output VAT: ₦${formatMoney(outputVAT)}</div>`;
+    html += `<div>Input VAT: ₦${formatMoney(inputVAT)}</div>`;
+    html += `<div>Net VAT (Output - Input): ₦${formatMoney(netVAT)}</div>`;
+    html += `<hr/>`;
+    html += `<h4>PIT</h4>`;
+    html += `<div>PIT base (Salary category): ₦${formatMoney(pitBase)}</div>`;
+    html += `<div>PIT computed: ₦${formatMoney(pitAmount)}</div>`;
+    html += `<small class="muted">PIT uses business.pit slices (DEFAULT_PIT when not present)</small>`;
+    html += `<hr/>`;
+    html += `<h4>CIT</h4>`;
+    html += `<div>Taxable profit (Income − Expenses): ₦${formatMoney(taxableProfit)}</div>`;
+    html += `<div>CIT @ 30%: ₦${formatMoney(citAmount)}</div>`;
+    html += `<hr/>`;
+    html += `<div><strong>Net profit before tax:</strong> ₦${formatMoney(netProfitBeforeTax)}</div>`;
+    html += `<div><strong>Net after PIT & CIT:</strong> ₦${formatMoney(netAfterTaxes)}</div>`;
+    html += `<div class="muted">Note: WHT withheld (₦${formatMoney(totalWht)}) and VAT payable/receivable are shown above but not automatically deducted from CIT base in this simple report.</div>`;
 
-  <footer>
-    <div class="muted">Nigeria Simple Accounting & Tax — WHT added (default rate 5%). WHT toggled per Expense transaction and totals shown in tax summary. Data stored in localStorage under key: ntc_data_v2.</div>
-  </footer>
-</body>
-  </html>
+    reportOutput.innerHTML = html;
+    return;
+  }
+
+  // fallback / other report types — preserve existing message for non-WHT types
+  reportOutput.innerHTML = `<div class="muted">Report type ${escapeHtml(type)} is not WHT-specific in this demo. Use WHT report for withholding breakdown.</div>`;
+});
