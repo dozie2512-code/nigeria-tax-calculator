@@ -1,5 +1,4 @@
-GitHub Copilot Chat Assistant — full updated index.html:
-
+<!-- GitHub Copilot Chat Assistant — repaired index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,7 +27,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -42,6 +41,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
     table.paye-table { width:100%; border-collapse:collapse; margin-top:8px; }
     table.paye-table th, table.paye-table td { border:1px solid #ddd; padding:8px; text-align:left; font-size:0.95rem; background:#fff; }
     table.paye-table th { background:#f5f8fb; }
+    .muted-inline { color:var(--muted); font-size:0.9rem; margin-left:8px; }
   </style>
 </head>
 <body>
@@ -100,7 +100,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
 
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is applicable for Expense transactions. Default WHT rate is 5% per transaction. PAYE is calculated monthly per employee based on salary transactions and statutory deductions.</small>
+      <small class="note">Transactions are saved at the business level. WHT (Withholding Tax) is typically applicable for Expense transactions. Default WHT rate is 5% per transaction. PAYE is calculated monthly for Employee contacts based on recorded salary transactions.</small>
     </section>
 
     <section class="panel section">
@@ -163,8 +163,8 @@ GitHub Copilot Chat Assistant — full updated index.html:
     </section>
   </main>
 
-  <!-- Modals (simplified) -->
-  <div id="modalOverlay" class="modalOverlay"></div>
+  <!-- Modals -->
+  <div id="modalOverlay" class="modalOverlay" aria-hidden="true"></div>
 
   <div id="userModal" class="modal" aria-hidden="true">
     <h3 id="userModalTitle">Add User</h3>
@@ -286,7 +286,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant — updated and complete index.html script with VAT & WHT handling
+    // GitHub Copilot Chat Assistant — repaired script
     const STORAGE_KEY = 'ntc_data_v3';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -314,6 +314,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
     let selectedUserId = null;
     let selectedBusinessId = null;
     let editTxnId = null;
+    let editTxnBizId = null;
 
     const PAGE_SIZE = 20;
     let currentPage = 1;
@@ -353,7 +354,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
           if (parsed && typeof parsed === 'object'){
             data = parsed;
             // normalize
-            data.businesses = data.businesses.map(b=>{
+            data.businesses = (data.businesses || []).map(b=>{
               if (!Array.isArray(b.members)) b.members = [];
               if (!Array.isArray(b.contacts)) b.contacts = [];
               if (!Array.isArray(b.accounts)) b.accounts = [];
@@ -418,9 +419,8 @@ GitHub Copilot Chat Assistant — full updated index.html:
         { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.code==='5000').id, whtEnabled: false, whtRate: 0, whtInclusive: false },
         { id: uid('txn'), date: now, desc: 'Salary - John Employee', amount: 180000, authorUserId: userId, contactId: contact3.id, accountId: uid('a_sal'), whtEnabled: false, whtRate: 0, whtInclusive: false }
       ];
-      const salaryAcc = { id: uid('a_sal'), code: '6000', name: 'Salaries & Wages', type: 'Expense', notes: 'Payroll', isSalary: true };
+      const salaryAcc = { id: data.transactions[bizId][2].accountId, code: '6000', name: 'Salaries & Wages', type: 'Expense', notes: 'Payroll', isSalary: true };
       data.businesses[0].accounts.push(salaryAcc);
-      data.transactions[bizId][2].accountId = salaryAcc.id;
       saveData();
     }
 
@@ -681,7 +681,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
       if (!biz) { payeSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>'; return; }
       if (!biz.pitEnabled) { payeSummaryDiv.innerHTML = '<div class="muted">PIT disabled for this business.</div>'; return; }
       const rows = computeEmployeePayeSummaries(biz);
-      if (!rows.length) { payeSummaryDiv.innerHTML = '<div class="muted">No employees found for this business (contacts with type \"Employee\").</div>'; return; }
+      if (!rows.length) { payeSummaryDiv.innerHTML = '<div class="muted">No employees found for this business (contacts with type "Employee").</div>'; return; }
 
       let html = `<strong>PAYE Summary (calendar year ${new Date().getFullYear()})</strong>`;
       html += `<table class="paye-table" role="table" aria-label="PAYE summary">
@@ -718,7 +718,11 @@ GitHub Copilot Chat Assistant — full updated index.html:
       renderPayeSummary(b);
       pitSummaryDiv.innerHTML = '';
       if (b && b.pit) {
-        pitSummaryDiv.innerHTML = `<div class="muted">Tax-free threshold: ₦${formatMoney((b.pit && b.pit.threshold) ? b.pit.threshold : DEFAULT_PIT.threshold)} — Rate bands applied as configured.</div>`;
+        const bands = (b.pit.slices || DEFAULT_PIT.slices).map(s => {
+          const upTo = s.upTo === Infinity ? 'and above' : `up to ₦${formatMoney(s.upTo)}`;
+          return `<div>${upTo}: ${(Number(s.rate || 0)*100).toFixed(0)}%</div>`;
+        }).join('');
+        pitSummaryDiv.innerHTML = `<div class="muted">Tax-free threshold: ₦${formatMoney((b.pit && b.pit.threshold) ? b.pit.threshold : DEFAULT_PIT.threshold)} — Rate bands:</div><div style="margin-top:6px">${bands}</div>`;
       }
     }
 
@@ -740,6 +744,15 @@ GitHub Copilot Chat Assistant — full updated index.html:
       if (!selectedBusinessId && data.businesses.length) selectedBusinessId = data.businesses[0].id;
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
+    }
+
+    function populateBizOwnerOptions(){
+      bizOwner.innerHTML = '';
+      if (!data.users.length) {
+        const opt = document.createElement('option'); opt.value=''; opt.textContent='-- no users --'; bizOwner.appendChild(opt);
+      } else {
+        data.users.forEach(u=>{ const opt = document.createElement('option'); opt.value=u.id; opt.textContent = (u.display||u.username); bizOwner.appendChild(opt); });
+      }
     }
 
     function populateContactSelects(){
@@ -800,7 +813,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
           const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
           const isWht = (b.whtAccountId && a.id === b.whtAccountId);
           const salaryTag = a.isSalary ? '<span class="muted"> (Salary)</span>' : '';
-          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''}${salaryTag} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span></div>`;
+          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''}${salaryTag} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span><br/><small class="muted">${escapeHtml(a.notes||'')}</small></div>`;
           accountsListDiv.appendChild(d);
         });
       }
@@ -819,11 +832,13 @@ GitHub Copilot Chat Assistant — full updated index.html:
         filtered = txs.filter(t=>{
           const acc = findAccount(b.id, t.accountId);
           const contact = findContact(b.id, t.contactId);
+          const author = findUser(t.authorUserId);
           return (t.date||'').toLowerCase().includes(q) ||
                  (t.desc||'').toLowerCase().includes(q) ||
                  String(t.amount||'').toLowerCase().includes(q) ||
-                 (acc && (acc.name||'').toLowerCase().includes(q)) ||
-                 (contact && (contact.name||'').toLowerCase().includes(q));
+                 (acc && ((acc.name||'').toLowerCase().includes(q) || (acc.code||'').toLowerCase().includes(q))) ||
+                 (contact && (contact.name||'').toLowerCase().includes(q)) ||
+                 (author && ((author.display||'').toLowerCase().includes(q) || (author.username||'').toLowerCase().includes(q)));
         });
       }
       const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -854,15 +869,19 @@ GitHub Copilot Chat Assistant — full updated index.html:
           }
         }
 
+        const accText = acc ? `${acc.code || ''} - ${acc.name}` : '(no account)';
         tr.innerHTML = `<td>${escapeHtml(t.date || '')}</td>
           <td>${escapeHtml(t.desc || '')}</td>
-          <td>${escapeHtml(acc ? (acc.code + ' - ' + acc.name) : '(no account)')}</td>
+          <td>${escapeHtml(accText)}</td>
           <td class="nowrap">${formatMoney(t.amount)}</td>
           <td class="nowrap">${formatMoney(vatAmt)}</td>
           <td class="nowrap">${formatMoney(whtAmt)}</td>
           <td>${escapeHtml(contact ? contact.name : '')}</td>
           <td>${escapeHtml(author ? (author.display || author.username) : '')}</td>
-          <td style="white-space:nowrap"><button class="small" onclick="window.editTxnHandler('${b.id}','${t.id}')">Edit</button> <button class="small danger" onclick="window.deleteTxnHandler('${b.id}','${t.id}')">Delete</button></td>`;
+          <td style="white-space:nowrap">
+            <button class="small" data-bid="${b.id}" data-tid="${t.id}" onclick="window.editTxnHandler('${b.id}','${t.id}')">Edit</button>
+            <button class="small danger" onclick="window.deleteTxnHandler('${b.id}','${t.id}')">Delete</button>
+          </td>`;
         ledgerTbody.appendChild(tr);
       }
       pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
@@ -902,17 +921,196 @@ GitHub Copilot Chat Assistant — full updated index.html:
         }
       }
 
+      const netVat = totalVatOutput - totalVatInput;
+
       vatSummaryDiv.innerHTML = `<strong>VAT Summary</strong>
         <div class="muted">VAT rate: ${b.vatRate}% — Inclusive mode: ${b.vatInclusive ? 'Yes' : 'No'}</div>
-        <div style="margin-top:6px">Output VAT (sales): ₦${formatMoney(totalVatOutput)}<br/>Input VAT (purchases): ₦${formatMoney(totalVatInput)}<br/>Net VAT payable/(receivable): ₦${formatMoney(totalVatOutput - totalVatInput)}</div>`;
+        <div style="margin-top:6px">Output VAT (sales): ₦${formatMoney(totalVatOutput)}<br/>Input VAT (purchases): ₦${formatMoney(totalVatInput)}<br/>Net VAT payable/(receivable): ₦${formatMoney(netVat)}</div>`;
 
       whtSummaryDiv.innerHTML = `<strong>WHT Summary</strong>
         <div class="muted">Total withheld (across transactions): ₦${formatMoney(totalWhtWithheld)}</div>`;
 
-      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div class="muted">Transactions: ${ (data.transactions[b.id] || []).length }</div><div style="margin-top:6px">Total amount: ₦${formatMoney(totalAmount)}</div>`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div class="muted">Transactions: ${ (data.transactions[b.id] || []).length }</div><div style="margin-top:6px">Total amount (all transactions): ₦${formatMoney(totalAmount)}</div>`;
 
       taxSummaryDiv.innerHTML = `<div class="muted">VAT & WHT totals calculated from transactions. WHT withheld should be remitted to tax authority; VAT payable is Output - Input.</div>`;
     }
+
+    // Modal helpers
+    function openModal(modal){
+      modalOverlay.style.display = 'block';
+      modalOverlay.setAttribute('aria-hidden','false');
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden','false');
+    }
+    function closeModal(modal){
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+      // hide overlay if no other modal open
+      const anyOpen = [...document.querySelectorAll('.modal')].some(m => m.style.display === 'block');
+      if (!anyOpen) {
+        modalOverlay.style.display = 'none';
+        modalOverlay.setAttribute('aria-hidden','true');
+      }
+    }
+    modalOverlay.addEventListener('click', ()=> {
+      // close all modals
+      [...document.querySelectorAll('.modal')].forEach(m => { m.style.display = 'none'; m.setAttribute('aria-hidden','true'); });
+      modalOverlay.style.display = 'none';
+      modalOverlay.setAttribute('aria-hidden','true');
+    });
+
+    // event handlers
+    btnAddUser.addEventListener('click', ()=>{
+      userModal.querySelector('#userModalTitle').textContent = 'Add User';
+      userName.value=''; userDisplay.value='';
+      userEditingId = null;
+      openModal(userModal);
+    });
+
+    userSave.addEventListener('click', ()=>{
+      const username = (userName.value || '').trim();
+      const display = (userDisplay.value || '').trim();
+      if (!username) return alert('Provide username');
+      if (userEditingId){
+        const u = data.users.find(x=>x.id===userEditingId);
+        if (u){ u.username = username; u.display = display; }
+      } else {
+        const u = { id: uid('user'), username, display: display || username };
+        data.users.push(u);
+      }
+      saveData();
+      closeModal(userModal);
+      populateUserBusinessSelects();
+      populateBizOwnerOptions();
+    });
+
+    userCancel.addEventListener('click', ()=> closeModal(userModal));
+
+    btnAddBusiness.addEventListener('click', ()=>{
+      businessModal.querySelector('#businessModalTitle').textContent = 'Add Business';
+      bizName.value=''; bizOwner.value = selectedUserId || ''; bizVat.value = 7.5; bizCurrency.value = '₦'; bizThreshold.value = '';
+      bizNotes.value=''; bizVatEnabled.checked = true; bizPitEnabled.checked = true; bizVatInclusive.checked = false;
+      bizWhtEnabled.checked = true; bizWhtCode.value = '2300';
+      bizEditingId = null;
+      populateBizOwnerOptions();
+      openModal(businessModal);
+    });
+
+    bizSave.addEventListener('click', ()=>{
+      const name = (bizName.value || '').trim();
+      const ownerId = bizOwner.value || null;
+      if (!name) return alert('Provide business name');
+      const newBiz = {
+        id: uid('biz'),
+        name,
+        ownerId,
+        members: ownerId ? [ownerId] : [],
+        vatRate: Number(bizVat.value || 0),
+        currency: bizCurrency.value || '₦',
+        threshold: Number(bizThreshold.value || 0),
+        notes: bizNotes.value || '',
+        vatEnabled: !!bizVatEnabled.checked,
+        pitEnabled: !!bizPitEnabled.checked,
+        vatInclusive: !!bizVatInclusive.checked,
+        whtAutoCreate: !!bizWhtEnabled.checked,
+        whtCode: bizWhtCode.value || '2300',
+        contacts: [],
+        accounts: [],
+        pit: DEFAULT_PIT
+      };
+      if (bizEditingId){
+        const b = data.businesses.find(x=>x.id===bizEditingId);
+        if (b) {
+          Object.assign(b, newBiz, { id: b.id });
+          ensureBizWhtAccount(b);
+        }
+      } else {
+        data.businesses.push(newBiz);
+        data.transactions[newBiz.id] = [];
+        ensureBizWhtAccount(newBiz);
+      }
+      saveData();
+      closeModal(businessModal);
+      populateUserBusinessSelects();
+      selectedBusinessId = data.businesses[data.businesses.length-1].id;
+      businessSelect.value = selectedBusinessId;
+      refreshContactsAccountsUI();
+      renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+    });
+
+    bizCancel.addEventListener('click', ()=> closeModal(businessModal));
+
+    btnAddContactInline.addEventListener('click', ()=>{
+      contactModalTitle.textContent = 'Add Contact';
+      contactName.value=''; contactType.value='Customer'; contactInfo.value='';
+      contactEditingId = null;
+      openModal(contactModal);
+    });
+
+    contactSave.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId);
+      if (!b) return alert('Select business first.');
+      const name = (contactName.value||'').trim();
+      const type = contactType.value || 'Customer';
+      const info = (contactInfo.value||'').trim();
+      if (!name) return alert('Provide contact name');
+      if (contactEditingId){
+        const c = b.contacts.find(x=>x.id===contactEditingId);
+        if (c){ c.name = name; c.type = type; c.info = info; }
+      } else {
+        const c = { id: uid('c'), name, type, info, notes: '' };
+        b.contacts.push(c);
+      }
+      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); renderMonthlyPayePitSummaries();
+    });
+
+    contactCancel.addEventListener('click', ()=> closeModal(contactModal));
+
+    btnOpenContacts.addEventListener('click', ()=>{
+      // to keep things simple open the Add Contact modal for quick additions
+      contactModalTitle.textContent = 'Add Contact';
+      contactName.value=''; contactType.value='Customer'; contactInfo.value='';
+      contactEditingId = null;
+      openModal(contactModal);
+    });
+
+    btnAddAccountInline.addEventListener('click', ()=>{
+      accountModal.querySelector('#accountModalTitle').textContent = 'Add Account';
+      accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountIsSalary.checked = false;
+      accountEditingId = null;
+      openModal(accountModal);
+    });
+
+    accountSave.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId);
+      if (!b) return alert('Select business first.');
+      const code = (accountCode.value||'').trim();
+      const name = (accountName.value||'').trim();
+      const type = accountType.value || 'Asset';
+      const notes = (accountNotes.value||'').trim();
+      const isSalary = !!accountIsSalary.checked;
+      if (!name) return alert('Provide account name');
+      if (accountEditingId){
+        const a = b.accounts.find(x=>x.id===accountEditingId);
+        if (a){ a.code = code; a.name = name; a.type = type; a.notes = notes; a.isSalary = isSalary; }
+      } else {
+        const acc = { id: uid('a'), code, name, type, notes, isSalary };
+        b.accounts.push(acc);
+      }
+      ensureBizWhtAccount(b);
+      saveData();
+      closeModal(accountModal);
+      refreshContactsAccountsUI();
+      renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+    });
+
+    accountCancel.addEventListener('click', ()=> closeModal(accountModal));
+
+    btnOpenAccounts.addEventListener('click', ()=>{
+      accountModal.querySelector('#accountModalTitle').textContent = 'Add Account';
+      accountCode.value=''; accountName.value=''; accountType.value='Asset'; accountNotes.value=''; accountIsSalary.checked = false;
+      openModal(accountModal);
+    });
 
     btnAddTxn.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId);
@@ -938,7 +1136,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
       if (!data.transactions[b.id]) data.transactions[b.id] = [];
       data.transactions[b.id].push(txn);
       saveData();
-      txnDate.value=''; txnDesc.value=''; txnAmount.value=''; txnContact.value=''; txnAccount.value='';
+      txnDate.value=''; txnDesc.value=''; txnAmount.value=''; txnContact.value=''; txnAccount.value=''; txnWhtEnabled.checked=false; txnWhtRate.value=5; txnWhtInclusive.checked=false;
       renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
@@ -947,6 +1145,7 @@ GitHub Copilot Chat Assistant — full updated index.html:
       const t = txs.find(x=>x.id===tid);
       if (!t) return alert('Transaction not found.');
       editTxnId = tid;
+      editTxnBizId = bid;
       editTxnDate.value = t.date || '';
       editTxnDesc.value = t.desc || '';
       editTxnAmount.value = t.amount || 0;
@@ -955,13 +1154,29 @@ GitHub Copilot Chat Assistant — full updated index.html:
       editTxnWhtEnabled.checked = !!t.whtEnabled;
       editTxnWhtRate.value = t.whtRate || 0;
       editTxnWhtInclusive.checked = !!t.whtInclusive;
+
+      // show/hide WHT controls if business has WHT config and account exists and expense
+      const b = findBiz(bid);
+      const acc = findAccount(bid, t.accountId);
+      if (b && b.whtAutoCreate && acc && acc.type === 'Expense') {
+        editWhtLabel.style.display = 'block';
+        editWhtRateLabel.style.display = 'block';
+        editWhtInclusiveLabel.style.display = 'block';
+      } else {
+        editWhtLabel.style.display = 'none';
+        editWhtRateLabel.style.display = 'none';
+        editWhtInclusiveLabel.style.display = 'none';
+      }
+
+      populateAccountSelects();
+      populateContactSelects();
       openModal(editModal);
     };
 
     editSave.addEventListener('click', ()=>{
-      if (!editTxnId) return closeModal(editModal);
-      const b = findBiz(selectedBusinessId);
-      const txs = data.transactions[b.id] || [];
+      if (!editTxnId || !editTxnBizId) return closeModal(editModal);
+      const b = findBiz(editTxnBizId);
+      const txs = data.transactions[editTxnBizId] || [];
       const t = txs.find(x=>x.id===editTxnId);
       if (!t) return alert('Transaction not found.');
       t.date = editTxnDate.value || t.date;
@@ -972,7 +1187,8 @@ GitHub Copilot Chat Assistant — full updated index.html:
       t.whtEnabled = !!editTxnWhtEnabled.checked;
       t.whtRate = Number(editTxnWhtRate.value || 0);
       t.whtInclusive = !!editTxnWhtInclusive.checked;
-      saveData(); closeModal(editModal); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
+      saveData(); closeModal(editModal);
+      renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     });
 
     editCancel.addEventListener('click', ()=> { closeModal(editModal); });
@@ -985,180 +1201,139 @@ GitHub Copilot Chat Assistant — full updated index.html:
       renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
     };
 
-    // contacts/accounts management (simplified)
-    btnAddContactInline.addEventListener('click', ()=>{
-      contactModalTitle.textContent = 'Add Contact';
-      contactName.value=''; contactType.value='Customer'; contactInfo.value='';
-      contactEditingId = null;
-      openModal(contactModal);
+    btnSearch.addEventListener('click', ()=>{
+      ledgerFilterText = (ledgerSearch.value || '').trim();
+      currentPage = 1;
+      renderLedger();
+    });
+    btnClearSearch.addEventListener('click', ()=>{
+      ledgerFilterText = '';
+      ledgerSearch.value = '';
+      currentPage = 1;
+      renderLedger();
+    });
+    btnPrevPage.addEventListener('click', ()=>{
+      if (currentPage > 1) { currentPage--; renderLedger(); }
+    });
+    btnNextPage.addEventListener('click', ()=>{
+      currentPage++;
+      renderLedger();
     });
 
-    contactSave.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select business first.');
-      const name = (contactName.value||'').trim();
-      const type = contactType.value;
-      if (!name) return alert('Name required');
-      if (contactEditingId){
-        const c = b.contacts.find(x=>x.id===contactEditingId);
-        if (c){ c.name = name; c.type = type; c.info = (contactInfo.value||'').trim(); }
-      } else {
-        const c = { id: uid('c'), name, type, info: (contactInfo.value||'').trim(), notes: '' };
-        b.contacts.push(c);
-      }
-      saveData(); closeModal(contactModal); refreshContactsAccountsUI(); renderLedger(); renderMonthlyPayePitSummaries();
+    btnExport.addEventListener('click', ()=>{
+      const payload = JSON.stringify(data, null, 2);
+      const blob = new Blob([payload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ntc_data_export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     });
 
-    contactCancel.addEventListener('click', ()=> closeModal(contactModal));
-
-    window.editContactHandler = function(cid){
-      const b = findBiz(selectedBusinessId);
-      if (!b) return;
-      const c = b.contacts.find(x=>x.id===cid);
-      if (!c) return;
-      contactModalTitle.textContent = 'Edit Contact';
-      contactName.value = c.name || '';
-      contactType.value = c.type || 'Customer';
-      contactInfo.value = c.info || '';
-      contactEditingId = c.id;
-      openModal(contactModal);
-    };
-
-    // Accounts
-    btnAddAccountInline.addEventListener('click', ()=>{
-      accountCode.value=''; accountName.value=''; accountType.value='Expense'; accountNotes.value=''; accountIsSalary.checked=false; accountEditingId = null;
-      openModal(accountModal);
-    });
-
-    accountSave.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId);
-      if (!b) return alert('Select business first.');
-      const code = (accountCode.value||'').trim();
-      const name = (accountName.value||'').trim();
-      const type = accountType.value;
-      if (!name) return alert('Name required');
-      if (accountEditingId){
-        const a = b.accounts.find(x=>x.id===accountEditingId);
-        if (a){ a.code = code; a.name = name; a.type = type; a.notes = (accountNotes.value||'').trim(); a.isSalary = !!accountIsSalary.checked; }
-      } else {
-        const a = { id: uid('a'), code, name, type, notes: (accountNotes.value||'').trim(), isSalary: !!accountIsSalary.checked };
-        b.accounts.push(a);
-      }
-      ensureBizWhtAccount(b);
-      saveData(); closeModal(accountModal); refreshContactsAccountsUI(); renderLedger(); renderMonthlyPayePitSummaries();
-    });
-
-    accountCancel.addEventListener('click', ()=> closeModal(accountModal));
-
-    // Business & user management (simplified add only)
-    btnAddUser.addEventListener('click', ()=>{ userName.value=''; userDisplay.value=''; openModal(userModal); userEditingId = null; });
-    userSave.addEventListener('click', ()=>{
-      const username = (userName.value||'').trim();
-      const display = (userDisplay.value||'').trim();
-      if (!username) return alert('Username required');
-      if (userEditingId){
-        const u = data.users.find(x=>x.id===userEditingId);
-        if (u){ u.username = username; u.display = display; }
-      } else {
-        data.users.push({ id: uid('user'), username, display, notes: '' });
-      }
-      saveData(); closeModal(userModal); populateUserBusinessSelects(); refreshContactsAccountsUI();
-    });
-    userCancel.addEventListener('click', ()=> closeModal(userModal));
-
-    btnAddBusiness.addEventListener('click', ()=>{
-      bizName.value=''; bizOwner.innerHTML='';
-      data.users.forEach(u=>{ const o = document.createElement('option'); o.value=u.id; o.textContent = u.display || u.username; bizOwner.appendChild(o); });
-      bizVat.value = 7.5; bizCurrency.value = '₦'; bizThreshold.value = 800000; bizNotes.value=''; bizVatEnabled.checked=true; bizPitEnabled.checked=true; bizVatInclusive.checked=false; bizWhtEnabled.checked=true; bizWhtCode.value='2300';
-      openModal(businessModal); bizEditingId = null;
-    });
-
-    bizSave.addEventListener('click', ()=>{
-      const name = (bizName.value||'').trim();
-      const ownerId = bizOwner.value || (data.users[0] && data.users[0].id);
-      if (!name) return alert('Business name required');
-      const b = {
-        id: uid('biz'),
-        name,
-        ownerId,
-        members: [ownerId],
-        vatRate: Number(bizVat.value || 0),
-        currency: bizCurrency.value || '₦',
-        threshold: Number(bizThreshold.value || 0),
-        notes: bizNotes.value || '',
-        vatEnabled: !!bizVatEnabled.checked,
-        pitEnabled: !!bizPitEnabled.checked,
-        vatInclusive: !!bizVatInclusive.checked,
-        whtAutoCreate: !!bizWhtEnabled.checked,
-        whtCode: bizWhtCode.value || '2300',
-        contacts: [],
-        accounts: [],
-        pit: DEFAULT_PIT
-      };
-      data.businesses.push(b);
-      ensureBizWhtAccount(b);
-      saveData(); closeModal(businessModal); populateUserBusinessSelects(); refreshContactsAccountsUI(); renderLedger(); calculateSummary();
-    });
-
-    bizCancel.addEventListener('click', ()=> closeModal(businessModal));
-
-    // helpers for modals
-    function openModal(el){ if (!el) return; modalOverlay.style.display='block'; el.style.display='block'; el.setAttribute('aria-hidden','false'); }
-    function closeModal(el){ if (!el) return; modalOverlay.style.display='none'; el.style.display='none'; el.setAttribute('aria-hidden','true'); }
-
-    // search & pagination
-    btnSearch.addEventListener('click', ()=>{ ledgerFilterText = ledgerSearch.value || ''; currentPage = 1; renderLedger(); });
-    btnClearSearch.addEventListener('click', ()=>{ ledgerSearch.value=''; ledgerFilterText=''; currentPage = 1; renderLedger(); });
-    btnPrevPage.addEventListener('click', ()=>{ if (currentPage > 1) { currentPage--; renderLedger(); } });
-    btnNextPage.addEventListener('click', ()=>{ currentPage++; renderLedger(); });
-
-    // import/export
-    btnExport.addEventListener('click', ()=>{ const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc-data.json'; a.click(); URL.revokeObjectURL(url); });
     btnImport.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', (e)=>{ const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ()=>{ try { const j = JSON.parse(r.result); if (j){ data = j; saveData(); populateUserBusinessSelects(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); alert('Import successful'); } } catch(err){ alert('Import failed: ' + err.message); } }; r.readAsText(f); });
-
-    btnClearAll.addEventListener('click', ()=>{ if (!confirm('Clear all stored data?')) return; localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; loadData(); populateUserBusinessSelects(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); });
-
-    // show/hide WHT inline controls when account selection changes
-    function updateWhtInlineVisibility(){
-      const b = findBiz(selectedBusinessId);
-      if (!b) { whtInlineLabel.style.display='none'; whtRateInlineLabel.style.display='none'; whtInclusiveLabel.style.display='none'; return; }
-      const acc = findAccount(selectedBusinessId, txnAccount.value);
-      if (!acc) { whtInlineLabel.style.display='none'; whtRateInlineLabel.style.display='none'; whtInclusiveLabel.style.display='none'; return; }
-      if (acc.type === 'Expense'){
-        whtInlineLabel.style.display='inline-block';
-        whtRateInlineLabel.style.display='inline-block';
-        whtInclusiveLabel.style.display='inline-block';
-      } else {
-        whtInlineLabel.style.display='none';
-        whtRateInlineLabel.style.display='none';
-        whtInclusiveLabel.style.display='none';
-      }
-    }
-    txnAccount.addEventListener('change', updateWhtInlineVisibility);
-    editTxnAccount.addEventListener('change', ()=>{
-      const acc = findAccount(selectedBusinessId, editTxnAccount.value);
-      if (!acc){
-        editWhtLabel.style.display='none'; editWhtRateLabel.style.display='none'; editWhtInclusiveLabel.style.display='none'; return;
-      }
-      if (acc.type === 'Expense'){ editWhtLabel.style.display='block'; editWhtRateLabel.style.display='block'; editWhtInclusiveLabel.style.display='block'; }
-      else { editWhtLabel.style.display='none'; editWhtRateLabel.style.display='none'; editWhtInclusiveLabel.style.display='none'; }
+    fileInput.addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = (ev)=>{
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (!confirm('Import will replace current local data. Continue?')) return;
+          data = parsed;
+          saveData();
+          // refresh UI
+          loadData();
+          populateUserBusinessSelects();
+          refreshContactsAccountsUI();
+          renderLedger();
+          calculateSummary();
+          renderMonthlyPayePitSummaries();
+          alert('Import complete.');
+        } catch(err){
+          alert('Invalid JSON file: ' + (err && err.message));
+        }
+      };
+      reader.readAsText(f);
+      // clear the input so same file can be re-imported if needed
+      fileInput.value = '';
     });
 
-    // when business / user selection changes
-    userSelect.addEventListener('change', ()=>{ selectedUserId = userSelect.value || null; });
+    btnClearAll.addEventListener('click', ()=>{
+      if (!confirm('Clear all local data? This cannot be undone.')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      data = { users: [], businesses: [], transactions: {} };
+      selectedUserId = null;
+      selectedBusinessId = null;
+      loadData();
+      populateUserBusinessSelects();
+      refreshContactsAccountsUI();
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
+    });
+
+    // when business or user changes
+    userSelect.addEventListener('change', ()=>{
+      selectedUserId = userSelect.value || null;
+      currentPage = 1;
+      renderLedger();
+    });
     businessSelect.addEventListener('change', ()=>{
       selectedBusinessId = businessSelect.value || null;
-      refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); updateWhtInlineVisibility();
+      currentPage = 1;
+      refreshContactsAccountsUI();
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
     });
 
-    // initial load
-    loadData(); populateUserBusinessSelects(); refreshContactsAccountsUI(); renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries(); updateWhtInlineVisibility();
+    // show/hide inline WHT options based on selected account & business settings
+    txnAccount.addEventListener('change', ()=>{
+      const b = findBiz(selectedBusinessId);
+      const acc = findAccount(selectedBusinessId, txnAccount.value);
+      if (b && b.whtAutoCreate && acc && acc.type === 'Expense'){
+        whtInlineLabel.style.display = 'inline-block';
+        whtRateInlineLabel.style.display = 'inline-block';
+        whtInclusiveLabel.style.display = 'inline-block';
+      } else {
+        whtInlineLabel.style.display = 'none';
+        whtRateInlineLabel.style.display = 'none';
+        whtInclusiveLabel.style.display = 'none';
+        txnWhtEnabled.checked = false;
+        txnWhtInclusive.checked = false;
+      }
+    });
 
-    // expose handlers used in inline HTML
-    window.editTxnHandler = window.editTxnHandler;
-    window.deleteTxnHandler = window.deleteTxnHandler;
+    // initialize app
+    function init(){
+      loadData();
+      populateUserBusinessSelects();
+      populateBizOwnerOptions();
+      refreshContactsAccountsUI();
+      renderLedger();
+      calculateSummary();
+      renderMonthlyPayePitSummaries();
 
+      // set default date for txnDate to today
+      txnDate.value = new Date().toISOString().slice(0,10);
+
+      // ensure selects populated on start
+      userSelect.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
+      businessSelect.value = selectedBusinessId || (data.businesses[0] && data.businesses[0].id) || '';
+
+      // set global on window for debugging if needed
+      window.ntc_data = data;
+    }
+
+    // run init after DOM ready
+    document.addEventListener('DOMContentLoaded', init);
+    // also run init if script runs after DOM loaded already
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(init, 0);
+    }
   </script>
 </body>
-</html>
+  </html>
