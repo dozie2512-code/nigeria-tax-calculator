@@ -1,3 +1,7 @@
+Updated index.html implementing your choices (default useful life = 4 years, editable per-asset, prorated depreciation, per-business fixedAssets, tax-year selector, capital allowance absorption 2/3 / carry forward 1/3, tax computations, etc.).
+
+Copy and replace your existing index.html with the full content below.
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,7 +30,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(920px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -45,6 +49,8 @@
     .field { display:flex; flex-direction:column; gap:4px; }
     .result-box { background:#fff; padding:10px; border:1px solid #eef2f6; border-radius:6px; margin-top:8px; }
     .result-row { display:flex; gap:8px; align-items:center; justify-content:space-between; padding:4px 0; }
+    .account-tag { font-size:0.85rem; color:var(--muted); margin-left:6px; }
+    .flex-col { display:flex; flex-direction:column; gap:8px; }
   </style>
 </head>
 <body>
@@ -67,6 +73,9 @@
     </div>
     <div class="spacer"></div>
     <div style="display:flex;gap:8px;align-items:center;">
+      <label class="muted-inline">Tax year:
+        <select id="taxYearSelect" style="margin-left:6px;"></select>
+      </label>
       <button id="btnExport" class="small">Export JSON</button>
       <button id="btnImport" class="small">Import JSON</button>
       <button id="btnClearAll" class="small danger">Clear All Data</button>
@@ -103,9 +112,16 @@
         </label>
         <button class="small" id="btnAddContactInline">+ Contact</button>
 
+        <label title="Mark this transaction as acquisition of a fixed asset">
+          <input type="checkbox" id="txnIsFixedAsset" /> Fixed asset?
+        </label>
+        <label style="display:flex;align-items:center;">
+          Useful life (yrs): <input type="number" id="txnAssetLife" min="1" step="1" value="4" style="width:70px;margin-left:6px" />
+        </label>
+
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved at the business level. VAT is calculated for sales (Revenue) and for purchases only (not all expenses). WHT (Withholding Tax) applies for qualifying expenses.</small>
+      <small class="note">Transactions are saved at the business level. VAT is calculated for sales (Revenue) and for purchases only (not all expenses). WHT (Withholding Tax) applies for qualifying expenses. Mark an acquisition as fixed asset to create an asset record for depreciation and capital allowance.</small>
     </section>
 
     <section class="panel section">
@@ -186,8 +202,8 @@
             <small class="muted">Tax-exempt income to remove</small>
           </div>
           <div class="field">
-            <label>Capital allowances (₦): <input type="number" id="capitalAllowances" step="0.01" /></label>
-            <small class="muted">Tax depreciation allowances</small>
+            <label>Capital allowances (₦) (auto): <input type="number" id="capitalAllowances" step="0.01" readonly /></label>
+            <small class="muted">Tax depreciation allowances (computed)</small>
           </div>
 
           <div class="field">
@@ -223,15 +239,37 @@
             </div>
             <div id="pitNotes" style="margin-top:8px;" class="muted"></div>
           </div>
+
+          <div id="citResult" class="result-box" aria-live="polite" style="display:none;">
+            <div class="result-row"><div><strong>Estimated Company Income Tax (CIT)</strong></div><div>₦ <span id="citValue">0</span></div></div>
+            <div id="citNotes" style="margin-top:6px;" class="muted"></div>
+          </div>
+
+          <div id="capAllowApplyBox" class="result-box" style="display:none;">
+            <div class="result-row"><div><strong>Capital allowance available</strong></div><div>₦ <span id="capAllowAvailable">0</span></div></div>
+            <div style="display:flex;gap:8px;">
+              <button id="btnApplyCarryforwards" class="small">Apply carryforward (persist)</button>
+              <button id="btnResetCarryforwards" class="small">Reset carryforward</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <small class="muted">Formula: Taxable income = Net profit A + Disallowable expenses - Non-taxable income - Capital allowances - Prior losses + Other adjustments</small>
+      <small class="muted">Formula: Taxable income = Net profit A + Disallowable expenses - Non-taxable income - Capital allowances applied - Prior losses + Other adjustments</small>
+    </section>
+
+    <section class="panel section" id="assetsPanel">
+      <h2 style="margin:0 0 8px 0;">Fixed Assets</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="btnAddAsset" class="small">+ Add Asset</button>
+        <button id="btnImportAssets" class="small">Import Assets</button>
+      </div>
+      <div id="fixedAssetsList" style="margin-top:8px;"></div>
     </section>
 
   </main>
 
-  <!-- Modals (simplified for this file) -->
+  <!-- Modals -->
   <div id="modalOverlay" class="modalOverlay" aria-hidden="true"></div>
 
   <div id="userModal" class="modal" aria-hidden="true">
@@ -269,14 +307,14 @@
       <label><input type="checkbox" id="bizWhtEnabled" checked /> Auto-create WHT Payable account</label>
       <label>WHT account code: <input type="text" id="bizWhtCode" value="2300" style="width:90px" /></label>
     </div>
-    <!-- NEW: Startup balances -->
+    <!-- Startup balances -->
     <div class="row">
       <label>Startup Fixed Assets (₦): <input type="number" id="bizStartupFixedAssets" step="0.01" value="0" /></label>
       <label>Opening Accum. Depreciation (₦): <input type="number" id="bizStartupAccumDep" step="0.01" value="0" /></label>
     </div>
     <div class="row">
       <label>Opening Capital Allowances (₦): <input type="number" id="bizStartupCapitalAllowances" step="0.01" value="0" /></label>
-      <label>Opening Retained Profit (₦): <input type="number" id="bizStartupRetainedEarnings" step="0.01" value="0" /></label>
+      <label>Opening retained profit (₦): <input type="number" id="bizStartupRetainedEarnings" step="0.01" value="0" /></label>
     </div>
     <div class="row">
       <label><input type="checkbox" id="bizApplyStartupToTax" checked /> Apply opening capital allowances when computing tax</label>
@@ -335,9 +373,32 @@
     </div>
   </div>
 
+  <div id="assetModal" class="modal" aria-hidden="true">
+    <h3 id="assetModalTitle">Add Fixed Asset</h3>
+    <div class="row">
+      <label>Name: <input type="text" id="assetName" /></label>
+      <label>Account:
+        <select id="assetAccount"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Cost (₦): <input type="number" id="assetCost" step="0.01" /></label>
+      <label>Date acquired: <input type="date" id="assetDate" /></label>
+      <label>Useful life (yrs): <input type="number" id="assetLife" min="1" step="1" value="4" style="width:80px" /></label>
+    </div>
+    <div class="row">
+      <label>Opening accumulated depreciation (₦): <input type="number" id="assetAccum" step="0.01" value="0" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="assetCancel">Cancel</button>
+      <button class="primary" id="assetSave">Save</button>
+    </div>
+  </div>
+
   <script>
-    // GitHub Copilot Chat Assistant — repaired and completed script
-    const STORAGE_KEY = 'ntc_data_v3';
+    // GitHub Copilot Chat Assistant — implemented requested tax & asset features
+    const STORAGE_KEY = 'ntc_data_v4';
+    // default PIT bands (as in repo)
     const DEFAULT_PIT = {
       threshold: 800000,
       slices: [
@@ -349,16 +410,21 @@
       ]
     };
 
+    // default deduction keywords
     const DEFAULT_DEDUCTION_KEYWORDS = [
       'rent',
       'pension',
       'nhf',
       'nhis',
       'life assurance',
+      'life',
       'interest on loan for owner occupied house',
       'interest',
       'owner occupied'
     ];
+
+    // default useful life (user chose 4)
+    const DEFAULT_USEFUL_LIFE_YEARS = 4;
 
     let data = { users: [], businesses: [], transactions: {} };
     let selectedUserId = null;
@@ -405,6 +471,7 @@
               if (!Array.isArray(b.members)) b.members = [];
               if (!Array.isArray(b.contacts)) b.contacts = [];
               if (!Array.isArray(b.accounts)) b.accounts = [];
+              if (!Array.isArray(b.fixedAssets)) b.fixedAssets = [];
               b.accounts = b.accounts.map(a => ({ ...a, isSalary: !!a.isSalary }));
               if (typeof b.vatRate !== 'number') b.vatRate = 7.5;
               if (typeof b.vatEnabled === 'undefined') b.vatEnabled = true;
@@ -413,7 +480,8 @@
               if (typeof b.whtAutoCreate === 'undefined') b.whtAutoCreate = true;
               if (!b.whtCode) b.whtCode = '2300';
               if (typeof b.vatInclusive === 'undefined') b.vatInclusive = false;
-              // NEW defaults for startup balances and options
+              if (typeof b.taxCarryforward !== 'object' || b.taxCarryforward === null) b.taxCarryforward = { capitalAllowances: 0, priorLosses: 0 };
+              // startup values fallback
               if (typeof b.startupFixedAssets !== 'number') b.startupFixedAssets = Number(b.startupFixedAssets || 0);
               if (typeof b.startupAccumDep !== 'number') b.startupAccumDep = Number(b.startupAccumDep || 0);
               if (typeof b.startupCapitalAllowances !== 'number') b.startupCapitalAllowances = Number(b.startupCapitalAllowances || 0);
@@ -472,6 +540,12 @@
             priorLosses: 0,
             otherAdjustments: 0
           },
+          // new fields
+          fixedAssets: [
+            // demo asset
+            { id: uid('fa'), accountId: accounts[0].id, name: 'Office Laptop', cost: 200000, dateAcquired: new Date().toISOString().slice(0,10), usefulLifeYears: DEFAULT_USEFUL_LIFE_YEARS, accumulatedDepreciation: 0 }
+          ],
+          taxCarryforward: { capitalAllowances: 40000, priorLosses: 0 },
           // demo startup values
           startupFixedAssets: 500000,
           startupAccumDep: 80000,
@@ -483,9 +557,9 @@
       };
       const now = new Date().toISOString().slice(0,10);
       data.transactions[bizId] = [
-        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: contact1.id, accountId: accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false },
-        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.code==='5000').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false },
-        { id: uid('txn'), date: now, desc: 'Purchase inventory', amount: 300000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.name==='Purchases').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false },
+        { id: uid('txn'), date: now, desc: 'Demo sale to ACME', amount: 1500000, authorUserId: userId, contactId: contact1.id, accountId: accounts.find(a=>a.type==='Revenue').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false, isFixedAsset:false },
+        { id: uid('txn'), date: now, desc: 'Office rent', amount: 200000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.code==='5000').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false, isFixedAsset:false },
+        { id: uid('txn'), date: now, desc: 'Purchase inventory', amount: 300000, authorUserId: userId, contactId: contact2.id, accountId: accounts.find(a=>a.name==='Purchases').id, whtEnabled: false, whtRate:0, whtInclusive:false, vatInclusive:false, isFixedAsset:false },
       ];
       saveData();
     }
@@ -499,6 +573,10 @@
     function findAccount(bizId, accountId){
       const b = findBiz(bizId); if (!b || !Array.isArray(b.accounts)) return null;
       return b.accounts.find(a=>a.id===accountId) || null;
+    }
+    function findAsset(bizId, assetId){
+      const b = findBiz(bizId); if (!b || !Array.isArray(b.fixedAssets)) return null;
+      return b.fixedAssets.find(f=>f.id===assetId) || null;
     }
 
     // UI references
@@ -526,6 +604,8 @@
     const txnAmount = document.getElementById('txnAmount');
     const txnContact = document.getElementById('txnContact');
     const txnAccount = document.getElementById('txnAccount');
+    const txnIsFixedAsset = document.getElementById('txnIsFixedAsset');
+    const txnAssetLife = document.getElementById('txnAssetLife');
 
     const btnAddContactInline = document.getElementById('btnAddContactInline');
     const btnAddAccountInline = document.getElementById('btnAddAccountInline');
@@ -566,6 +646,15 @@
     const pitMonthlyValueSpan = document.getElementById('pitMonthlyValue');
     const pitNotesDiv = document.getElementById('pitNotes');
 
+    const citResultDiv = document.getElementById('citResult');
+    const citValueSpan = document.getElementById('citValue');
+    const citNotesDiv = document.getElementById('citNotes');
+
+    const capAllowApplyBox = document.getElementById('capAllowApplyBox');
+    const capAllowAvailableSpan = document.getElementById('capAllowAvailable');
+    const btnApplyCarryforwards = document.getElementById('btnApplyCarryforwards');
+    const btnResetCarryforwards = document.getElementById('btnResetCarryforwards');
+
     // Business modal startup fields
     const bizNameInput = document.getElementById('bizName');
     const bizOwnerSelect = document.getElementById('bizOwner');
@@ -583,6 +672,21 @@
     const bizStartupCapitalAllowancesInput = document.getElementById('bizStartupCapitalAllowances');
     const bizStartupRetainedEarningsInput = document.getElementById('bizStartupRetainedEarnings');
     const bizApplyStartupToTaxChk = document.getElementById('bizApplyStartupToTax');
+
+    // asset modal refs
+    const btnAddAsset = document.getElementById('btnAddAsset');
+    const assetModal = document.getElementById('assetModal');
+    const assetNameInput = document.getElementById('assetName');
+    const assetAccountSelect = document.getElementById('assetAccount');
+    const assetCostInput = document.getElementById('assetCost');
+    const assetDateInput = document.getElementById('assetDate');
+    const assetLifeInput = document.getElementById('assetLife');
+    const assetAccumInput = document.getElementById('assetAccum');
+    const assetCancel = document.getElementById('assetCancel');
+    const assetSave = document.getElementById('assetSave');
+    const fixedAssetsListDiv = document.getElementById('fixedAssetsList');
+
+    const taxYearSelect = document.getElementById('taxYearSelect');
 
     // helper functions
     function displayAccountType(type){
@@ -644,9 +748,9 @@
     }
 
     // PAYE summary (kept minimal)
-    function computeEmployeePayeSummaries(biz){
+    function computeEmployeePayeSummaries(biz, taxYear){
       if (!biz) return [];
-      const year = new Date().getFullYear();
+      // taxYear is a number (e.g., 2024)
       const txs = data.transactions[biz.id] || [];
       const pitRules = biz.pit || DEFAULT_PIT;
       const employees = getEmployeesForBusiness(biz);
@@ -672,7 +776,7 @@
         for (const t of txs){
           if (!t.contactId || t.contactId !== emp.id) continue;
           if (!t.date) continue;
-          if (t.date.slice(0,4) !== String(year)) continue;
+          if (t.date.slice(0,4) !== String(taxYear)) continue;
           const acc = findAccount(biz.id, t.accountId);
           if (!acc) continue;
           const isDeduction = isDeductionAccount(acc, keywords);
@@ -724,14 +828,14 @@
       return results;
     }
 
-    function renderPayeSummary(biz){
+    function renderPayeSummary(biz, taxYear){
       payeSummaryDiv.innerHTML = '';
       if (!biz) { payeSummaryDiv.innerHTML = '<div class="muted">No business selected.</div>'; return; }
       if (!biz.pitEnabled) { payeSummaryDiv.innerHTML = '<div class="muted">PIT disabled for this business.</div>'; return; }
-      const rows = computeEmployeePayeSummaries(biz);
+      const rows = computeEmployeePayeSummaries(biz, taxYear);
       if (!rows.length) { payeSummaryDiv.innerHTML = '<div class="muted">No employees found for this business (contacts with type "Employee").</div>'; return; }
 
-      let html = `<strong>PAYE Summary (calendar year ${new Date().getFullYear()})</strong>`;
+      let html = `<strong>PAYE Summary (calendar year ${taxYear})</strong>`;
       html += `<table class="paye-table" role="table" aria-label="PAYE summary">
         <thead><tr><th>Employee</th><th>Gross Salary (₦)</th><th>Statutory Deductions (₦)</th><th>Taxable Income (₦)</th><th>Annual PAYE (₦)</th><th>Monthly PAYE (₦)</th></tr></thead><tbody>`;
       let totalGross=0, totalDeductions=0, totalTaxable=0, totalAnnual=0, totalMonthly=0;
@@ -763,14 +867,15 @@
 
     function renderMonthlyPayePitSummaries(){
       const b = findBiz(selectedBusinessId);
-      renderPayeSummary(b);
+      const taxYear = Number(taxYearSelect.value);
+      renderPayeSummary(b, taxYear);
       pitSummaryDiv.innerHTML = '';
       if (b && b.pit) {
         const bands = (b.pit.slices || DEFAULT_PIT.slices).map(s => {
           const upTo = s.upTo === Infinity ? 'and above' : `up to ₦${formatMoney(s.upTo)}`;
           return `<div>${upTo}: ${(Number(s.rate || 0)*100).toFixed(0)}%</div>`;
         }).join('');
-        pitSummaryDiv.innerHTML = `<div class="muted">Tax-free threshold: ₦${formatMoney((b.pit && b.pit.threshold) ? b.pit.threshold : DEFAULT_PIT.threshold)} — Rate bands:</div><div style="margin-top:6px;">${bands}</div>`;
+        pitSummaryDiv.innerHTML = `<div class="muted">Tax-free threshold: ₦${formatMoney((b.pit && b.pit.threshold) ? b.pit.threshold : DEFAULT_PIT.threshold)} — Rate bands:</div><div style="margin-top:6px">${bands}</div>`;
       } else {
         pitSummaryDiv.innerHTML = '<div class="muted">PIT settings not configured for this business.</div>';
       }
@@ -826,7 +931,7 @@
 
     function populateAccountSelects(){
       const b = findBiz(selectedBusinessId);
-      const lists = [txnAccount];
+      const lists = [txnAccount, assetAccountSelect];
       lists.forEach(select => {
         if (!select) return;
         select.innerHTML = '';
@@ -864,7 +969,7 @@
           const d = document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.padding='4px 0';
           const isWht = (b.whtAccountId && a.id === b.whtAccountId);
           const salaryTag = a.isSalary ? '<span class="muted"> (Salary)</span>' : '';
-          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''}${salaryTag} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span></div>`;
+          d.innerHTML = `<div><strong>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</strong> ${isWht?'<span class="muted"> (WHT Payable)</span>':''}${salaryTag} <span class="muted">(${escapeHtml(displayAccountType(a.type))})</span><br/><small class="muted">${escapeHtml(a.notes||'')}</small></div>`;
           accountsListDiv.appendChild(d);
         });
       }
@@ -940,7 +1045,7 @@
 
         const accText = acc ? `${acc.code || ''} - ${acc.name}` : '(no account)';
         tr.innerHTML = `<td>${escapeHtml(t.date || '')}</td>
-          <td>${escapeHtml(t.desc || '')}</td>
+          <td>${escapeHtml(t.desc || '')}${t.isFixedAsset ? '<div class="account-tag">[Fixed asset]</div>' : ''}</td>
           <td>${escapeHtml(accText)}</td>
           <td class="nowrap">${formatMoney(t.amount)}</td>
           <td class="nowrap">${formatMoney(vatAmt)}</td>
@@ -949,20 +1054,32 @@
           <td>${escapeHtml(author ? (author.display || author.username) : '')}</td>
           <td style="white-space:nowrap">
             <button class="small" onclick="alert('Edit not implemented in this demo')">Edit</button>
-            <button class="small danger" onclick="alert('Delete not implemented in this demo')">Delete</button>
+            <button class="small danger" onclick="deleteTransaction('${b.id}','${t.id}')">Delete</button>
           </td>`;
         ledgerTbody.appendChild(tr);
       }
       pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
     }
 
-    function calculateSummary(){
+    function deleteTransaction(bizId, txnId){
+      if (!confirm('Delete transaction?')) return;
+      if (!data.transactions[bizId]) return;
+      data.transactions[bizId] = data.transactions[bizId].filter(t => t.id !== txnId);
+      saveData();
+      renderAll();
+    }
+
+    function calculateSummary(taxYearOverride){
       const b = findBiz(selectedBusinessId);
       if (!b) return;
       const txs = data.transactions[b.id] || [];
 
       let totalVatOutput = 0, totalVatInput = 0, totalWhtWithheld = 0, totalAmount = 0;
       for (const t of txs){
+        // default summaries show for selected tax year unless not provided
+        const taxYear = taxYearOverride || Number(taxYearSelect.value);
+        if (!t.date || t.date.slice(0,4) !== String(taxYear)) continue;
+
         const acc = findAccount(b.id, t.accountId);
         if (!acc) continue;
         const amt = Number(t.amount || 0);
@@ -987,134 +1104,490 @@
         }
       }
 
-      vatSummaryDiv.innerHTML = `<strong>VAT</strong><div>Output VAT: ₦${formatMoney(totalVatOutput)}</div><div>Input VAT: ₦${formatMoney(totalVatInput)}</div><div>Net VAT (payable): ₦${formatMoney(totalVatOutput - totalVatInput)}</div>`;
+      vatSummaryDiv.innerHTML = `<strong>VAT (year ${taxYearSelect.value})</strong><div>Output VAT: ₦${formatMoney(totalVatOutput)}</div><div>Input VAT: ₦${formatMoney(totalVatInput)}</div><div>Net VAT (payable): ₦${formatMoney(totalVatOutput - totalVatInput)}</div>`;
       whtSummaryDiv.innerHTML = `<strong>WHT</strong><div>Total withheld: ₦${formatMoney(totalWhtWithheld)}</div>`;
-      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div>Total transactions amount: ₦${formatMoney(totalAmount)}</div>`;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div>Total transactions amount (year): ₦${formatMoney(totalAmount)}</div>`;
     }
 
-    // TAXABLE income compute and PIT display
+    // new: compute depreciation & capital allowances
+    // prorated by months in tax year; straight-line
+    function computeDepreciationAndCapitalAllowances(b, taxYear){
+      if (!b) return { depreciation:0, capitalAllowanceThisYear:0, totalAvailableCapitalAllowance:0, openingCarry:0, carryForwardAfter:0 };
+      const taxYearNum = Number(taxYear);
+      // opening capital allowance from carryforward + startup
+      const openingCAFromCarry = Number((b.taxCarryforward && b.taxCarryforward.capitalAllowances) || 0);
+      const openingCAFromStartup = b.applyStartupToTax ? Number(b.startupCapitalAllowances || 0) : 0;
+      const openingCA = openingCAFromCarry + openingCAFromStartup;
+
+      // compute annual allowance = same as depreciation (straight-line) for assets
+      let totalDepreciationThisYear = 0;
+      let totalAnnualAllowanceThisYear = 0;
+      // iterate fixed assets and compute prorated annual depreciation/allowance
+      const assets = Array.isArray(b.fixedAssets) ? b.fixedAssets : [];
+      for (const a of assets){
+        const cost = Number(a.cost || 0);
+        const accum = Number(a.accumulatedDepreciation || 0);
+        const life = Number(a.usefulLifeYears || DEFAULT_USEFUL_LIFE_YEARS) || DEFAULT_USEFUL_LIFE_YEARS;
+        if (cost <= accum) continue;
+        // determine months in tax year for which asset is held
+        // depreciable base
+        const remainingNBV = cost - accum;
+        const annualFull = remainingNBV / life;
+        // prorate based on acquisition date:
+        let monthsWithinYear = 12;
+        if (a.dateAcquired){
+          const acqDate = new Date(a.dateAcquired);
+          const startOfYear = new Date(taxYearNum,0,1);
+          const endOfYear = new Date(taxYearNum,11,31);
+          if (acqDate > endOfYear) monthsWithinYear = 0;
+          else {
+            const effectiveStart = acqDate < startOfYear ? startOfYear : acqDate;
+            // number of months inclusive in tax year
+            const m = (endOfYear.getFullYear() - effectiveStart.getFullYear())*12 + (endOfYear.getMonth() - effectiveStart.getMonth()) + 1;
+            monthsWithinYear = Math.max(0, Math.min(12, m));
+          }
+        }
+        // prorate monthly
+        const prorated = annualFull * (monthsWithinYear / 12);
+        totalDepreciationThisYear += prorated;
+        totalAnnualAllowanceThisYear += prorated; // per your instruction CA uses same straight-line rate
+      }
+
+      // also treat opening startup net CA as already included via openingCAFromStartup
+      const totalAvailableCA = openingCA + totalAnnualAllowanceThisYear;
+      // apply 2/3 of total available to this tax year, carry forward 1/3
+      const applyThisYear = (2/3) * totalAvailableCA;
+      const carryForward = totalAvailableCA - applyThisYear;
+
+      return {
+        depreciation: totalDepreciationThisYear,
+        capitalAllowanceThisYear: totalAnnualAllowanceThisYear,
+        totalAvailableCapitalAllowance: totalAvailableCA,
+        openingCarry: openingCA,
+        applyThisYear,
+        carryForwardAfter: carryForward
+      };
+    }
+
+    // taxable income compute and PIT display (complete implementation)
     function computeTaxableAndPit(){
       const b = findBiz(selectedBusinessId);
       if (!b) { alert('No business selected'); return; }
-      const netProfitA = Number(netProfitAInput.value || 0);
+
+      const taxYear = Number(taxYearSelect.value);
+      // compute accounting net profit A from transactions in tax year:
+      // revenue - expenses - depreciation (from fixed assets)
+      const txs = data.transactions[b.id] || [];
+      let revenueTotal = 0;
+      let expenseTotal = 0;
+      // identify revenue vs expense by account type
+      for (const t of txs){
+        if (!t.date || t.date.slice(0,4) !== String(taxYear)) continue;
+        const acc = findAccount(b.id, t.accountId);
+        if (!acc) continue;
+        const amt = Number(t.amount || 0);
+        if (acc.type === 'Revenue') revenueTotal += amt;
+        else if (acc.type === 'Expense') expenseTotal += amt;
+        else {
+          // treat Purchases as expense
+          if (isPurchaseAccount(b, acc)) expenseTotal += amt;
+        }
+      }
+
+      // compute depreciation & CA
+      const depCA = computeDepreciationAndCapitalAllowances(b, taxYear);
+      const depreciation = depCA.depreciation || 0;
+      const capitalAllowanceThisYear = depCA.capitalAllowanceThisYear || 0;
+      const totalAvailableCA = depCA.totalAvailableCapitalAllowance || 0;
+      const openingCarry = depCA.openingCarry || 0;
+      const applyThisYear = depCA.applyThisYear || 0;
+      const carryForwardAfter = depCA.carryForwardAfter || 0;
+
+      // Net profit A = revenue - expense - depreciation
+      const netProfitA = revenueTotal - expenseTotal - depreciation;
+
+      // gather user inputs
+      const userNetProfitA = Number(netProfitAInput.value || 0);
+      // allow manual override: if user supplied netProfitA input use that else computed
+      const netProfitUsed = (userNetProfitA !== 0) ? userNetProfitA : netProfitA;
+
       const disallowable = Number(disallowableInput.value || 0);
-      const nonTaxable = Number(nonTaxableInput.value || 0);
-      const capitalAllowances = Number(capitalAllowancesInput.value || 0);
-      const priorLosses = Number(priorLossesInput.value || 0);
-      const otherAdj = Number(otherAdjustmentsInput.value || 0);
+      const nonTaxableIncome = Number(nonTaxableInput.value || 0);
+      // capitalAllowancesInput is readonly; show applyThisYear computed
+      capitalAllowancesInput.value = Math.round(applyThisYear * 100) / 100;
 
-      // incorporate startup capital allowances if business configured and option checked
-      let startupCA = 0;
-      if (b.applyStartupToTax && (typeof b.startupCapitalAllowances === 'number')) startupCA = Number(b.startupCapitalAllowances || 0);
+      const priorLossesInputNumber = Number(priorLossesInput.value || 0);
+      // incorporate carryforward priorLosses stored in business.taxCarryforward as default
+      const priorLossesStored = Number((b.taxCarryforward && b.taxCarryforward.priorLosses) || 0);
+      const priorLosses = priorLossesInputNumber || priorLossesStored || 0;
 
-      const totalCapitalAllowances = capitalAllowances + startupCA;
+      const otherAdjustments = Number(otherAdjustmentsInput.value || 0);
 
-      let taxable = netProfitA + disallowable - nonTaxable - totalCapitalAllowances - priorLosses + otherAdj;
-      taxable = Math.max(0, Number(taxable || 0));
+      // Taxable income = Net profit A + disallowable - nonTaxable - capital allowances applied - prior losses + other adjustments
+      const taxableIncome = Math.max(0, netProfitUsed + disallowable - nonTaxableIncome - applyThisYear - priorLosses + otherAdjustments);
 
-      taxableResultValue.textContent = formatMoney(taxable);
-      taxableBreakdownDiv.innerHTML = `<div>Net profit A: ₦${formatMoney(netProfitA)}</div>
-        <div>Add: Disallowable expenses: ₦${formatMoney(disallowable)}</div>
-        <div>Less: Non-taxable income: ₦${formatMoney(nonTaxable)}</div>
-        <div>Less: Capital allowances: ₦${formatMoney(capitalAllowances)} ${startupCA ? '(+ startup: ₦' + formatMoney(startupCA) + ')' : ''}</div>
-        <div>Less: Prior losses: ₦${formatMoney(priorLosses)}</div>
-        <div>Other adjustments: ₦${formatMoney(otherAdj)}</div>`;
+      // PIT (personal) — compute for a proprietor if needed (we compute PIT estimate on taxable income as provided)
+      const pitRules = b.pit || DEFAULT_PIT;
+      const annualPit = computeAnnualTax(taxableIncome, pitRules);
 
-      taxableResultDiv.style.display = 'block';
-
-      // Compute PIT using business PIT rules (if enabled)
-      if (b.pitEnabled) {
-        const pitRules = b.pit || DEFAULT_PIT;
-        const annualTax = computeAnnualTax(taxable, pitRules);
-        const monthlyTax = annualTax / 12;
-        pitAnnualValueSpan.textContent = formatMoney(annualTax);
-        pitMonthlyValueSpan.textContent = formatMoney(monthlyTax);
-        pitNotesDiv.textContent = `Threshold: ₦${formatMoney(pitRules.threshold || DEFAULT_PIT.threshold)}. Rates applied per configured bands.`;
-        pitResultDiv.style.display = 'block';
+      // CIT
+      // turnover = revenue for the tax year
+      const turnover = revenueTotal;
+      let cit = 0;
+      let citRateUsed = 0;
+      if (turnover < 50000000) {
+        cit = 0;
+        citRateUsed = 0;
       } else {
-        pitResultDiv.style.display = 'none';
+        citRateUsed = 0.25;
+        cit = Math.max(0, taxableIncome * citRateUsed);
       }
 
+      // prepare breakdown UI
+      taxableResultDiv.style.display = 'block';
+      taxableResultValue.textContent = formatMoney(taxableIncome);
+      taxableBreakdownDiv.innerHTML = `
+        <div class="muted">Computed net profit A (revenue - expenses - depreciation): ₦${formatMoney(netProfitA)}</div>
+        <div class="muted">Depreciation (year ${taxYear}) : ₦${formatMoney(depreciation)}</div>
+        <div class="muted">Opening capital allowances (carry & startup): ₦${formatMoney(openingCarry)}</div>
+        <div class="muted">Annual capital allowance this year (from assets): ₦${formatMoney(capitalAllowanceThisYear)}</div>
+        <div class="muted">Total available capital allowances (opening + current): ₦${formatMoney(totalAvailableCA)}</div>
+        <div class="muted">Capital allowances applied to reduce taxable income (2/3 rule): ₦${formatMoney(applyThisYear)}</div>
+        <div class="muted">Capital allowance carryforward after applying 2/3: ₦${formatMoney(carryForwardAfter)}</div>
+        <div class="muted">Disallowable add-backs: ₦${formatMoney(disallowable)}</div>
+        <div class="muted">Non-taxable income excluded: ₦${formatMoney(nonTaxableIncome)}</div>
+        <div class="muted">Prior losses applied: ₦${formatMoney(priorLosses)}</div>
+        <div class="muted">Other adjustments: ₦${formatMoney(otherAdjustments)}</div>
+      `;
+
+      // PIT UI
+      pitResultDiv.style.display = 'block';
+      pitAnnualValueSpan.textContent = formatMoney(annualPit);
+      pitMonthlyValueSpan.textContent = formatMoney(annualPit / 12);
+      pitNotesDiv.innerHTML = `<div class="muted">Using PIT bands with threshold ₦${formatMoney(pitRules.threshold)}</div>`;
+
+      // CIT UI
+      citResultDiv.style.display = 'block';
+      citValueSpan.textContent = formatMoney(cit);
+      citNotesDiv.innerHTML = `<div class="muted">Turnover in ${taxYear}: ₦${formatMoney(turnover)} — CIT rate used: ${(citRateUsed*100).toFixed(0)}%</div>`;
+
+      // capital allowance apply/carry box
+      capAllowApplyBox.style.display = 'block';
+      capAllowAvailableSpan.textContent = formatMoney(totalAvailableCA);
+
+      // show notable values in main tax summary
+      taxSummaryDiv.innerHTML = `<strong>Tax Summary (${taxYear})</strong>
+        <div>Net profit A: ₦${formatMoney(netProfitUsed)}</div>
+        <div>Taxable income: ₦${formatMoney(taxableIncome)}</div>
+        <div>PIT (annual estimate): ₦${formatMoney(annualPit)}</div>
+        <div>CIT: ₦${formatMoney(cit)}</div>`;
+
+      // Optionally save adjustments to business object
       if (saveTaxAdjToBusinessChk.checked){
-        b.taxAdjustments = {
-          netProfitA,
-          disallowable,
-          nonTaxableIncome: nonTaxable,
-          capitalAllowances,
-          priorLosses,
-          otherAdjustments: otherAdj
-        };
-        // also store startup fields if present in modal
-        b.startupFixedAssets = Number(b.startupFixedAssets || 0);
+        if (!b.taxAdjustments) b.taxAdjustments = {};
+        b.taxAdjustments.netProfitA = netProfitUsed;
+        b.taxAdjustments.disallowable = disallowable;
+        b.taxAdjustments.nonTaxableIncome = nonTaxableIncome;
+        b.taxAdjustments.capitalAllowances = applyThisYear;
+        b.taxAdjustments.priorLosses = priorLosses;
+        b.taxAdjustments.otherAdjustments = otherAdjustments;
+        // update carryforward values in-memory but do not persist carryforward until user applies "Apply carryforward"
+        b._computed = b._computed || {};
+        b._computed.capAllowApplyThisYear = applyThisYear;
+        b._computed.capAllowCarryAfter = carryForwardAfter;
+        b._computed.capAllowTotalAvailable = totalAvailableCA;
         saveData();
+        renderAll();
       }
     }
 
-    // modal helpers
-    function showModal(modal){
-      modalOverlay.style.display = 'block';
-      modal.style.display = 'block';
-      modal.setAttribute('aria-hidden', 'false');
-    }
-    function hideModal(modal){
-      modalOverlay.style.display = 'none';
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden', 'true');
-    }
-
-    // init and event wiring
-    loadData();
-    populateUserBusinessSelects();
-    populateBizOwnerOptions();
-    refreshContactsAccountsUI();
-    renderLedger();
-    calculateSummary();
-    renderMonthlyPayePitSummaries();
-
-    // selection changes
-    userSelect.addEventListener('change', e=>{
-      selectedUserId = userSelect.value || null;
+    function applyCarryforwardsToBusiness(){
+      const b = findBiz(selectedBusinessId);
+      if (!b) return alert('No business selected');
+      // ensure we computed values
+      if (!b._computed) return alert('Compute taxable income first to calculate carryforwards.');
+      const carry = Number(b._computed.capAllowCarryAfter || 0);
+      const priorLosses = Number(b.taxCarryforward && b.taxCarryforward.priorLosses || 0);
+      // save carryforward capital allowances
+      if (!b.taxCarryforward) b.taxCarryforward = { capitalAllowances: 0, priorLosses: 0 };
+      b.taxCarryforward.capitalAllowances = carry;
+      // we do not automatically change priorLosses here unless user indicates
       saveData();
-    });
-    businessSelect.addEventListener('change', e=>{
-      selectedBusinessId = businessSelect.value || null;
-      currentPage = 1;
-      populateContactSelects();
-      populateAccountSelects();
-      refreshContactsAccountsUI();
-      renderLedger();
-      calculateSummary();
-      renderMonthlyPayePitSummaries();
-    });
+      alert('Carryforwards saved to business (capital allowances).');
+      renderAll();
+    }
 
-    // Add user modal
-    const userModal = document.getElementById('userModal');
-    document.getElementById('btnAddUser').addEventListener('click', ()=>{
+    function resetCarryforwardsForBusiness(){
+      const b = findBiz(selectedBusinessId);
+      if (!b) return;
+      if (!confirm('Reset carryforward capital allowances to zero?')) return;
+      if (!b.taxCarryforward) b.taxCarryforward = { capitalAllowances: 0, priorLosses: 0 };
+      b.taxCarryforward.capitalAllowances = 0;
+      saveData();
+      renderAll();
+    }
+
+    // UI for assets
+    function renderFixedAssetsList(){
+      fixedAssetsListDiv.innerHTML = '';
+      const b = findBiz(selectedBusinessId);
+      if (!b) { fixedAssetsListDiv.innerHTML = '<div class="muted">No business selected.</div>'; return; }
+      const taxYear = Number(taxYearSelect.value);
+      if (!Array.isArray(b.fixedAssets) || b.fixedAssets.length === 0){
+        fixedAssetsListDiv.innerHTML = '<div class="muted">No fixed assets recorded.</div>';
+        return;
+      }
+      const ul = document.createElement('div');
+      ul.innerHTML = '<strong>Fixed assets</strong>';
+      b.fixedAssets.forEach(a=>{
+        const acName = findAccount(b.id, a.accountId);
+        const d = document.createElement('div');
+        d.style.padding = '6px 0';
+        const depInfo = computeDepForAsset(a, b, taxYear);
+        d.innerHTML = `<div><strong>${escapeHtml(a.name)}</strong> <span class="muted">(${escapeHtml(acName ? acName.name : '')})</span></div>
+          <div class="muted">Cost: ₦${formatMoney(a.cost)} — Acquired: ${escapeHtml(a.dateAcquired || '')} — Useful life: ${escapeHtml(String(a.usefulLifeYears || DEFAULT_USEFUL_LIFE_YEARS))} yrs</div>
+          <div class="muted">Opening accumulated depreciation: ₦${formatMoney(a.accumulatedDepreciation || 0)} — Depreciation this year (prorated ${taxYear}): ₦${formatMoney(depInfo.prorated)}</div>
+          <div style="margin-top:4px;"><button class="small" onclick="editAsset('${b.id}','${a.id}')">Edit</button> <button class="small danger" onclick="deleteAsset('${b.id}','${a.id}')">Delete</button></div>
+        `;
+        fixedAssetsListDiv.appendChild(d);
+      });
+    }
+
+    function computeDepForAsset(a, b, taxYear){
+      const cost = Number(a.cost || 0);
+      const accum = Number(a.accumulatedDepreciation || 0);
+      const life = Number(a.usefulLifeYears || DEFAULT_USEFUL_LIFE_YEARS) || DEFAULT_USEFUL_LIFE_YEARS;
+      const remainingNBV = Math.max(0, cost - accum);
+      const annualFull = remainingNBV / life;
+      let monthsWithinYear = 12;
+      if (a.dateAcquired){
+        const acqDate = new Date(a.dateAcquired);
+        const startOfYear = new Date(Number(taxYear),0,1);
+        const endOfYear = new Date(Number(taxYear),11,31);
+        if (acqDate > endOfYear) monthsWithinYear = 0;
+        else {
+          const effectiveStart = acqDate < startOfYear ? startOfYear : acqDate;
+          const m = (endOfYear.getFullYear() - effectiveStart.getFullYear())*12 + (endOfYear.getMonth() - effectiveStart.getMonth()) + 1;
+          monthsWithinYear = Math.max(0, Math.min(12, m));
+        }
+      }
+      const prorated = annualFull * (monthsWithinYear / 12);
+      return { annualFull, prorated };
+    }
+
+    function editAsset(bizId, assetId){
+      const b = findBiz(bizId);
+      const a = findAsset(bizId, assetId);
+      if (!a) return;
+      // populate modal
+      assetNameInput.value = a.name || '';
+      assetAccountSelect.value = a.accountId || '';
+      assetCostInput.value = a.cost || 0;
+      assetDateInput.value = a.dateAcquired || '';
+      assetLifeInput.value = a.usefulLifeYears || DEFAULT_USEFUL_LIFE_YEARS;
+      assetAccumInput.value = a.accumulatedDepreciation || 0;
+      assetModal.style.display = 'block';
+      modalOverlay.style.display = 'block';
+      assetModal.setAttribute('data-editing', assetId);
+    }
+
+    function deleteAsset(bizId, assetId){
+      if (!confirm('Delete fixed asset?')) return;
+      const b = findBiz(bizId);
+      if (!b || !Array.isArray(b.fixedAssets)) return;
+      b.fixedAssets = b.fixedAssets.filter(f => f.id !== assetId);
+      saveData();
+      renderAll();
+    }
+
+    // initial population of taxYearSelect — default previous calendar year but editable + show +/- few years
+    function populateTaxYearOptions(){
+      const now = new Date();
+      const current = now.getFullYear();
+      const defaultYear = current - 1; // preceding calendar year
+      taxYearSelect.innerHTML = '';
+      for (let y = current - 5; y <= current + 1; y++){
+        const opt = document.createElement('option'); opt.value = y; opt.textContent = y;
+        if (y === defaultYear) opt.selected = true;
+        taxYearSelect.appendChild(opt);
+      }
+    }
+
+    // event handlers
+    function wireUpEventHandlers(){
+      userSelect.addEventListener('change', () => { selectedUserId = userSelect.value; saveData(); renderAll(); });
+      businessSelect.addEventListener('change', () => { selectedBusinessId = businessSelect.value; saveData(); renderAll(); });
+      btnAddTxn.addEventListener('click', () => {
+        const b = findBiz(selectedBusinessId);
+        if (!b) return alert('No business selected');
+        const date = txnDate.value || new Date().toISOString().slice(0,10);
+        const desc = txnDesc.value || '';
+        const amt = Number(txnAmount.value || 0);
+        const accId = txnAccount.value || '';
+        const contactId = txnContact.value || '';
+        const t = {
+          id: uid('txn'),
+          date,
+          desc,
+          amount: amt,
+          authorUserId: selectedUserId,
+          contactId,
+          accountId: accId,
+          whtEnabled: !!document.getElementById('txnWhtEnabled') && document.getElementById('txnWhtEnabled').checked,
+          whtRate: Number(document.getElementById('txnWhtRate') ? document.getElementById('txnWhtRate').value : 0),
+          whtInclusive: !!(document.getElementById('txnWhtInclusive') && document.getElementById('txnWhtInclusive').checked),
+          vatInclusive: false,
+          isFixedAsset: !!txnIsFixedAsset.checked
+        };
+        if (!data.transactions[b.id]) data.transactions[b.id] = [];
+        data.transactions[b.id].push(t);
+        // if transaction is marked fixed asset, create an asset entry
+        if (t.isFixedAsset && accId){
+          const asset = {
+            id: uid('fa'),
+            accountId: accId,
+            name: desc || ('Asset ' + new Date().toISOString().slice(0,10)),
+            cost: amt,
+            dateAcquired: date,
+            usefulLifeYears: Number(txnAssetLife.value || DEFAULT_USEFUL_LIFE_YEARS),
+            accumulatedDepreciation: 0
+          };
+          if (!b.fixedAssets) b.fixedAssets = [];
+          b.fixedAssets.push(asset);
+        }
+        // reset fields
+        txnDate.value = '';
+        txnDesc.value = '';
+        txnAmount.value = '';
+        txnContact.value = '';
+        txnAccount.value = '';
+        txnIsFixedAsset.checked = false;
+        txnAssetLife.value = DEFAULT_USEFUL_LIFE_YEARS;
+        saveData();
+        renderAll();
+      });
+
+      btnSearch.addEventListener('click', () => { ledgerFilterText = ledgerSearch.value || ''; currentPage = 1; renderLedger(); });
+      btnClearSearch.addEventListener('click', () => { ledgerSearch.value=''; ledgerFilterText=''; currentPage=1; renderLedger(); });
+
+      btnPrevPage.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); renderLedger(); });
+      btnNextPage.addEventListener('click', () => { currentPage = currentPage + 1; renderLedger(); });
+
+      btnExport.addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'nigeria_tax_data.json'; a.click(); URL.revokeObjectURL(url);
+      });
+      btnImport.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function(evt){
+          try {
+            data = JSON.parse(evt.target.result);
+            saveData();
+            renderAll();
+          } catch(err){ alert('Invalid JSON file'); }
+        };
+        reader.readAsText(f);
+      });
+      btnClearAll.addEventListener('click', () => {
+        if (!confirm('Clear all data? This cannot be undone.')) return;
+        localStorage.removeItem(STORAGE_KEY);
+        location.reload();
+      });
+
+      btnComputeTaxable.addEventListener('click', () => computeTaxableAndPit());
+      btnLoadFromBusiness.addEventListener('click', () => {
+        const b = findBiz(selectedBusinessId);
+        if (!b || !b.taxAdjustments) return alert('No saved tax adjustments for this business.');
+        const t = b.taxAdjustments;
+        netProfitAInput.value = Number(t.netProfitA || 0);
+        disallowableInput.value = Number(t.disallowable || 0);
+        nonTaxableInput.value = Number(t.nonTaxableIncome || 0);
+        capitalAllowancesInput.value = Number(t.capitalAllowances || 0);
+        priorLossesInput.value = Number(t.priorLosses || 0);
+        otherAdjustmentsInput.value = Number(t.otherAdjustments || 0);
+      });
+
+      btnApplyCarryforwards.addEventListener('click', () => applyCarryforwardsToBusiness());
+      btnResetCarryforwards.addEventListener('click', () => resetCarryforwardsForBusiness());
+
+      // asset modal
+      btnAddAsset.addEventListener('click', () => {
+        assetModal.style.display = 'block';
+        modalOverlay.style.display = 'block';
+        assetModal.removeAttribute('data-editing');
+        assetNameInput.value = '';
+        assetAccountSelect.value = '';
+        assetCostInput.value = '';
+        assetDateInput.value = new Date().toISOString().slice(0,10);
+        assetLifeInput.value = DEFAULT_USEFUL_LIFE_YEARS;
+        assetAccumInput.value = 0;
+      });
+      assetCancel.addEventListener('click', () => { assetModal.style.display = 'none'; modalOverlay.style.display='none'; assetModal.removeAttribute('data-editing'); });
+      assetSave.addEventListener('click', () => {
+        const b = findBiz(selectedBusinessId);
+        if (!b) return alert('No business selected');
+        const editingId = assetModal.getAttribute('data-editing');
+        const assetRecord = {
+          id: editingId || uid('fa'),
+          accountId: assetAccountSelect.value || '',
+          name: assetNameInput.value || ('Asset ' + new Date().toISOString().slice(0,10)),
+          cost: Number(assetCostInput.value || 0),
+          dateAcquired: assetDateInput.value || new Date().toISOString().slice(0,10),
+          usefulLifeYears: Number(assetLifeInput.value || DEFAULT_USEFUL_LIFE_YEARS),
+          accumulatedDepreciation: Number(assetAccumInput.value || 0)
+        };
+        if (!b.fixedAssets) b.fixedAssets = [];
+        if (editingId){
+          b.fixedAssets = b.fixedAssets.map(f => f.id === editingId ? assetRecord : f);
+        } else {
+          b.fixedAssets.push(assetRecord);
+        }
+        assetModal.style.display = 'none';
+        modalOverlay.style.display = 'none';
+        assetModal.removeAttribute('data-editing');
+        saveData();
+        renderAll();
+      });
+
+      modalOverlay.addEventListener('click', () => {
+        // close modals if overlay clicked
+        document.querySelectorAll('.modal').forEach(m=>{ m.style.display='none'; m.removeAttribute('data-editing'); });
+        modalOverlay.style.display = 'none';
+      });
+
+      taxYearSelect.addEventListener('change', () => renderAll());
+    }
+
+    // CRUD for users, businesses, accounts, contacts — minimal implementations
+    // Add user
+    btnAddUser.addEventListener('click', ()=> {
       document.getElementById('userModalTitle').textContent = 'Add User';
       document.getElementById('userName').value = '';
       document.getElementById('userDisplay').value = '';
-      showModal(userModal);
+      document.getElementById('userModal').style.display = 'block';
+      modalOverlay.style.display = 'block';
     });
-    document.getElementById('userCancel').addEventListener('click', ()=> hideModal(userModal));
-    document.getElementById('userSave').addEventListener('click', ()=>{
-      const uname = document.getElementById('userName').value.trim();
-      const udisp = document.getElementById('userDisplay').value.trim();
-      if (!uname) { alert('Username required'); return; }
-      const u = { id: uid('user'), username: uname, display: udisp || uname };
+    document.getElementById('userCancel').addEventListener('click', ()=>{ document.getElementById('userModal').style.display='none'; modalOverlay.style.display='none'; });
+    document.getElementById('userSave').addEventListener('click', ()=> {
+      const username = document.getElementById('userName').value || ('user_' + Date.now());
+      const display = document.getElementById('userDisplay').value || username;
+      const u = { id: uid('user'), username, display };
       data.users.push(u);
+      selectedUserId = u.id;
       saveData();
-      populateUserBusinessSelects();
-      populateBizOwnerOptions();
-      hideModal(userModal);
+      document.getElementById('userModal').style.display='none'; modalOverlay.style.display='none';
+      populateUserBusinessSelects(); populateBizOwnerOptions(); renderAll();
     });
 
-    // Business modal
-    const businessModal = document.getElementById('businessModal');
-    document.getElementById('btnAddBusiness').addEventListener('click', ()=>{
+    // Add business
+    btnAddBusiness.addEventListener('click', () => {
       document.getElementById('businessModalTitle').textContent = 'Add Business';
       bizNameInput.value = '';
       populateBizOwnerOptions();
-      bizOwnerSelect.value = (data.users[0] && data.users[0].id) || '';
       bizVatInput.value = 7.5;
       bizCurrencyInput.value = '₦';
       bizThresholdInput.value = 800000;
@@ -1129,21 +1602,20 @@
       bizStartupCapitalAllowancesInput.value = 0;
       bizStartupRetainedEarningsInput.value = 0;
       bizApplyStartupToTaxChk.checked = true;
-      showModal(businessModal);
+      document.getElementById('businessModal').style.display = 'block';
+      modalOverlay.style.display = 'block';
     });
-    document.getElementById('bizCancel').addEventListener('click', ()=> hideModal(businessModal));
-    document.getElementById('bizSave').addEventListener('click', ()=>{
-      const name = bizNameInput.value.trim();
-      const owner = bizOwnerSelect.value || null;
-      if (!name) { alert('Business name required'); return; }
+    document.getElementById('bizCancel').addEventListener('click', ()=>{ document.getElementById('businessModal').style.display='none'; modalOverlay.style.display='none'; });
+    document.getElementById('bizSave').addEventListener('click', () => {
+      const ownerId = bizOwnerSelect.value || (data.users[0] && data.users[0].id) || '';
       const b = {
         id: uid('biz'),
-        name,
-        ownerId: owner,
-        members: owner ? [owner] : [],
-        vatRate: Number(bizVatInput.value || 0),
+        name: bizNameInput.value || ('Business ' + Date.now()),
+        ownerId: ownerId,
+        members: ownerId ? [ownerId] : [],
+        vatRate: Number(bizVatInput.value || 7.5),
         currency: bizCurrencyInput.value || '₦',
-        threshold: Number(bizThresholdInput.value || 0),
+        threshold: Number(bizThresholdInput.value || 800000),
         notes: bizNotesInput.value || '',
         vatEnabled: !!bizVatEnabledChk.checked,
         pitEnabled: !!bizPitEnabledChk.checked,
@@ -1152,203 +1624,124 @@
         whtCode: bizWhtCodeInput.value || '2300',
         contacts: [],
         accounts: [],
+        fixedAssets: [],
         pit: DEFAULT_PIT,
-        taxAdjustments: {
-          netProfitA: 0, disallowable:0, nonTaxableIncome:0, capitalAllowances:0, priorLosses:0, otherAdjustments:0
-        },
+        taxAdjustments: { netProfitA:0, disallowable:0, nonTaxableIncome:0, capitalAllowances:0, priorLosses:0, otherAdjustments:0 },
+        taxCarryforward: { capitalAllowances: Number(bizStartupCapitalAllowancesInput.value || 0), priorLosses: 0 },
         startupFixedAssets: Number(bizStartupFixedAssetsInput.value || 0),
         startupAccumDep: Number(bizStartupAccumDepInput.value || 0),
         startupCapitalAllowances: Number(bizStartupCapitalAllowancesInput.value || 0),
         startupRetainedEarnings: Number(bizStartupRetainedEarningsInput.value || 0),
         applyStartupToTax: !!bizApplyStartupToTaxChk.checked
       };
-      data.businesses.push(b);
-      data.transactions[b.id] = [];
       ensureBizWhtAccount(b);
+      data.businesses.push(b);
+      selectedBusinessId = b.id;
+      if (!data.transactions[b.id]) data.transactions[b.id] = [];
       saveData();
-      populateUserBusinessSelects();
-      refreshContactsAccountsUI();
-      hideModal(businessModal);
+      document.getElementById('businessModal').style.display='none'; modalOverlay.style.display='none';
+      populateUserBusinessSelects(); renderAll();
     });
 
-    // Contact modal
-    const contactModal = document.getElementById('contactModal');
-    document.getElementById('btnAddContactInline').addEventListener('click', ()=>{
+    // Contacts modal
+    btnAddContactInline.addEventListener('click', ()=> {
       document.getElementById('contactModalTitle').textContent = 'Add Contact';
-      document.getElementById('contactName').value = '';
-      document.getElementById('contactInfo').value = '';
-      document.getElementById('contactType').value = 'Customer';
-      showModal(contactModal);
+      document.getElementById('contactName').value='';
+      document.getElementById('contactType').value='Customer';
+      document.getElementById('contactInfo').value='';
+      document.getElementById('contactModal').style.display='block';
+      modalOverlay.style.display='block';
     });
-    document.getElementById('contactCancel').addEventListener('click', ()=> hideModal(contactModal));
-    document.getElementById('contactSave').addEventListener('click', ()=>{
+    document.getElementById('contactCancel').addEventListener('click', ()=>{ document.getElementById('contactModal').style.display='none'; modalOverlay.style.display='none'; });
+    document.getElementById('contactSave').addEventListener('click', ()=> {
       const b = findBiz(selectedBusinessId);
-      if (!b) { alert('Select a business first'); hideModal(contactModal); return; }
-      const name = document.getElementById('contactName').value.trim();
-      const info = document.getElementById('contactInfo').value.trim();
-      const type = document.getElementById('contactType').value;
-      if (!name) { alert('Contact name required'); return; }
-      const c = { id: uid('c'), name, type, info, notes: '' };
-      b.contacts.push(c);
+      if (!b) return alert('No business selected');
+      const contact = { id: uid('c'), name: document.getElementById('contactName').value || 'Contact', type: document.getElementById('contactType').value || 'Customer', info: document.getElementById('contactInfo').value || '' };
+      if (!b.contacts) b.contacts = [];
+      b.contacts.push(contact);
       saveData();
-      refreshContactsAccountsUI();
-      hideModal(contactModal);
+      document.getElementById('contactModal').style.display='none'; modalOverlay.style.display='none';
+      renderAll();
     });
 
-    // Account modal
-    const accountModal = document.getElementById('accountModal');
-    document.getElementById('btnAddAccountInline').addEventListener('click', ()=>{
+    // Accounts modal
+    btnAddAccountInline.addEventListener('click', ()=> {
       document.getElementById('accountModalTitle').textContent = 'Add Account';
-      document.getElementById('accountCode').value = '';
-      document.getElementById('accountName').value = '';
-      document.getElementById('accountNotes').value = '';
-      document.getElementById('accountType').value = 'Expense';
+      document.getElementById('accountCode').value='';
+      document.getElementById('accountName').value='';
+      document.getElementById('accountType').value='Expense';
+      document.getElementById('accountNotes').value='';
       document.getElementById('accountIsSalary').checked = false;
-      showModal(accountModal);
+      document.getElementById('accountModal').style.display='block';
+      modalOverlay.style.display='block';
     });
-    document.getElementById('accountCancel').addEventListener('click', ()=> hideModal(accountModal));
-    document.getElementById('accountSave').addEventListener('click', ()=>{
+    document.getElementById('accountCancel').addEventListener('click', ()=>{ document.getElementById('accountModal').style.display='none'; modalOverlay.style.display='none'; });
+    document.getElementById('accountSave').addEventListener('click', ()=> {
       const b = findBiz(selectedBusinessId);
-      if (!b) { alert('Select a business first'); hideModal(accountModal); return; }
-      const code = document.getElementById('accountCode').value.trim();
-      const name = document.getElementById('accountName').value.trim();
-      const notes = document.getElementById('accountNotes').value.trim();
-      const type = document.getElementById('accountType').value;
-      const isSalary = !!document.getElementById('accountIsSalary').checked;
-      if (!name) { alert('Account name required'); return; }
-      const a = { id: uid('a'), code, name, type, notes, isSalary };
-      b.accounts.push(a);
+      if (!b) return alert('No business selected');
+      const account = { id: uid('a'), code: document.getElementById('accountCode').value || '', name: document.getElementById('accountName').value || 'Account', type: document.getElementById('accountType').value || 'Expense', notes: document.getElementById('accountNotes').value || '', isSalary: !!document.getElementById('accountIsSalary').checked };
+      if (!b.accounts) b.accounts = [];
+      b.accounts.push(account);
       saveData();
-      refreshContactsAccountsUI();
-      hideModal(accountModal);
+      document.getElementById('accountModal').style.display='none'; modalOverlay.style.display='none';
+      renderAll();
     });
 
-    // Add transaction
-    btnAddTxn.addEventListener('click', ()=>{
+    function renderTaxYearedViews(){
       const b = findBiz(selectedBusinessId);
-      if (!b) { alert('Select a business first'); return; }
-      const date = txnDate.value || new Date().toISOString().slice(0,10);
-      const desc = txnDesc.value || '';
-      const amt = Number(txnAmount.value || 0);
-      const contactId = txnContact.value || '';
-      const accountId = txnAccount.value || '';
-      if (!accountId) { alert('Select account'); return; }
-      if (!amt) { alert('Enter amount'); return; }
-      const t = {
-        id: uid('txn'),
-        date,
-        desc,
-        amount: amt,
-        authorUserId: selectedUserId,
-        contactId: contactId || null,
-        accountId: accountId,
-        whtEnabled: !!document.getElementById('txnWhtEnabled').checked,
-        whtRate: Number(document.getElementById('txnWhtRate').value || 0),
-        whtInclusive: !!document.getElementById('txnWhtInclusive').checked,
-        vatInclusive: false
-      };
-      data.transactions[b.id] = data.transactions[b.id] || [];
-      data.transactions[b.id].push(t);
-      saveData();
-      txnDesc.value=''; txnAmount.value=''; txnContact.value=''; txnAccount.value='';
-      renderLedger(); calculateSummary(); renderMonthlyPayePitSummaries();
-    });
+      const taxYear = Number(taxYearSelect.value);
+      // summaries
+      calculateSummary(taxYear);
+      renderMonthlyPayePitSummaries();
+      // render assets list with depreciation info for selected year
+      renderFixedAssetsList();
+    }
 
-    // Search & pagination
-    btnSearch.addEventListener('click', ()=>{
-      ledgerFilterText = ledgerSearch.value || '';
-      currentPage = 1;
-      renderLedger();
-    });
-    btnClearSearch.addEventListener('click', ()=>{
-      ledgerSearch.value = '';
-      ledgerFilterText = '';
-      currentPage = 1;
-      renderLedger();
-    });
-    btnPrevPage.addEventListener('click', ()=>{
-      if (currentPage > 1) currentPage--;
-      renderLedger();
-    });
-    btnNextPage.addEventListener('click', ()=>{
-      currentPage++;
-      renderLedger();
-    });
-
-    // Export / Import / Clear
-    btnExport.addEventListener('click', ()=>{
-      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'ntc-data.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    });
-    btnImport.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', (e)=>{
-      const f = e.target.files && e.target.files[0];
-      if (!f) return;
-      const fr = new FileReader();
-      fr.onload = (evt) => {
-        try {
-          const parsed = JSON.parse(evt.target.result);
-          if (!parsed) throw new Error('Invalid JSON');
-          data = parsed;
-          saveData();
-          loadData();
-          populateUserBusinessSelects();
-          populateBizOwnerOptions();
-          refreshContactsAccountsUI();
-          renderLedger();
-          calculateSummary();
-          renderMonthlyPayePitSummaries();
-          alert('Import successful');
-        } catch(err) { alert('Import failed: ' + (err && err.message)); }
-      };
-      fr.readAsText(f);
-      fileInput.value = '';
-    });
-
-    btnClearAll.addEventListener('click', ()=>{
-      if (!confirm('Clear all saved data from localStorage? This cannot be undone.')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      data = { users: [], businesses: [], transactions: {} };
-      selectedUserId = null; selectedBusinessId = null;
-      loadData();
+    function renderAll(){
       populateUserBusinessSelects();
       populateBizOwnerOptions();
+      populateContactSelects();
+      populateAccountSelects();
       refreshContactsAccountsUI();
       renderLedger();
-      calculateSummary();
-      renderMonthlyPayePitSummaries();
-    });
+      renderTaxYearedViews();
+      // refresh account/asset selects in modals
+      populateAccountSelects();
+    }
 
-    // compute taxable
-    btnComputeTaxable.addEventListener('click', computeTaxableAndPit);
-    btnLoadFromBusiness.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId);
-      if (!b || !b.taxAdjustments) { alert('No saved adjustments for this business'); return; }
-      const ta = b.taxAdjustments;
-      netProfitAInput.value = Number(ta.netProfitA || 0);
-      disallowableInput.value = Number(ta.disallowable || 0);
-      nonTaxableInput.value = Number(ta.nonTaxableIncome || 0);
-      capitalAllowancesInput.value = Number(ta.capitalAllowances || 0);
-      priorLossesInput.value = Number(ta.priorLosses || 0);
-      otherAdjustmentsInput.value = Number(ta.otherAdjustments || 0);
-    });
-
-    // initial UI wiring
+    // startup
+    loadData();
+    populateTaxYearOptions();
     populateUserBusinessSelects();
     populateBizOwnerOptions();
-    refreshContactsAccountsUI();
-    renderLedger();
-    calculateSummary();
-    renderMonthlyPayePitSummaries();
+    wireUpEventHandlers();
+    renderAll();
 
-    // close modals on overlay click
-    modalOverlay.addEventListener('click', ()=>{
-      document.querySelectorAll('.modal').forEach(m => hideModal(m));
-    });
+    // expose some helpers globally for inline onclick handlers
+    window.deleteTransaction = deleteTransaction;
+    window.editAsset = editAsset;
+    window.deleteAsset = deleteAsset;
 
   </script>
+
+  <footer>
+    <div class="muted">Demo software for Nigerian tax computations — includes fixed assets, prorated straight-line depreciation, capital allowance absorption (2/3) and carry forward (1/3), CIT, VAT, WHT and PAYE summaries. Data stored in browser localStorage.</div>
+  </footer>
 </body>
 </html>
 
-patch/diff in unified format for you to apply locally. Which do you prefer?
+Notes and next steps
+- Default useful life: set to 4 years as you requested; per-asset useful life is editable in the Add Asset modal and when marking a transaction as a fixed asset you can set the useful life inline.
+- Depreciation: straight-line, prorated by months in the tax year (partial-year allowance for assets acquired during the year).
+- Capital allowances: computed using the same straight-line annual allowance. Total available CA = opening carryforward + opening startup CA (if enabled) + current-year allowance. 2/3 of total available is applied to reduce taxable income; 1/3 carried forward and persisted when you click "Apply carryforward (persist)".
+- Tax year: selectable in the header (defaults to preceding calendar year), and all tax-year-relevant computations are filtered to that year (PIT, PAYE, VAT/WHT summaries, depreciation/CA).
+- PAYE: computed by annualising gross salary after statutory deductions (pension, NHF, NHIS, life) using existing deduction detection. PIT uses DEFAULT_PIT bands you confirmed.
+- CIT: uses turnover=total revenue for selected tax year; 0% if turnover < ₦50,000,000; 25% otherwise.
+- Persistence: carryforwards saved on business.taxCarryforward when you click Apply; tax adjustments can be saved to business.taxAdjustments if you check the box when computing.
+
+If you want, I can:
+- Add an automatic "close tax year" button that both applies carryforwards and advances the tax year selector.
+- Implement pro-rating rules differently (e.g., half-year convention) if desired.
+- Add an export of the computed tax report for the selected year (PDF/CSV/JSON).
+
+Tell me if you want any of the above changes or a PR opened directly to your repository (I can create a branch and PR if you confirm).
