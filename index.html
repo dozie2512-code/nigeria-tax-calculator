@@ -92,18 +92,19 @@
           <input type="checkbox" id="txnIsFixedAsset" /> Fixed asset?
         </label>
         <label>Useful life (yrs): <input type="number" id="txnAssetLife" min="1" step="1" value="4" style="width:80px;" /></label>
+        <button class="small" id="btnAddInventoryInline">Add Inventory</button>
       </div>
 
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <label>VAT (₦): <input type="number" id="txnVat" step="0.01" style="width:120px;" /></label>
-        <label>WHT (₦): <input type="number" id="txnWht" step="0.01" style="width:120px;" /></label>
+        <label>VAT (%): <input type="number" id="txnVat" step="0.01" min="0" max="100" style="width:120px;" /></label>
+        <label>WHT (%): <input type="number" id="txnWht" step="0.01" min="0" max="100" style="width:120px;" /></label>
         <label>PAYE (₦): <input type="number" id="txnPaye" step="0.01" style="width:120px;" /></label>
         <label>Bank account: <select id="txnBankAccount"></select></label>
         <label><input type="checkbox" id="txnReconciled" /> Mark reconciled</label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
 
-      <small class="note">Transactions saved per business. Mark a transaction as Fixed asset to create a fixed-asset record automatically. Enter tax amounts if applicable; they will be aggregated in reports.</small>
+      <small class="note">Transactions saved per business. Mark a transaction as Fixed asset to create a fixed-asset record automatically. VAT and WHT are entered as percentages and will be computed automatically from the transaction amount.</small>
     </section>
 
     <section class="panel section">
@@ -215,11 +216,7 @@
       <div class="two-col">
         <div>
           <div class="row">
-            <label>Item name: <input type="text" id="invName" /></label>
-            <label>SKU: <input type="text" id="invSku" /></label>
-            <label>Opening qty: <input type="number" id="invQty" step="1" value="0" style="width:100px;" /></label>
-            <label>Opening avg cost (₦): <input type="number" id="invCost" step="0.01" style="width:140px;" /></label>
-            <button class="small" id="btnAddInvItem">Add Item</button>
+            <button class="small" id="btnAddInvItemModal">Add Inventory Item</button>
           </div>
 
           <div style="margin-top:10px;">
@@ -337,6 +334,22 @@
     </div>
   </div>
 
+  <div id="inventoryModal" class="modal" aria-hidden="true">
+    <h3>Add Inventory Item</h3>
+    <div class="row">
+      <label>Item name: <input type="text" id="invModalName" /></label>
+      <label>SKU: <input type="text" id="invModalSku" /></label>
+    </div>
+    <div class="row">
+      <label>Opening qty: <input type="number" id="invModalQty" step="1" value="0" style="width:100px;" /></label>
+      <label>Opening avg cost (₦): <input type="number" id="invModalCost" step="0.01" style="width:140px;" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="invModalCancel">Cancel</button>
+      <button class="primary" id="invModalSave">Save</button>
+    </div>
+  </div>
+
   <script>
     // GitHub Copilot Chat Assistant
     const STORAGE_KEY = 'ntc_data_v6';
@@ -425,6 +438,15 @@
     const invQtyInput = document.getElementById('invQty');
     const invCostInput = document.getElementById('invCost');
     const btnAddInvItem = document.getElementById('btnAddInvItem');
+    const btnAddInvItemModal = document.getElementById('btnAddInvItemModal');
+    const btnAddInventoryInline = document.getElementById('btnAddInventoryInline');
+    const inventoryModal = document.getElementById('inventoryModal');
+    const invModalNameInput = document.getElementById('invModalName');
+    const invModalSkuInput = document.getElementById('invModalSku');
+    const invModalQtyInput = document.getElementById('invModalQty');
+    const invModalCostInput = document.getElementById('invModalCost');
+    const invModalCancel = document.getElementById('invModalCancel');
+    const invModalSave = document.getElementById('invModalSave');
     const purchaseItemSelect = document.getElementById('purchaseItem');
     const purchaseDate = document.getElementById('purchaseDate');
     const purchaseQty = document.getElementById('purchaseQty');
@@ -494,6 +516,7 @@
         if (!b.pit) b.pit = DEFAULT_PIT;
         if (!b.taxCarryforward) b.taxCarryforward = { capitalAllowances: 0, priorLosses: 0 };
         if (typeof b.vatRate !== 'number') b.vatRate = 7.5;
+        if (typeof b.whtRate !== 'number') b.whtRate = 5;
         if (typeof b.vatEnabled === 'undefined') b.vatEnabled = true;
         if (typeof b.pitEnabled === 'undefined') b.pitEnabled = true;
         if (!Array.isArray(b.bankAccounts)) b.bankAccounts = []; // store explicit bank account ids
@@ -501,6 +524,27 @@
         const txs = data.transactions[b.id] || [];
         txs.forEach(t=>{
           if (!t.taxes) t.taxes = { vat: 0, wht: 0, paye: 0 };
+          // Normalize old tax format (amounts only) to new format (rates + amounts)
+          if (typeof t.taxes.vatRate === 'undefined') {
+            // Convert old amount-only taxes to new rate+amount format
+            const oldVat = Number(t.taxes.vat || 0);
+            const oldWht = Number(t.taxes.wht || 0);
+            if (oldVat > 0 && t.amount > 0) {
+              t.taxes.vatRate = b.vatRate;
+              t.taxes.vatAmount = oldVat;
+            } else {
+              t.taxes.vatRate = 0;
+              t.taxes.vatAmount = 0;
+            }
+            if (oldWht > 0 && t.amount > 0) {
+              t.taxes.whtRate = b.whtRate;
+              t.taxes.whtAmount = oldWht;
+            } else {
+              t.taxes.whtRate = 0;
+              t.taxes.whtAmount = 0;
+            }
+            t.taxes.paye = Number(t.taxes.paye || 0);
+          }
           if (typeof t.reconciled === 'undefined') t.reconciled = false;
           if (typeof t.bankAccountId === 'undefined') t.bankAccountId = '';
         });
@@ -517,6 +561,7 @@
         ownerId: u.id,
         members: [u.id],
         vatRate: 7.5,
+        whtRate: 5,
         currency: '₦',
         threshold: 800000,
         notes: '',
@@ -552,8 +597,8 @@
       const now = new Date().toISOString().slice(0,10);
       data = { users: [u], businesses: [b], transactions: {} };
       data.transactions[b.id] = [
-        { id: uid('t'), date: now, desc: 'Demo sale', amount: 1500000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.type==='Revenue').id, taxes: { vat: 0, wht: 0, paye: 0 }, reconciled: false, bankAccountId: accounts[0].id },
-        { id: uid('t2'), date: now, desc: 'Demo rent', amount: 200000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.code==='5000').id, taxes:{ vat:0,wht:0,paye:0 }, reconciled:false, bankAccountId: accounts[0].id }
+        { id: uid('t'), date: now, desc: 'Demo sale', amount: 1500000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.type==='Revenue').id, taxes: { vatRate: 0, vatAmount: 0, whtRate: 0, whtAmount: 0, paye: 0 }, reconciled: false, bankAccountId: accounts[0].id },
+        { id: uid('t2'), date: now, desc: 'Demo rent', amount: 200000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.code==='5000').id, taxes:{ vatRate: 0, vatAmount: 0, whtRate: 0, whtAmount: 0, paye:0 }, reconciled:false, bankAccountId: accounts[0].id }
       ];
       selectedUserId = u.id;
       selectedBusinessId = b.id;
@@ -608,6 +653,11 @@
       txnContact.innerHTML = ''; txnAccount.innerHTML = ''; assetAccountSelect.innerHTML = ''; disposeAssetSelect.innerHTML = ''; txnBankAccountSelect.innerHTML = '';
       purchaseAccountSelect.innerHTML = ''; sellRevenueAccount.innerHTML = ''; sellContactSelect.innerHTML = ''; sellItemSelect.innerHTML = ''; purchaseItemSelect.innerHTML = ''; bankAccountSelect.innerHTML = '';
       if (!b) return;
+      
+      // Pre-fill VAT/WHT rates from business defaults
+      txnVatInput.value = b.vatRate || 0;
+      txnWhtInput.value = b.whtRate || 0;
+      
       const emptyC = document.createElement('option'); emptyC.value=''; emptyC.textContent='-- select --'; txnContact.appendChild(emptyC);
       b.contacts.forEach(c=>{ const opt = document.createElement('option'); opt.value=c.id; opt.textContent=c.name + ' (' + (c.type||'') + ')'; txnContact.appendChild(opt); });
       const emptyA = document.createElement('option'); emptyA.value=''; emptyA.textContent='-- select --'; txnAccount.appendChild(emptyA);
@@ -698,6 +748,7 @@
         ownerId: selectedUserId,
         members: [selectedUserId],
         vatRate: 7.5,
+        whtRate: 5,
         currency: '₦',
         threshold: 800000,
         notes: '',
@@ -753,10 +804,17 @@
       const accountId = txnAccount.value || '';
       const contactId = txnContact.value || '';
       if (!accountId){ alert('Select account'); return; }
+      const vatRate = Number(txnVatInput.value) || 0;
+      const whtRate = Number(txnWhtInput.value) || 0;
+      const vatAmount = amount * vatRate / 100;
+      const whtAmount = amount * whtRate / 100;
+      const paye = Number(txnPayeInput.value) || 0;
       const taxes = {
-        vat: Number(txnVatInput.value) || 0,
-        wht: Number(txnWhtInput.value) || 0,
-        paye: Number(txnPayeInput.value) || 0
+        vatRate,
+        vatAmount,
+        whtRate,
+        whtAmount,
+        paye
       };
       const bankAccountId = txnBankAccountSelect.value || '';
       const reconciled = !!txnReconciledCheckbox.checked;
@@ -854,7 +912,7 @@
         tags: ['asset-disposal'],
         nonTaxableForTax: true,
         disposalDetails: { assetId: asset.id, proceeds, nbv, gain, accumToDate },
-        taxes: { vat:0,wht:0,paye:0 },
+        taxes: { vatRate:0, vatAmount:0, whtRate:0, whtAmount:0, paye:0 },
         reconciled: false,
         bankAccountId: ''
       };
@@ -885,21 +943,38 @@
     }
 
     // Inventory functions
-    btnAddInvItem.addEventListener('click', ()=>{
-      const b = findBiz(selectedBusinessId); if(!b) { alert('Select business'); return; }
-      const name = (invNameInput.value || '').trim(); if (!name){ alert('Enter item name'); return; }
-      const sku = (invSkuInput.value || '').trim();
-      const qty = Number(invQtyInput.value) || 0;
-      const cost = Number(invCostInput.value) || 0;
+    // Open inventory modal from button in Add Transaction area
+    btnAddInventoryInline.addEventListener('click', ()=>{ openInventoryModal(); });
+    // Open inventory modal from button in Inventory section
+    btnAddInvItemModal.addEventListener('click', ()=>{ openInventoryModal(); });
+    invModalCancel.addEventListener('click', ()=>{ closeModal(inventoryModal); });
+    invModalSave.addEventListener('click', ()=>{ saveInventoryFromModal(); });
+
+    function openInventoryModal(){
+      invModalNameInput.value = '';
+      invModalSkuInput.value = '';
+      invModalQtyInput.value = '0';
+      invModalCostInput.value = '0';
+      showModal(inventoryModal);
+    }
+
+    function saveInventoryFromModal(){
+      const b = findBiz(selectedBusinessId); if(!b) { closeModal(inventoryModal); return; }
+      const name = (invModalNameInput.value || '').trim(); if (!name){ alert('Enter item name'); return; }
+      const sku = (invModalSkuInput.value || '').trim();
+      const qty = Number(invModalQtyInput.value) || 0;
+      const cost = Number(invModalCostInput.value) || 0;
       const item = { id: uid('inv'), sku, name, qtyOnHand: qty, avgCost: cost, lots: [] };
       if (qty > 0){
         item.lots.push({ id: uid('lot'), date: new Date().toISOString().slice(0,10), qty, totalCost: qty * cost });
       }
       b.inventory = b.inventory || [];
       b.inventory.push(item);
-      saveData(); populateTxnContactAccount(); renderAll();
-      invNameInput.value=''; invSkuInput.value=''; invQtyInput.value='0'; invCostInput.value='0';
-    });
+      saveData(); 
+      closeModal(inventoryModal);
+      populateTxnContactAccount(); 
+      renderAll();
+    }
 
     btnPurchase.addEventListener('click', ()=>{
       const b = findBiz(selectedBusinessId); if(!b) { alert('Select business'); return; }
@@ -920,9 +995,24 @@
       item.avgCost = newAvg;
       item.lots = item.lots || [];
       item.lots.push({ id: uid('lot'), date, qty: q, totalCost });
-      // optionally create purchase transaction
+      // optionally create purchase transaction with VAT/WHT rates
       if (accountId){
-        const tx = { id: uid('t'), date, desc: `Purchase ${item.name}`, amount: totalCost, authorUserId: selectedUserId, contactId: '', accountId, taxes:{vat:0,wht:0,paye:0}, reconciled:false, bankAccountId:'' };
+        const vatRate = b.vatEnabled ? (b.vatRate || 0) : 0;
+        const whtRate = b.whtRate || 0;
+        const vatAmount = totalCost * vatRate / 100;
+        const whtAmount = totalCost * whtRate / 100;
+        const tx = { 
+          id: uid('t'), 
+          date, 
+          desc: `Purchase ${item.name}`, 
+          amount: totalCost, 
+          authorUserId: selectedUserId, 
+          contactId: '', 
+          accountId, 
+          taxes:{ vatRate, vatAmount, whtRate, whtAmount, paye:0 }, 
+          reconciled:false, 
+          bankAccountId:'' 
+        };
         data.transactions[b.id] = data.transactions[b.id] || [];
         data.transactions[b.id].push(tx);
       }
@@ -948,9 +1038,24 @@
       const cogs = q * avg;
       // reduce qty
       item.qtyOnHand = (item.qtyOnHand || 0) - q;
-      // create revenue transaction
+      // create revenue transaction with VAT/WHT rates
       if (revenueAccId){
-        const saleTx = { id: uid('t'), date, desc: `Sale ${item.name}`, amount: saleAmount, authorUserId: selectedUserId, contactId, accountId: revenueAccId, taxes:{vat:0,wht:0,paye:0}, reconciled:false, bankAccountId:'' };
+        const vatRate = b.vatEnabled ? (b.vatRate || 0) : 0;
+        const whtRate = b.whtRate || 0;
+        const vatAmount = saleAmount * vatRate / 100;
+        const whtAmount = saleAmount * whtRate / 100;
+        const saleTx = { 
+          id: uid('t'), 
+          date, 
+          desc: `Sale ${item.name}`, 
+          amount: saleAmount, 
+          authorUserId: selectedUserId, 
+          contactId, 
+          accountId: revenueAccId, 
+          taxes:{ vatRate, vatAmount, whtRate, whtAmount, paye:0 }, 
+          reconciled:false, 
+          bankAccountId:'' 
+        };
         data.transactions[b.id] = data.transactions[b.id] || [];
         data.transactions[b.id].push(saleTx);
       } else {
@@ -962,8 +1067,19 @@
         cogsAcc = { id: uid('acc'), code: '5200', name: 'Cost of Goods Sold', type: 'Expense' };
         b.accounts.push(cogsAcc);
       }
-      // create COGS transaction (expense)
-      const cogsTx = { id: uid('t'), date, desc: `COGS ${item.name}`, amount: cogs, authorUserId: selectedUserId, contactId, accountId: cogsAcc.id, taxes:{vat:0,wht:0,paye:0}, reconciled:false, bankAccountId:'' };
+      // create COGS transaction (expense) - no VAT/WHT on COGS
+      const cogsTx = { 
+        id: uid('t'), 
+        date, 
+        desc: `COGS ${item.name}`, 
+        amount: cogs, 
+        authorUserId: selectedUserId, 
+        contactId, 
+        accountId: cogsAcc.id, 
+        taxes:{ vatRate:0, vatAmount:0, whtRate:0, whtAmount:0, paye:0 }, 
+        reconciled:false, 
+        bankAccountId:'' 
+      };
       data.transactions[b.id] = data.transactions[b.id] || [];
       data.transactions[b.id].push(cogsTx);
 
@@ -1111,7 +1227,26 @@
         const tags = Array.isArray(t.tags) ? t.tags.join(', ') : (t.tags || '');
         const contactName = escapeHtml(findContactName(b,t.contactId));
         const accName = acc ? escapeHtml((acc.code?acc.code+' - ':'') + acc.name) : '';
-        const taxesStr = `VAT ₦${fmt((t.taxes && t.taxes.vat) || 0)} WHT ₦${fmt((t.taxes && t.taxes.wht) || 0)} PAYE ₦${fmt((t.taxes && t.taxes.paye) || 0)}`;
+        
+        // Format taxes with rate and amount
+        const vatRate = Number((t.taxes && t.taxes.vatRate) || 0);
+        const vatAmount = Number((t.taxes && t.taxes.vatAmount) || 0);
+        const whtRate = Number((t.taxes && t.taxes.whtRate) || 0);
+        const whtAmount = Number((t.taxes && t.taxes.whtAmount) || 0);
+        const paye = Number((t.taxes && t.taxes.paye) || 0);
+        
+        let taxesParts = [];
+        if (vatRate > 0 || vatAmount > 0) {
+          taxesParts.push(`VAT ${vatRate}% (₦${fmt(vatAmount)})`);
+        }
+        if (whtRate > 0 || whtAmount > 0) {
+          taxesParts.push(`WHT ${whtRate}% (₦${fmt(whtAmount)})`);
+        }
+        if (paye > 0) {
+          taxesParts.push(`PAYE ₦${fmt(paye)}`);
+        }
+        const taxesStr = taxesParts.length > 0 ? taxesParts.join(', ') : '-';
+        
         const bankName = findAccount(b.id, t.bankAccountId) ? escapeHtml(findAccount(b.id, t.bankAccountId).name) : '';
         tr.innerHTML = `<td>${t.date||''}</td>
           <td>${escapeHtml(t.desc||'')}</td>
@@ -1125,9 +1260,9 @@
         ledgerTbody.appendChild(tr);
         const btn = tr.querySelector('button');
         btn && btn.addEventListener('click', ()=>{ if (confirm('Delete transaction?')){ deleteTransaction(b.id, t.id); } });
-        totalVat += Number((t.taxes && t.taxes.vat) || 0);
-        totalWht += Number((t.taxes && t.taxes.wht) || 0);
-        totalPaye += Number((t.taxes && t.taxes.paye) || 0);
+        totalVat += vatAmount;
+        totalWht += whtAmount;
+        totalPaye += paye;
       });
       document.getElementById('vatSummary').innerHTML = `<strong>Total VAT (year view):</strong> ₦${fmt(totalVat)}`;
       document.getElementById('whtSummary').innerHTML = `<strong>Total WHT (year view):</strong> ₦${fmt(totalWht)}`;
@@ -1288,7 +1423,11 @@
       // totals
       const txs = (data.transactions[biz.id] || []).filter(t=> t.date && t.date.slice(0,4) === yearStr);
       let totalVat = 0, totalWht = 0, totalPaye = 0;
-      txs.forEach(t=>{ totalVat += Number((t.taxes && t.taxes.vat) || 0); totalWht += Number((t.taxes && t.taxes.wht) || 0); totalPaye += Number((t.taxes && t.taxes.paye) || 0); });
+      txs.forEach(t=>{ 
+        totalVat += Number((t.taxes && t.taxes.vatAmount) || 0); 
+        totalWht += Number((t.taxes && t.taxes.whtAmount) || 0); 
+        totalPaye += Number((t.taxes && t.taxes.paye) || 0); 
+      });
       const np = computeNetProfitFromCoA(biz, year);
       // bank flows per bank account
       const bankAccounts = getBankAccounts(biz);
