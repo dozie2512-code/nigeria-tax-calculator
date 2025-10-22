@@ -1,19 +1,3 @@
-Below is the complete index.html you can copy-paste or upload to your repository. It is a full, self-contained page implementing the features you requested:
-
-- Multi-user / multi-business UI
-- Tax year selector (defaults to previous calendar year)
-- Chart-of-accounts net profit (revenue − expenses)
-- Fixed assets with useful life, straight-line depreciation, prorated by months owned
-- Asset additions created from transactions marked Fixed asset
-- Asset disposal: proceeds recorded to revenue but marked non-taxable for tax computations (CIT/PIT)
-- Capital allowances computed from opening allowances + current-year allowances, straight-line; apply 2/3 to current year, carry 1/3 to business.taxCarryforward.capitalAllowances
-- PAYE/PIT: default in-code DEFAULT_PIT used; PAYE approach included for employee calculations (aggregate approach)
-- CIT: 0% if turnover < ₦50,000,000; 25% otherwise
-- Carryforwards stored on business.taxCarryforward = { capitalAllowances, priorLosses }
-- All data persisted to localStorage (STORAGE_KEY)
-
-Save this as index.html and replace your existing file.
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -42,7 +26,7 @@ Save this as index.html and replace your existing file.
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(920px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(920px,96vw); box-shadow:0 8px 24px rgba(0,0,0,0.12); }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -250,7 +234,7 @@ Save this as index.html and replace your existing file.
   </div>
 
   <script>
-    // GitHub Copilot Chat Assistant — provided full file for manual copy
+    // GitHub Copilot Chat Assistant — repaired full file
     const STORAGE_KEY = 'ntc_data_v5';
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -325,6 +309,14 @@ Save this as index.html and replace your existing file.
     const disposeConfirm = document.getElementById('disposeConfirm');
     const btnOpenDispose = document.getElementById('btnOpenDispose');
 
+    // other controls
+    const btnAddUser = document.getElementById('btnAddUser');
+    const btnAddBusiness = document.getElementById('btnAddBusiness');
+    const btnAddAccountInline = document.getElementById('btnAddAccountInline');
+    const btnAddContactInline = document.getElementById('btnAddContactInline');
+    const btnSearch = document.getElementById('btnSearch');
+    const btnClearSearch = document.getElementById('btnClearSearch');
+
     function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
     function fmt(n){ n = Number(n)||0; return n.toLocaleString('en-NG', { maximumFractionDigits:2, minimumFractionDigits: (n%1===0?0:2) }); }
 
@@ -359,7 +351,24 @@ Save this as index.html and replace your existing file.
 
     function initializeDemo(){
       const u = { id: uid('user'), username: 'demo', display: 'Demo User' };
-      const b = { id: uid('biz'), name: 'Demo Business', ownerId: u.id, members: [u.id], vatRate: 7.5, currency: '₦', threshold: 800000, notes: '', vatEnabled: true, pitEnabled: true, vatInclusive: false, whtAutoCreate: true, whtCode: '2300', taxCarryforward: { capitalAllowances: 0, priorLosses: 0 }, contacts: [], accounts: [], fixedAssets: [], pit: DEFAULT_PIT, applyStartupToTax: true, startupCapitalAllowances: 0 };
+      const b = {
+        id: uid('biz'),
+        name: 'Demo Business',
+        ownerId: u.id,
+        members: [u.id],
+        vatRate: 7.5,
+        currency: '₦',
+        threshold: 800000,
+        notes: '',
+        vatEnabled: true,
+        pitEnabled: true,
+        vatInclusive: false,
+        pit: DEFAULT_PIT,
+        taxCarryforward: { capitalAllowances: 0, priorLosses: 0 },
+        contacts: [],
+        accounts: [],
+        fixedAssets: []
+      };
       const accounts = [
         { id: uid('a'), code: '1000', name: 'Cash', type: 'Asset' },
         { id: uid('a2'), code: '2000', name: 'Accounts Payable', type: 'Liability' },
@@ -374,6 +383,8 @@ Save this as index.html and replace your existing file.
         { id: uid('t'), date: now, desc: 'Demo sale', amount: 1500000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.type==='Revenue').id },
         { id: uid('t2'), date: now, desc: 'Demo rent', amount: 200000, authorUserId: u.id, contactId: '', accountId: accounts.find(a=>a.code==='5000').id }
       ];
+      selectedUserId = u.id;
+      selectedBusinessId = b.id;
       saveData();
     }
 
@@ -410,11 +421,78 @@ Save this as index.html and replace your existing file.
       const emptyC = document.createElement('option'); emptyC.value=''; emptyC.textContent='-- select --'; txnContact.appendChild(emptyC);
       b.contacts.forEach(c=>{ const opt = document.createElement('option'); opt.value=c.id; opt.textContent=c.name + ' (' + (c.type||'') + ')'; txnContact.appendChild(opt); });
       const emptyA = document.createElement('option'); emptyA.value=''; emptyA.textContent='-- select --'; txnAccount.appendChild(emptyA);
-      b.accounts.forEach(a=>{ const opt = document.createElement('option'); opt.value = a.id; opt.textContent = (a.code||'') + ' - ' + a.name + ' (' + a.type + ')'; txnAccount.appendChild(opt); const opt2 = opt.cloneNode(true); assetAccountSelect.appendChild(opt2); });
+      const emptyAssetAcct = document.createElement('option'); emptyAssetAcct.value=''; emptyAssetAcct.textContent='-- select --'; assetAccountSelect.appendChild(emptyAssetAcct);
+      b.accounts.forEach(a=>{
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = (a.code||'') + ' - ' + a.name + ' (' + a.type + ')';
+        txnAccount.appendChild(opt);
+        // asset account select for assets modal
+        const opt2 = opt.cloneNode(true);
+        assetAccountSelect.appendChild(opt2);
+      });
       // dispose assets select
       const e = document.createElement('option'); e.value=''; e.textContent='-- select asset --'; disposeAssetSelect.appendChild(e);
       b.fixedAssets.forEach(f=>{ const opt = document.createElement('option'); opt.value = f.id; opt.textContent = f.name + ' — cost ₦' + fmt(f.cost); disposeAssetSelect.appendChild(opt); });
     }
+
+    // Add user/business/account/contact inline helpers
+    btnAddUser.addEventListener('click', ()=>{
+      const name = prompt('Enter user display name:','New User');
+      if (!name) return;
+      const u = { id: uid('user'), username: name.toLowerCase().replace(/\s+/g,'_'), display: name };
+      data.users.push(u);
+      selectedUserId = u.id;
+      saveData(); populateSelectors();
+    });
+
+    btnAddBusiness.addEventListener('click', ()=>{
+      const name = prompt('Enter business name:','New Business');
+      if (!name) return;
+      const b = {
+        id: uid('biz'),
+        name,
+        ownerId: selectedUserId,
+        members: [selectedUserId],
+        vatRate: 7.5,
+        currency: '₦',
+        threshold: 800000,
+        notes: '',
+        vatEnabled: true,
+        pitEnabled: true,
+        vatInclusive: false,
+        pit: DEFAULT_PIT,
+        taxCarryforward: { capitalAllowances: 0, priorLosses: 0 },
+        contacts: [],
+        accounts: [],
+        fixedAssets: []
+      };
+      data.businesses.push(b);
+      data.transactions[b.id] = [];
+      selectedBusinessId = b.id;
+      saveData(); populateSelectors();
+    });
+
+    btnAddAccountInline.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select business first'); return; }
+      const name = prompt('Account name (e.g., Sales Revenue):','New Account');
+      if (!name) return;
+      const type = prompt('Account type (Asset, Liability, Revenue, Expense, Equity):','Expense');
+      const code = prompt('Account code (optional):','');
+      const acc = { id: uid('acc'), code: code || '', name, type: type || 'Expense' };
+      b.accounts.push(acc);
+      saveData(); populateTxnContactAccount(); renderAll();
+    });
+
+    btnAddContactInline.addEventListener('click', ()=>{
+      const b = findBiz(selectedBusinessId); if (!b) { alert('Select business first'); return; }
+      const name = prompt('Contact name:','New Contact');
+      if (!name) return;
+      const type = prompt('Contact type (Customer, Supplier, Employee):','Customer');
+      const c = { id: uid('c'), name, type };
+      b.contacts.push(c);
+      saveData(); populateTxnContactAccount(); renderAll();
+    });
 
     // Transactions
     btnAddTxn.addEventListener('click', ()=>{
@@ -506,7 +584,7 @@ Save this as index.html and replace your existing file.
       const nbv = (asset.cost || 0) - accumToDate;
       const gain = proceeds - nbv;
       // create disposal transaction: proceeds to revenue account but mark non-taxable for CIT/PIT
-      const revenueAccount = b.accounts.find(a=>a.type==='Revenue') || b.accounts[0];
+      const revenueAccount = b.accounts.find(a=>a.type==='Revenue') || b.accounts[0] || { id: '', name: 'Revenue' };
       const tx = {
         id: uid('t'),
         date,
@@ -514,7 +592,7 @@ Save this as index.html and replace your existing file.
         amount: proceeds,
         authorUserId: selectedUserId,
         contactId: '',
-        accountId: revenueAccount ? revenueAccount.id : '',
+        accountId: revenueAccount.id,
         tags: ['asset-disposal'],
         nonTaxableForTax: true,
         disposalDetails: { assetId: asset.id, proceeds, nbv, gain, accumToDate }
@@ -638,6 +716,9 @@ Save this as index.html and replace your existing file.
       const citRate = turnover < 50000000 ? 0 : 0.25;
       const cit = taxable * citRate;
 
+      // PIT (aggregate approach example): compute annual PIT on taxable (if treating as individual). Show monthly and annual.
+      const pit = computeAnnualTax(taxable, biz.pit);
+
       return {
         netProfitA,
         disallowable,
@@ -649,7 +730,8 @@ Save this as index.html and replace your existing file.
         taxable,
         turnover,
         citRate,
-        cit
+        cit,
+        pit
       };
     }
 
@@ -662,14 +744,29 @@ Save this as index.html and replace your existing file.
     }
 
     // Rendering
-    function renderLedger(){
+    function renderLedger(searchTerm){
       ledgerTbody.innerHTML = '';
       const b = findBiz(selectedBusinessId); if (!b) return;
-      const txs = (data.transactions[b.id] || []).slice().sort((a,b2)=> b2.date.localeCompare(a.date));
+      const txs = (data.transactions[b.id] || []).slice().sort((a,b2)=> b2.date.localeCompare(a.date) || b2.id.localeCompare(a.id));
       txs.forEach(t=>{
+        if (searchTerm){
+          const s = searchTerm.toLowerCase();
+          const match = (t.desc||'').toLowerCase().includes(s) || String(t.amount||'').toLowerCase().includes(s) || (findAccount(b.id,t.accountId)&&findAccount(b.id,t.accountId).name.toLowerCase().includes(s)) || (findContactName(b,t.contactId)||'').toLowerCase().includes(s);
+          if (!match) return;
+        }
         const acc = findAccount(b.id, t.accountId);
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${t.date||''}</td><td>${escapeHtml(t.desc||'')}</td><td>${escapeHtml(acc ? acc.name : '')}</td><td class="nowrap">${fmt(t.amount)}</td><td>${escapeHtml(findContactName(b,t.contactId)||'')}</td><td>${(t.tags||[]).join(', ')}${t.nonTaxableForTax? ' (non-tax)': ''}</td><td><button class="small" data-tid="${t.id}">Del</button></td>`;
+        const tags = Array.isArray(t.tags) ? t.tags.join(', ') : (t.tags || '');
+        const contactName = escapeHtml(findContactName(b,t.contactId));
+        const accName = acc ? escapeHtml((acc.code?acc.code+' - ':'') + acc.name) : '';
+        const nonTaxNote = t.nonTaxableForTax ? ' (non-taxable)' : '';
+        tr.innerHTML = `<td>${t.date||''}</td>
+          <td>${escapeHtml(t.desc||'')}</td>
+          <td>${accName}</td>
+          <td class="nowrap">${fmt(t.amount)}</td>
+          <td>${contactName}</td>
+          <td>${escapeHtml(tags)}${nonTaxNote}</td>
+          <td><button class="small">Delete</button></td>`;
         ledgerTbody.appendChild(tr);
         const btn = tr.querySelector('button');
         btn && btn.addEventListener('click', ()=>{ if (confirm('Delete transaction?')){ deleteTransaction(b.id, t.id); } });
@@ -718,7 +815,16 @@ Save this as index.html and replace your existing file.
       taxableResultDiv.style.display = 'block';
       taxableResultValue.textContent = fmt(taxRes.taxable);
       const netSource = (typeof userInputs.netProfitA === 'number') ? userInputs.netProfitA : computeNetProfitFromCoA(b,year).netProfit;
-      taxableBreakdownDiv.innerHTML = `<div class="muted">Net profit A: ₦${fmt(netSource)}<br/>Disallowable addbacks: ₦${fmt(userInputs.disallowable)}<br/>Non-taxable income (incl disposals): ₦${fmt(taxRes.nonTaxableIncome)}<br/>Capital allowances applied (2/3 of total available): ₦${fmt(taxRes.capitalAllowancesApplied)}<br/>Prior losses used: ₦${fmt(userInputs.priorLosses||0)}<br/>Other adjustments: ₦${fmt(userInputs.otherAdjustments)}</div>`;
+      taxableBreakdownDiv.innerHTML = `
+        <div class="muted">
+          Net profit A: ₦${fmt(netSource)}<br/>
+          Disallowable addbacks: ₦${fmt(userInputs.disallowable)}<br/>
+          Non-taxable income (incl disposals): ₦${fmt(taxRes.nonTaxableIncome)}<br/>
+          Capital allowances applied (2/3 rule): ₦${fmt(taxRes.capitalAllowancesApplied)}<br/>
+          Prior losses applied: ₦${fmt(taxRes.priorLosses)}<br/>
+          Other adjustments: ₦${fmt(taxRes.otherAdjustments)}<br/>
+          <strong>Taxable income: ₦${fmt(taxRes.taxable)}</strong>
+        </div>`;
       // CIT
       citResultDiv.style.display = 'block';
       citValueSpan.textContent = fmt(taxRes.cit);
@@ -726,6 +832,12 @@ Save this as index.html and replace your existing file.
       capAllowApplyBox.style.display = 'block';
       capAllowAvailableSpan.textContent = fmt(caRes.totalAvailable);
       capAllowApplyBox.dataset.ca = JSON.stringify(caRes);
+
+      // PIT (aggregate example display)
+      pitResultDiv.style.display = 'block';
+      pitAnnualValueSpan.textContent = fmt(taxRes.pit || 0);
+      pitMonthlyValueSpan.textContent = fmt((taxRes.pit || 0) / 12);
+      pitNotes.textContent = `Using PIT rules (threshold ₦${fmt(DEFAULT_PIT.threshold)}). This is an illustrative aggregate calculation.`;
     }
 
     // Button actions for taxable panel
@@ -781,7 +893,12 @@ Save this as index.html and replace your existing file.
     function escapeHtml(s){ if (s === undefined || s === null) return ''; return String(s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function findContactName(b, id){ if (!b || !b.contacts) return ''; const c = b.contacts.find(x=>x.id===id); return c ? c.name : ''; }
 
-    function renderAll(){ renderLedger(); renderAssets(); renderTaxPanels(); }
+    function renderAll(){
+      populateTxnContactAccount();
+      renderLedger();
+      renderAssets();
+      renderTaxPanels();
+    }
 
     // Modal helpers
     function showModal(el){ document.getElementById('modalOverlay').style.display = 'block'; el.style.display = 'block'; el.setAttribute('aria-hidden','false'); }
@@ -808,7 +925,11 @@ Save this as index.html and replace your existing file.
         } catch(err){ alert('Invalid JSON'); }
       }; r.readAsText(f);
     });
-    document.getElementById('btnClearAll').addEventListener('click', ()=>{ if (confirm('Clear all data? This will reset localStorage for this app.')){ localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; initializeDemo(); loadData(); populateSelectors(); alert('Cleared'); } });
+    document.getElementById('btnClearAll').addEventListener('click', ()=>{ if (confirm('Clear all data? This will reset localStorage for this app.')){ localStorage.removeItem(STORAGE_KEY); data = { users: [], businesses: [], transactions: {} }; initializeDemo(); populateSelectors(); alert('Data cleared and demo initialized.'); } });
+
+    // Search ledger
+    btnSearch.addEventListener('click', ()=>{ const q = document.getElementById('ledgerSearch').value.trim(); renderLedger(q); });
+    btnClearSearch.addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
 
     // Initial load
     loadData();
@@ -817,17 +938,4 @@ Save this as index.html and replace your existing file.
     // End of script
   </script>
 </body>
-</html>
-
-Notes and suggestions:
-- Save this file as index.html and upload/replace in your repo.
-- The disposal transaction is saved in transactions with nonTaxableForTax: true and disposalDetails (nbv and gain). The UI records proceeds as revenue but it is excluded automatically from taxable income and CIT/PIT computations.
-- Capital allowances compute: carry (business.taxCarryforward.capitalAllowances) + startupCapitalAllowances (if applyStartupToTax true) + prorated current-year allowances from fixedAssets. The code applies 2/3 for current year and sets 1/3 in business.taxCarryforward.capitalAllowances when you press "Apply carryforward".
-- PAYE per-employee aggregation is not aggressively detailed in this page (you can extend using the employee contact types and account.isSalary flags if you like). The PIT tables use DEFAULT_PIT.
-
-If you want, I can:
-- Produce a branch + pull request instead of manual copy (I attempted earlier and got permission errors).
-- Add more UI for editing businesses, contacts, and chart of accounts (currently minimal).
-- Add unit tests or example data for assets & disposals.
-
-What would you like next?
+  </html>
