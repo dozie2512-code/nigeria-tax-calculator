@@ -44,9 +44,6 @@
     .nowrap { white-space:nowrap; }
     .two-col { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
     .inventory-list { margin-top:8px; }
-    .bank-table { width:100%; border-collapse:collapse; margin-top:8px; }
-    .bank-table th, .bank-table td { border:1px solid #ddd; padding:6px; }
-    .reconcile-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
     .small-muted { font-size:0.85rem; color:var(--muted); }
     .hidden { display:none; }
     .settings-inline { display:flex; gap:8px; align-items:center; }
@@ -335,45 +332,7 @@
       <small class="muted">Average-cost (weighted) method used for COGS. Selling creates revenue transaction and an automatic COGS expense transaction.</small>
     </section>
 
-    <section class="panel section" id="reportsPanel">
-      <h2>Reports & Bank Reconciliation</h2>
 
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-        <label>Report year: <select id="reportYearSelect"></select></label>
-        <button id="btnGenerateReport" class="small">Generate</button>
-        <button id="btnExportReport" class="small">Export JSON</button>
-        <button id="btnPrintReport" class="small">Printable view</button>
-      </div>
-
-      <div id="reportResults" style="margin-top:8px;"></div>
-
-      <div style="margin-top:12px;">
-        <h4>Bank accounts & Reconciliation</h4>
-        <div class="row">
-          <label>Select bank account: <select id="bankAccountSelect"></select></label>
-          <label>Opening balance for year: <input type="number" id="bankOpeningBalance" step="0.01" style="width:140px;" /></label>
-          <button id="btnSaveOpeningBalance" class="small">Save</button>
-        </div>
-
-        <div style="margin-top:8px;">
-          <label>Paste bank statement lines (one per line: date,description,amount):</label>
-          <textarea id="bankStatementInput" rows="4" style="width:100%;"></textarea>
-          <div style="display:flex;gap:8px;margin-top:6px;">
-            <button id="btnParseBankStatement" class="small">Parse lines</button>
-            <button id="btnClearBankStatement" class="small">Clear</button>
-          </div>
-        </div>
-
-        <div id="bankStatementParsed" style="margin-top:8px;"></div>
-
-        <div style="margin-top:8px;">
-          <h5>Transactions (select to mark reconciled)</h5>
-          <div id="bankTxList"></div>
-        </div>
-      </div>
-
-      <small class="muted">Reconciliation is manual: parse or paste your statement lines and match them to application transactions. Matched transactions will be marked reconciled and saved to the business.</small>
-    </section>
 
   </main>
 
@@ -562,20 +521,6 @@
     const btnQuickRecordPurchase = document.getElementById('btnQuickRecordPurchase');
     const btnQuickRecordSale = document.getElementById('btnQuickRecordSale');
 
-    // reports refs
-    const reportYearSelect = document.getElementById('reportYearSelect');
-    const btnGenerateReport = document.getElementById('btnGenerateReport');
-
-    // bank refs
-    const bankAccountSelect = document.getElementById('bankAccountSelect');
-    const bankOpeningBalanceInput = document.getElementById('bankOpeningBalance');
-    const btnSaveOpeningBalance = document.getElementById('btnSaveOpeningBalance');
-    const bankStatementInput = document.getElementById('bankStatementInput');
-    const btnParseBankStatement = document.getElementById('btnParseBankStatement');
-    const btnClearBankStatement = document.getElementById('btnClearBankStatement');
-    const bankStatementParsedDiv = document.getElementById('bankStatementParsed');
-    const bankTxListDiv = document.getElementById('bankTxList');
-
     // other controls
     const btnAddUser = document.getElementById('btnAddUser');
     const btnAddBusiness = document.getElementById('btnAddBusiness');
@@ -706,7 +651,6 @@
       populateTaxYears();
       populateTxnContactAccount();
       populateInventorySelectors();
-      populateReportYears();
       renderAll();
       loadBusinessSettingsToUI();
     }
@@ -742,17 +686,6 @@
       }
     }
 
-    function populateReportYears(){
-      reportYearSelect.innerHTML = '';
-      const now = new Date(); const defaultYear = now.getFullYear() - 1;
-      for (let y = defaultYear - 3; y <= defaultYear + 2; y++){
-        const opt = document.createElement('option'); opt.value = String(y); opt.textContent = String(y);
-        if (y === defaultYear) opt.selected = true;
-        reportYearSelect.appendChild(opt);
-      }
-      reportYearSelect.value = String(defaultYear);
-    }
-
     function populateTxnContactAccount(){
       const b = findBiz(selectedBusinessId);
       // clear many selects (some may not exist in certain DOM states)
@@ -770,7 +703,6 @@
       if (txnSellItem) txnSellItem.innerHTML = '';
       if (txnPurchaseAccount) txnPurchaseAccount.innerHTML = '';
       if (txnSellRevenueAccount) txnSellRevenueAccount.innerHTML = '';
-      if (bankAccountSelect) bankAccountSelect.innerHTML = '';
 
       if (!b) return;
       const emptyC = document.createElement('option'); emptyC.value=''; emptyC.textContent='-- select --'; txnContact.appendChild(emptyC);
@@ -806,8 +738,6 @@
           ba.value = a.id;
           ba.textContent = (a.code||'') + ' - ' + a.name;
           txnBankAccountSelect.appendChild(ba);
-          const ba2 = ba.cloneNode(true);
-          bankAccountSelect.appendChild(ba2);
         }
       });
 
@@ -819,15 +749,11 @@
           ba.value = found.id;
           ba.textContent = (found.code||'') + ' - ' + found.name;
           txnBankAccountSelect.appendChild(ba);
-          const ba2 = ba.cloneNode(true);
-          bankAccountSelect.appendChild(ba2);
         } else if (b.accounts[0]){
           const ba = document.createElement('option');
           ba.value = b.accounts[0].id;
           ba.textContent = (b.accounts[0].code||'') + ' - ' + b.accounts[0].name;
           txnBankAccountSelect.appendChild(ba);
-          const ba2 = ba.cloneNode(true);
-          bankAccountSelect.appendChild(ba2);
         }
       }
 
@@ -1466,6 +1392,8 @@
     // Render all UI elements
     function renderAll(){
       const b = findBiz(selectedBusinessId);
+      const totalsSummary = document.getElementById('totalsSummary');
+      const taxSummary = document.getElementById('taxSummary');
       if (!b) {
         ledgerTbody.innerHTML = '';
         fixedAssetsListDiv.innerHTML = '';
@@ -1495,8 +1423,6 @@
       });
 
       // totals and tax summary
-      const totalsSummary = document.getElementById('totalsSummary');
-      const taxSummary = document.getElementById('taxSummary');
       const sums = computeSummaries(b, taxYear);
 
       totalsSummary.innerHTML = `
@@ -1714,13 +1640,6 @@
       saveData();
       populateSelectors();
     });
-
-    // initial render elements that are referenced earlier but not defined in some branches
-    const totalsSummary = document.getElementById('totalsSummary');
-    // Ensure some elements exist for code above
-    if (!totalsSummary) {
-      console.warn('totalsSummary missing');
-    }
 
     // end script
   </script>
