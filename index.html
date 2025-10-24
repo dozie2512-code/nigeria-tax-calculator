@@ -20,14 +20,14 @@ GitHub Copilot Chat Assistant
     .section { margin-top:14px; }
     .form-inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .ledger-table { border-collapse: collapse; width:100%; margin-top:10px; }
-    .ledger-table th, .ledger-table td { border:1px solid #ddd; padding:8px; text-align:left; font-size:0.95rem; }
+    .ledger-table th, .ledger-table td { border:1px solid #ddd; padding:8px; text-align:left; font-size:0.95rem; vertical-align: middle; }
     .ledger-table th { background:#f2f6fa; }
     .totals, .tax-summary, .vat-summary { background:#f7f9fc; padding:10px; margin-top:10px; border-radius:6px; border:1px solid #eef2f6; }
     .muted { color:var(--muted); font-size:0.9rem; }
     .actions { display:flex; gap:6px; }
-    .danger { color:var(--danger); border-color:var(--danger); }
+    .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -127,9 +127,9 @@ GitHub Copilot Chat Assistant
             <th>Type</th>
             <th>Category</th>
             <th>Description</th>
-            <th>Amount (₦)</th>
-            <th>VAT (₦)</th>
-            <th>WHT (₦)</th>
+            <th>Amount</th>
+            <th>VAT</th>
+            <th>WHT</th>
             <th>Cap. Allow (yr)</th>
             <th>Action</th>
           </tr>
@@ -185,7 +185,7 @@ GitHub Copilot Chat Assistant
     </div>
     <div class="row">
       <label>Tax-free threshold (₦): <input type="number" id="bizThreshold" min="0" step="1" /></label>
-      <label>Default useful life (yrs): <input type="number" id="bizUsefulLife" id="bizUsefulLife" min="1" step="1" class="smallInput" /></label>
+      <label>Default useful life (yrs): <input type="number" id="bizUsefulLife" min="1" step="1" class="smallInput" /></label>
     </div>
     <div class="row">
       <label>Notes: <input type="text" id="bizNotes" placeholder="Optional" /></label>
@@ -236,21 +236,19 @@ GitHub Copilot Chat Assistant
       <label id="editTxnUsefulLabel" style="display:none;">Useful life (yrs): <input type="number" id="editTxnUseful" class="smallInput" min="1" step="1" /></label>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-      <button onclick="closeEditModal()">Cancel</button>
-      <button class="primary" onclick="saveEdit()">Save</button>
+      <button id="editCancelBtn">Cancel</button>
+      <button class="primary" id="editSaveBtn">Save</button>
     </div>
   </div>
 
   <script>
     // GitHub Copilot Chat Assistant
-    // Data model in localStorage key 'ntc_data_v1'
     const STORAGE_KEY = 'ntc_data_v1';
 
-    // Default PIT slices (as previously used)
     const DEFAULT_PIT = {
       threshold: 800000,
       slices: [
-        { upTo: 3000000, rate: 0.15 },  // slice from threshold up to 3,000,000
+        { upTo: 3000000, rate: 0.15 },
         { upTo: 12000000, rate: 0.18 },
         { upTo: 25000000, rate: 0.21 },
         { upTo: 50000000, rate: 0.23 },
@@ -258,42 +256,31 @@ GitHub Copilot Chat Assistant
       ]
     };
 
-    // sensible defaults for new business tax fields
     const DEFAULT_BUSINESS_TAX = {
-      whtRate: 5.0,               // %
-      citRate: 30.0,              // %
-      defaultUsefulLifeYears: 5,  // years for straight-line
+      whtRate: 5.0,
+      citRate: 30.0,
+      defaultUsefulLifeYears: 5,
       payeEnabled: true
     };
 
-    // In-memory state
-    let data = {
-      users: [],
-      businesses: [],
-      transactions: {} // { userId: { businessId: [ txns ] } }
-    };
-
+    let data = { users: [], businesses: [], transactions: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
-
-    // Transaction edit state
     let editIndex = null;
-
-    // Ledger UI state
     const PAGE_SIZE = 20;
     let currentPage = 1;
     let ledgerFilterText = '';
-    let ledgerFiltered = []; // filtered txns used for pagination and summaries
+    let ledgerFiltered = [];
 
-    // Utilities
-    function uid(prefix='id') { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
+    function uid(prefix='id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
 
-    function saveData() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    }
+    function formatNumber(n){ return Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    function escapeHtml(s){ if (!s) return ''; return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-    function ensureBizDefaults(biz) {
-      if (!biz) return;
+    function saveData(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+    function ensureBizDefaults(biz){
+      if(!biz) return;
       if (typeof biz.whtRate === 'undefined') biz.whtRate = DEFAULT_BUSINESS_TAX.whtRate;
       if (typeof biz.citRate === 'undefined') biz.citRate = DEFAULT_BUSINESS_TAX.citRate;
       if (typeof biz.defaultUsefulLifeYears === 'undefined') biz.defaultUsefulLifeYears = DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
@@ -303,45 +290,35 @@ GitHub Copilot Chat Assistant
       if (typeof biz.threshold === 'undefined') biz.threshold = DEFAULT_PIT.threshold;
     }
 
-    function loadData() {
+    function loadData(){
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
+      if (raw){
         try {
           const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
+          if (parsed && typeof parsed === 'object'){
             data = parsed;
             if (!data.users) data.users = [];
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
-            // ensure defaults on businesses
             data.businesses.forEach(b => ensureBizDefaults(b));
             return;
           }
-        } catch(e) {
+        } catch(e){
           console.error('Invalid saved data', e);
         }
       }
-      // initialize with a demo user and business if empty
-      const userId = uid('user');
-      const bizId = uid('biz');
+      // seed demo
+      const u = uid('user'), b = uid('biz');
       data = {
-        users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
+        users: [{ id: u, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
         businesses: [{
-          id: bizId,
-          name: 'Demo Business',
-          ownerId: userId,
-          vatRate: 7.5,
-          whtRate: DEFAULT_BUSINESS_TAX.whtRate,
-          citRate: DEFAULT_BUSINESS_TAX.citRate,
+          id: b, name: 'Demo Business', ownerId: u, vatRate: 7.5,
+          whtRate: DEFAULT_BUSINESS_TAX.whtRate, citRate: DEFAULT_BUSINESS_TAX.citRate,
           defaultUsefulLifeYears: DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears,
-          currency: '₦',
-          threshold: DEFAULT_PIT.threshold,
-          notes: 'Sample business',
-          vatEnabled: true,
-          pitEnabled: true,
-          payeEnabled: true
+          currency: '₦', threshold: DEFAULT_PIT.threshold, notes: 'Sample business',
+          vatEnabled: true, pitEnabled: true, payeEnabled: true
         }],
-        transactions: { [userId]: { [bizId]: [
+        transactions: { [u]: { [b]: [
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000, whtApplied: false, depreciable: false },
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, whtApplied: false, depreciable: false }
         ] } }
@@ -352,7 +329,7 @@ GitHub Copilot Chat Assistant
     function findUser(id){ return data.users.find(u=>u.id===id); }
     function findBiz(id){ return data.businesses.find(b=>b.id===id); }
 
-    // UI wiring
+    // UI refs
     const userSelect = document.getElementById('userSelect');
     const businessSelect = document.getElementById('businessSelect');
     const btnAddUser = document.getElementById('btnAddUser');
@@ -371,7 +348,7 @@ GitHub Copilot Chat Assistant
 
     const modalOverlay = document.getElementById('modalOverlay');
 
-    // User modal elements
+    // User modal
     const userModal = document.getElementById('userModal');
     const userModalTitle = document.getElementById('userModalTitle');
     const userName = document.getElementById('userName');
@@ -380,7 +357,7 @@ GitHub Copilot Chat Assistant
     const userSave = document.getElementById('userSave');
     const userCancel = document.getElementById('userCancel');
 
-    // Business modal elements
+    // Business modal
     const businessModal = document.getElementById('businessModal');
     const businessModalTitle = document.getElementById('businessModalTitle');
     const bizName = document.getElementById('bizName');
@@ -398,7 +375,7 @@ GitHub Copilot Chat Assistant
     const bizSave = document.getElementById('bizSave');
     const bizCancel = document.getElementById('bizCancel');
 
-    // Edit transaction modal
+    // Edit modal
     const editModal = document.getElementById('editModal');
     const editTxnDate = document.getElementById('editTxnDate');
     const editTxnType = document.getElementById('editTxnType');
@@ -409,6 +386,8 @@ GitHub Copilot Chat Assistant
     const editTxnDep = document.getElementById('editTxnDep');
     const editTxnUseful = document.getElementById('editTxnUseful');
     const editTxnUsefulLabel = document.getElementById('editTxnUsefulLabel');
+    const editCancelBtn = document.getElementById('editCancelBtn');
+    const editSaveBtn = document.getElementById('editSaveBtn');
 
     // Add txn fields
     const txnWht = document.getElementById('txnWht');
@@ -424,15 +403,55 @@ GitHub Copilot Chat Assistant
     const btnNextPage = document.getElementById('btnNextPage');
     const pageIndicator = document.getElementById('pageIndicator');
 
-    // Export/Import UI
+    // Export/Import
     const btnExport = document.getElementById('btnExport');
     const btnImport = document.getElementById('btnImport');
     const fileInput = document.getElementById('fileInput');
     const btnClearAll = document.getElementById('btnClearAll');
 
-    // State for modals: editing vs adding
     let userEditingId = null;
     let bizEditingId = null;
+
+    // helper - compute PIT on an income value using DEFAULT_PIT slices and business threshold
+    function computePIT(income, biz){
+      const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+      if (income <= threshold) return 0;
+      let remainingIncome = income;
+      let tax = 0;
+      let prevUpper = threshold;
+      for (const slice of DEFAULT_PIT.slices){
+        const upper = slice.upTo;
+        const sliceUpper = Math.max(prevUpper, Math.min(income, upper));
+        const taxableInSlice = Math.max(0, sliceUpper - prevUpper);
+        tax += taxableInSlice * slice.rate;
+        prevUpper = upper;
+        if (income <= upper) break;
+      }
+      return tax;
+    }
+
+    // computeTax wrapper: for PIT (progressive). biz param may be undefined.
+    function computeTax(income, biz){
+      return computePIT(income, biz);
+    }
+
+    function openModal(modal){
+      modalOverlay.style.display = 'block';
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden','false');
+    }
+    function closeModal(modal){
+      modalOverlay.style.display = 'none';
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+      userEditingId = null;
+      bizEditingId = null;
+    }
+
+    modalOverlay.addEventListener('click', () => {
+      // close any open modal
+      [userModal, businessModal, editModal].forEach(m => { if (m.style.display === 'block') closeModal(m); });
+    });
 
     // Initialization
     loadData();
@@ -443,8 +462,7 @@ GitHub Copilot Chat Assistant
     calculateSummary();
 
     // --- User & Business management functions ---
-    function refreshUserBusinessSelectors() {
-      // Users
+    function refreshUserBusinessSelectors(){
       userSelect.innerHTML = '';
       data.users.forEach(u => {
         const opt = document.createElement('option');
@@ -452,9 +470,10 @@ GitHub Copilot Chat Assistant
         opt.textContent = (u.display || u.username) + ' (' + u.username + ')';
         userSelect.appendChild(opt);
       });
-      // Businesses
+
       businessSelect.innerHTML = '';
       data.businesses.forEach(b => {
+        ensureBizDefaults(b);
         const owner = findUser(b.ownerId);
         const enabledParts = [];
         if (b.vatEnabled) enabledParts.push('VAT');
@@ -463,10 +482,10 @@ GitHub Copilot Chat Assistant
         const status = enabledParts.length ? ' — ' + enabledParts.join('/') : '';
         const opt = document.createElement('option');
         opt.value = b.id;
-        opt.textContent = `${b.name} ${owner ? ' — ' + (owner.display || owner.username) : ''} (${(typeof b.vatRate === 'number' ? b.vatRate : 0)}% VAT, ${ (typeof b.citRate === 'number' ? b.citRate : DEFAULT_BUSINESS_TAX.citRate)}% CIT)${status}`;
+        opt.textContent = `${b.name}${owner ? ' — ' + (owner.display || owner.username) : ''} (${(typeof b.vatRate === 'number' ? b.vatRate : 0)}% VAT, ${(typeof b.citRate === 'number' ? b.citRate : 0)}% CIT)${status}`;
         businessSelect.appendChild(opt);
       });
-      // populate bizOwner select for business modal
+
       bizOwner.innerHTML = '';
       data.users.forEach(u => {
         const o = document.createElement('option');
@@ -475,7 +494,6 @@ GitHub Copilot Chat Assistant
         bizOwner.appendChild(o);
       });
 
-      // set selected values if still available, else pick first
       if (!data.users.find(u=>u.id===selectedUserId)) selectedUserId = data.users.length ? data.users[0].id : null;
       if (!data.businesses.find(b=>b.id===selectedBusinessId)) selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
 
@@ -483,28 +501,14 @@ GitHub Copilot Chat Assistant
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
 
-    function ensureSelection() {
+    function ensureSelection(){
       if (!selectedUserId && data.users.length) selectedUserId = data.users[0].id;
       if (!selectedBusinessId && data.businesses.length) selectedBusinessId = data.businesses[0].id;
       if (selectedUserId) userSelect.value = selectedUserId;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
     }
 
-    function openModal(modal) {
-      modalOverlay.style.display = 'block';
-      modal.style.display = 'block';
-      modal.setAttribute('aria-hidden','false');
-    }
-    function closeModal(modal) {
-      modalOverlay.style.display = 'none';
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden','true');
-      // clear editing state
-      userEditingId = null;
-      bizEditingId = null;
-    }
-
-    // --- Users ---
+    // Users
     btnAddUser.addEventListener('click', () => {
       userModalTitle.textContent = 'Add User';
       userName.value = '';
@@ -535,10 +539,7 @@ GitHub Copilot Chat Assistant
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
       delete data.transactions[u.id];
       data.users = data.users.filter(x => x.id !== u.id);
-      if (!data.users.length) {
-        // clear everything
-        data = { users: [], businesses: [], transactions: {} };
-      }
+      if (!data.users.length) data = { users: [], businesses: [], transactions: {} };
       saveData();
       selectedUserId = data.users.length ? data.users[0].id : null;
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
@@ -557,7 +558,6 @@ GitHub Copilot Chat Assistant
         u.display = (userDisplay.value||'').trim();
         u.notes = (userNotes.value||'').trim();
       } else {
-        // ensure unique username
         const exists = data.users.find(x => x.username === username);
         if (exists) { if (!confirm('Username already exists. Add anyway?')) return; }
         const id = uid('user');
@@ -573,7 +573,6 @@ GitHub Copilot Chat Assistant
 
     userSelect.addEventListener('change', (e) => {
       selectedUserId = e.target.value;
-      // auto-select first business owned by user if possible
       const owned = data.businesses.find(b => b.ownerId === selectedUserId);
       if (owned) selectedBusinessId = owned.id;
       if (selectedBusinessId) businessSelect.value = selectedBusinessId;
@@ -582,7 +581,7 @@ GitHub Copilot Chat Assistant
       calculateSummary();
     });
 
-    // --- Businesses ---
+    // Businesses
     btnAddBusiness.addEventListener('click', () => {
       businessModalTitle.textContent = 'Add Business';
       bizName.value = '';
@@ -627,9 +626,7 @@ GitHub Copilot Chat Assistant
       const b = findBiz(selectedBusinessId);
       if (!b) return;
       if (!confirm(`Delete business "${b.name}" and all its transactions for all users? This action cannot be undone.`)) return;
-      // remove business from businesses
       data.businesses = data.businesses.filter(x => x.id !== b.id);
-      // remove transactions for this business across all users
       for (const uid of Object.keys(data.transactions)) {
         if (data.transactions[uid] && data.transactions[uid][b.id]) delete data.transactions[uid][b.id];
       }
@@ -704,7 +701,7 @@ GitHub Copilot Chat Assistant
       calculateSummary();
     });
 
-    // --- Transactions ---
+    // Transactions: UI behavior
     txnDep.addEventListener('change', () => {
       txnUsefulLifeLabel.style.display = txnDep.checked ? '' : 'none';
       if (!txnDep.checked) txnUsefulLife.value = '';
@@ -740,12 +737,16 @@ GitHub Copilot Chat Assistant
       data.transactions[selectedUserId][selectedBusinessId].push(txn);
       saveData();
       clearForm();
-      currentPage = Math.ceil(((ledgerFiltered.length || 0) + 1) / PAGE_SIZE); // jump to last page after adding (approx)
+      // refresh ledger and summaries
       renderLedger();
       calculateSummary();
+      // jump to last page
+      const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+      currentPage = Math.max(1, Math.ceil(allTxns.length / PAGE_SIZE));
+      renderLedger();
     });
 
-    function clearForm() {
+    function clearForm(){
       document.getElementById('txnDate').value = "";
       document.getElementById('txnDesc').value = "";
       document.getElementById('txnAmount').value = "";
@@ -757,7 +758,7 @@ GitHub Copilot Chat Assistant
       txnUsefulLifeLabel.style.display = 'none';
     }
 
-    function renderLedger() {
+    function renderLedger(){
       ledgerTbody.innerHTML = '';
       if (!selectedUserId || !selectedBusinessId) {
         ledgerFiltered = [];
@@ -765,17 +766,10 @@ GitHub Copilot Chat Assistant
         return;
       }
       const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
-      // apply search filter (case-insensitive)
       const q = (ledgerFilterText || '').trim().toLowerCase();
       ledgerFiltered = allTxns.filter(txn => {
         if (!q) return true;
-        const parts = [
-          txn.date || '',
-          txn.type || '',
-          txn.category || '',
-          txn.desc || '',
-          String(txn.amount || '')
-        ];
+        const parts = [txn.date || '', txn.type || '', txn.category || '', txn.desc || '', String(txn.amount || '')];
         return parts.join(' ').toLowerCase().includes(q);
       });
 
@@ -788,7 +782,7 @@ GitHub Copilot Chat Assistant
       const start = (currentPage - 1) * PAGE_SIZE;
       const pageSlice = ledgerFiltered.slice(start, start + PAGE_SIZE);
 
-      pageSlice.forEach((txn, idx) => {
+      pageSlice.forEach((txn) => {
         let vat = 0;
         if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
         let wht = 0;
@@ -805,23 +799,33 @@ GitHub Copilot Chat Assistant
           <td>${txn.type}</td>
           <td>${txn.category}${txn.depreciable ? ' <span class="flag">depr</span>' : ''}</td>
           <td>${escapeHtml(txn.desc)}</td>
-          <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
+          <td>${(biz && biz.currency ? biz.currency : '₦')}${formatNumber(txn.amount)}</td>
           <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
           <td>${(wht && biz) ? (biz.currency || '₦') + formatNumber(wht) : ''}</td>
           <td>${capAllow}</td>
           <td>
             <div class="actions">
-              <button class="small" onclick="openEditModal('${txn.id}')">Edit</button>
-              <button class="small danger" onclick="removeTransaction('${txn.id}')">Delete</button>
+              <button class="small" data-txnid="${txn.id}" data-action="edit">Edit</button>
+              <button class="small danger" data-txnid="${txn.id}" data-action="delete">Delete</button>
             </div>
           </td>`;
         ledgerTbody.appendChild(tr);
       });
 
+      // attach event delegation for edit/delete
+      ledgerTbody.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-txnid');
+          const a = btn.getAttribute('data-action');
+          if (a === 'edit') openEditModal(id);
+          else if (a === 'delete') removeTransaction(id);
+        };
+      });
+
       updatePaginationControls();
     }
 
-    function updatePaginationControls() {
+    function updatePaginationControls(){
       const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
       pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
       btnPrevPage.disabled = currentPage <= 1;
@@ -829,17 +833,11 @@ GitHub Copilot Chat Assistant
     }
 
     btnPrevPage.addEventListener('click', () => {
-      if (currentPage > 1) {
-        currentPage--;
-        renderLedger();
-      }
+      if (currentPage > 1) { currentPage--; renderLedger(); }
     });
     btnNextPage.addEventListener('click', () => {
       const totalPages = Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE));
-      if (currentPage < totalPages) {
-        currentPage++;
-        renderLedger();
-      }
+      if (currentPage < totalPages) { currentPage++; renderLedger(); }
     });
 
     btnSearch.addEventListener('click', () => {
@@ -857,8 +855,8 @@ GitHub Copilot Chat Assistant
       calculateSummary();
     });
 
-    // Expose functions needed by inline onclick attributes
-    window.openEditModal = function(txnId) {
+    // Edit & remove transaction
+    window.openEditModal = function(txnId){
       if (!selectedUserId || !selectedBusinessId) return;
       const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
       const idx = txns.findIndex(t => t.id === txnId);
@@ -872,17 +870,12 @@ GitHub Copilot Chat Assistant
       editTxnAmount.value = t.amount;
       editTxnWht.checked = !!t.whtApplied;
       editTxnDep.checked = !!t.depreciable;
-      if (t.depreciable) {
-        editTxnUsefulLabel.style.display = '';
-        editTxnUseful.value = t.usefulLifeYears || '';
-      } else {
-        editTxnUsefulLabel.style.display = 'none';
-        editTxnUseful.value = '';
-      }
+      if (t.depreciable) { editTxnUsefulLabel.style.display = ''; editTxnUseful.value = t.usefulLifeYears || ''; }
+      else { editTxnUsefulLabel.style.display = 'none'; editTxnUseful.value = ''; }
       openModal(editModal);
     };
 
-    window.removeTransaction = function(txnId) {
+    window.removeTransaction = function(txnId){
       if (!selectedUserId || !selectedBusinessId) return;
       if (!confirm('Delete this transaction?')) return;
       const txns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
@@ -890,20 +883,19 @@ GitHub Copilot Chat Assistant
       if (idx === -1) return;
       txns.splice(idx,1);
       saveData();
-      // keep page sane
+      // adjust page if needed
       const totalPages = Math.max(1, Math.ceil(((ledgerFiltered.length - 1) || 0) / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
       renderLedger();
       calculateSummary();
     };
 
-    function closeEditModal() {
-      closeModal(editModal);
-      editIndex = null;
-    }
-    window.closeEditModal = closeEditModal;
+    editCancelBtn.addEventListener('click', () => closeEditModal());
+    editSaveBtn.addEventListener('click', () => saveEdit());
 
-    function saveEdit() {
+    function closeEditModal(){ closeModal(editModal); editIndex = null; }
+
+    function saveEdit(){
       if (editIndex === null) return;
       const date = editTxnDate.value;
       const type = editTxnType.value;
@@ -925,23 +917,19 @@ GitHub Copilot Chat Assistant
       renderLedger();
       calculateSummary();
     }
-    window.saveEdit = saveEdit;
 
     // --- Summaries and tax calculations ---
-    function calculateSummary() {
+    function calculateSummary(){
       const biz = findBiz(selectedBusinessId);
       const currency = (biz && biz.currency) ? biz.currency : '₦';
       const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
-
-      // Determine if PIT is enabled (default true if undefined)
       const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
       const vatEnabled = biz ? !!biz.vatEnabled : false;
       const payeEnabled = biz ? (!!biz.payeEnabled) : false;
       const whtRate = (biz && typeof biz.whtRate === 'number') ? (biz.whtRate/100) : (DEFAULT_BUSINESS_TAX.whtRate/100);
       const citRate = (biz && typeof biz.citRate === 'number') ? (biz.citRate/100) : (DEFAULT_BUSINESS_TAX.citRate/100);
 
-      // Use ledgerFiltered so summaries match the filtered view
       const txns = ledgerFiltered || [];
 
       let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, cogsTotal = 0, rentTotal = 0;
@@ -964,12 +952,10 @@ GitHub Copilot Chat Assistant
           cogsTotal += txn.amount;
         }
 
-        // WHT
         if (txn.whtApplied) {
           whtWithheldTotal += txn.amount * whtRate;
         }
 
-        // Capital allowance (straight-line annual depreciation)
         if (txn.depreciable) {
           const useful = txn.usefulLifeYears || (biz && biz.defaultUsefulLifeYears) || DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
           const annualDep = (useful && useful > 0) ? (txn.amount / useful) : 0;
@@ -977,145 +963,77 @@ GitHub Copilot Chat Assistant
         }
       });
 
-      // PAYE calculation: if PAYE enabled, aggregate Salary expense transactions
+      // PAYE (PIT on salary expenses) if enabled
       if (payeEnabled && pitEnabled) {
-        const salaryTotal = txns
-          .filter(t => t.type === 'Expense' && t.category && t.category.toLowerCase() === 'salary')
-          .reduce((s,t) => s + (t.amount || 0), 0);
-        // computeTax expects an "adjIncome" and uses biz.pit settings. For PAYE we want tax on salaryTotal.
+        const salaryTotal = txns.filter(t => t.type === 'Expense' && t.category && t.category.toLowerCase() === 'salary')
+          .reduce((s,t)=>s + (t.amount || 0), 0);
         payeTotal = computeTax(salaryTotal, biz);
       } else {
         payeTotal = 0;
       }
 
-      let netBalance = incomeTotal - expenseTotal - cogsTotal;
-      let vatPayable = (vatOutputTotal - vatInputTotal);
+      const netBalance = incomeTotal - expenseTotal - cogsTotal;
+      const vatPayable = (vatOutputTotal - vatInputTotal);
 
       // rent relief: 20% of rent up to 500,000
       let rentRelief = rentTotal * 0.20;
       if (rentRelief > 500000) rentRelief = 500000;
 
-      // taxable income after deductions and relief and capital allowances and PAYE
       let taxableIncomeBeforeThreshold = incomeTotal - cogsTotal - expenseTotal - capitalAllowances - payeTotal - deductionTotal;
-      // We will calculate CIT based on taxableIncomeBeforeThreshold (no threshold applied except as per business rules)
-      let taxableProfit = taxableIncomeBeforeThreshold;
-      if (taxableProfit < 0) taxableProfit = 0;
+      // taxable income for PIT is reduced by threshold (computed in computeTax)
+      const pitLiability = pitEnabled ? computeTax(Math.max(0, taxableIncomeBeforeThreshold), biz) : 0;
 
-      // CIT calculation
-      let citPayable = 0;
-      if (typeof citRate === 'number' && citRate > 0) {
-        citPayable = taxableProfit * citRate;
-      } else {
-        citPayable = 0;
-      }
+      // CIT computed simply as citRate on positive taxableIncomeBeforeThreshold
+      const citTaxable = Math.max(0, taxableIncomeBeforeThreshold);
+      const citLiability = (biz && typeof biz.citRate === 'number') ? (citTaxable * citRate) : (citTaxable * (DEFAULT_BUSINESS_TAX.citRate/100));
 
-      // For PIT display (personal income tax) we can compute tax on adjIncome = incomeTotal - deductionTotal - rentRelief
-      let adjIncome = incomeTotal - deductionTotal - rentRelief;
-      if (adjIncome < 0) adjIncome = 0;
-      let pitTax = 0;
-      if (pitEnabled) {
-        pitTax = computeTax(adjIncome, biz);
-      } else {
-        pitTax = 0;
-      }
+      // totals display
+      vatSummaryDiv.innerHTML = `<strong>VAT</strong><br/>Output VAT: ${currency}${formatNumber(vatOutputTotal)}<br/>Input VAT: ${currency}${formatNumber(vatInputTotal)}<br/><strong>VAT Payable: ${currency}${formatNumber(vatPayable)}</strong>`;
 
-      let effRate = incomeTotal > 0 ? ( (pitTax + citPayable + whtWithheldTotal + payeTotal) / incomeTotal ) * 100 : 0;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><br/>
+        Income: ${currency}${formatNumber(incomeTotal)}<br/>
+        Expenses: ${currency}${formatNumber(expenseTotal)}<br/>
+        COGS: ${currency}${formatNumber(cogsTotal)}<br/>
+        Capital allowances (annual): ${currency}${formatNumber(capitalAllowances)}<br/>
+        Net balance: ${currency}${formatNumber(netBalance)}`;
 
-      // VAT summary: show only when VAT enabled for the business
-      if (vatEnabled) {
-        vatSummaryDiv.style.display = '';
-        vatSummaryDiv.innerHTML =
-          `<strong>VAT Summary (${(vatRate*100).toFixed(2)}%):</strong><br>
-           VAT Output (Sales): ${currency}${formatNumber(vatOutputTotal)}<br>
-           VAT Input (Purchases): ${currency}${formatNumber(vatInputTotal)}<br>
-           <strong>VAT Payable:</strong> ${currency}${formatNumber(vatPayable)}`;
-      } else {
-        vatSummaryDiv.style.display = 'none';
-        vatSummaryDiv.innerHTML = '';
-      }
-
-      totalsSummaryDiv.style.display = ''; // totals always shown
-      totalsSummaryDiv.innerHTML =
-        `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
-         <strong>COGS:</strong> ${currency}${formatNumber(cogsTotal)}  |
-         <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
-         <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
-         <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
-
-      // Tax summary: combine items (PIT, PAYE, WHT, Capital allowances, CIT)
-      taxSummaryDiv.style.display = '';
-      taxSummaryDiv.innerHTML =
-        `<strong>Tax Summary:</strong><br>
-         <strong>PIT (on adjusted income):</strong> ${currency}${formatNumber(pitTax)}<br>
-         Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
-         Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
-         Taxable income for PIT: ${currency}${formatNumber(adjIncome)}<br>
-         <hr style="border:none;border-top:1px solid #eee;margin:6px 0;">
-         <strong>PAYE (on salaries):</strong> ${currency}${formatNumber(payeTotal)} ${payeEnabled ? '' : '<span class="muted">(PAYE disabled)</span>'}<br>
-         <strong>WHT Withheld (credit):</strong> ${currency}${formatNumber(whtWithheldTotal)}<br>
-         <strong>Capital allowances (annual):</strong> ${currency}${formatNumber(capitalAllowances)}<br>
-         <strong>Taxable profit for CIT (Income - COGS - Expenses - Capital allowances - PAYE - Deductions):</strong> ${currency}${formatNumber(taxableProfit)}<br>
-         <strong>CIT Rate:</strong> ${(citRate*100).toFixed(2)}%  | <strong>CIT Payable:</strong> ${currency}${formatNumber(citPayable)}<br>
-         <strong>Effective tax burden (PIT + PAYE + CIT + WHT):</strong> ${currency}${formatNumber(pitTax + payeTotal + citPayable + whtWithheldTotal)}<br>
-         Effective tax rate on gross income: ${effRate.toFixed(2)}%`;
-
+      taxSummaryDiv.innerHTML = `<strong>Taxes</strong><br/>
+        WHT withheld (approx): ${currency}${formatNumber(whtWithheldTotal)}<br/>
+        PAYE (on salaries): ${currency}${formatNumber(payeTotal)}<br/>
+        PIT (progressive): ${currency}${formatNumber(pitLiability)}<br/>
+        CIT taxable: ${currency}${formatNumber(citTaxable)}<br/>
+        CIT (at ${ (biz && typeof biz.citRate==='number') ? biz.citRate : DEFAULT_BUSINESS_TAX.citRate }%): ${currency}${formatNumber(citLiability)}<br/>
+        Rent relief applied: ${currency}${formatNumber(rentRelief)}
+      `;
     }
 
-    function computeTax(adjIncome, biz) {
-      // biz may include custom PIT slices in biz.pit (not exposed in UI now).
-      // If PIT disabled on business, return 0
-      if (biz && typeof biz.pitEnabled !== 'undefined' && !biz.pitEnabled) return 0;
-      const pit = (biz && biz.pit && Array.isArray(biz.pit.slices)) ? biz.pit : DEFAULT_PIT;
-      // If adjIncome <= threshold => 0
-      let tax = 0;
-      if (adjIncome > (pit.threshold || DEFAULT_PIT.threshold)) {
-        let taxable = adjIncome;
-        let remaining = taxable - (pit.threshold || DEFAULT_PIT.threshold);
-        // iterate slices
-        let prevUpper = (pit.threshold || DEFAULT_PIT.threshold);
-        for (let s of pit.slices) {
-          const upper = s.upTo;
-          let sliceLimit = (upper === Infinity) ? Infinity : (upper - prevUpper);
-          if (remaining <= 0) break;
-          const slice = Math.min(remaining, sliceLimit);
-          tax += slice * s.rate;
-          remaining -= slice;
-          prevUpper = upper;
-        }
-      }
-      return Math.max(0, Math.round(tax)); // tax in whole Naira
-    }
-
-    // --- Export / Import / Clear ---
+    // Export / Import / Clear
     btnExport.addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const now = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-      a.download = `ntc_data_export_${now}.json`;
+      a.download = 'ntc_data_export.json';
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     });
 
-    btnImport.addEventListener('click', () => {
-      fileInput.click();
-    });
+    btnImport.addEventListener('click', () => fileInput.click());
 
-    fileInput.addEventListener('change', (e) => {
-      const f = e.target.files[0];
+    fileInput.addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0];
       if (!f) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const imported = JSON.parse(ev.target.result);
-          if (!imported.users || !imported.businesses) throw new Error('Invalid format: missing users/businesses');
-          if (!confirm('Import will replace current data. Continue?')) return;
-          data = imported;
+      if (!confirm('Importing will replace current data. Continue?')) { fileInput.value = ''; return; }
+      try {
+        const text = await f.text();
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') {
+          data = parsed;
+          if (!data.users) data.users = [];
+          if (!data.businesses) data.businesses = [];
           if (!data.transactions) data.transactions = {};
-          // Ensure business defaults for compatibility
           data.businesses.forEach(b => ensureBizDefaults(b));
           saveData();
           refreshUserBusinessSelectors();
@@ -1123,65 +1041,46 @@ GitHub Copilot Chat Assistant
           currentPage = 1;
           renderLedger();
           calculateSummary();
-          alert('Import successful');
-        } catch (err) {
-          alert('Failed to import JSON: ' + err.message);
+          alert('Import successful.');
+        } else {
+          alert('Invalid file.');
         }
-      };
-      reader.readAsText(f);
-      // reset file input
-      fileInput.value = '';
+      } catch(err){
+        alert('Failed to import: ' + err.message);
+      } finally {
+        fileInput.value = '';
+      }
     });
 
     btnClearAll.addEventListener('click', () => {
-      if (!confirm('Clear ALL saved data (users, businesses, transactions)? This cannot be undone.')) return;
+      if (!confirm('Clear all stored data? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
+      data = { users: [], businesses: [], transactions: {} };
       loadData();
       refreshUserBusinessSelectors();
       ensureSelection();
       currentPage = 1;
       renderLedger();
       calculateSummary();
-      alert('All data cleared and reset to demo.');
     });
 
-    // --- Helpers ---
-    function formatNumber(n, fractionDigits=2) {
-      if (typeof n !== 'number') n = Number(n) || 0;
-      return n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits });
+    // initial render handlers for page load
+    function initialFixes(){
+      // wire modal close states for user and biz cancel buttons
+      userCancel.addEventListener('click', () => closeModal(userModal));
+      bizCancel.addEventListener('click', () => closeModal(businessModal));
     }
+    initialFixes();
 
-    function escapeHtml(s) {
-      if (!s) return '';
-      return s.replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    }
-
-    // close modal when overlay clicked
-    modalOverlay.addEventListener('click', () => {
-      // close any open modal
-      closeModal(userModal);
-      closeModal(businessModal);
-      closeModal(editModal);
+    // wire edit modal useful life display
+    editTxnDep.addEventListener('change', () => {
+      editTxnUsefulLabel.style.display = editTxnDep.checked ? '' : 'none';
+      if (!editTxnDep.checked) editTxnUseful.value = '';
     });
 
-    // Keyboard: Esc closes modals
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        closeModal(userModal);
-        closeModal(businessModal);
-        closeModal(editModal);
-      }
-    });
-
-    // Expose helper for debug (optional)
-    window._ntc = { data, saveData, loadData, refreshUserBusinessSelectors, renderLedger, calculateSummary };
-
-    // Initial focus improvements
-    setTimeout(()=>{ if (userSelect.options.length) userSelect.focus(); }, 300);
+    // ensure ledger and summary refresh on load
+    renderLedger();
+    calculateSummary();
   </script>
-
-  <footer>
-    <div class="muted">Notes: Data is stored locally in your browser (localStorage). For production or multi-device sharing, use a server-backed solution. This tool keeps VAT, WHT, PAYE and CIT per business and calculates straight-line capital allowances per depreciable transaction (annual depreciation). Rates and defaults are editable per business in Business settings.</div>
-  </footer>
 </body>
 </html>
