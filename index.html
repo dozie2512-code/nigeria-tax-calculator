@@ -76,6 +76,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
           <select id="txnType">
             <option value="Income">Income (Sales)</option>
             <option value="Expense">Expense (Purchase)</option>
+            <option value="COGS">COGS (Cost of Goods Sold)</option>
             <option value="Deduction">Deduction</option>
           </select>
         </label>
@@ -96,6 +97,9 @@ GitHub Copilot Chat Assistant — updated index.html below.
         </label>
         <label>Description: <input type="text" id="txnDesc" placeholder="Details" /></label>
         <label>Amount (₦): <input type="number" id="txnAmount" min="0" step="0.01" /></label>
+        <label><input type="checkbox" id="txnWhtApplied" /> WHT Applied</label>
+        <label><input type="checkbox" id="txnDepreciable" /> Depreciable (capital allowance)</label>
+        <label id="txnUsefulLifeLabel" style="display:none;">Useful life (yrs): <input type="number" id="txnUsefulLife" min="1" step="1" placeholder="Optional" style="width:80px;" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
       <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Use the search & pagination controls below to filter and navigate transactions.</small>
@@ -119,6 +123,8 @@ GitHub Copilot Chat Assistant — updated index.html below.
             <th>Description</th>
             <th>Amount (₦)</th>
             <th>VAT (₦)</th>
+            <th>WHT (₦)</th>
+            <th>Cap. Allow.</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -174,14 +180,20 @@ GitHub Copilot Chat Assistant — updated index.html below.
       <label>Notes: <input type="text" id="bizNotes" placeholder="Optional" /></label>
     </div>
     <div class="row">
+      <label>WHT rate (%): <input type="number" id="bizWhtRate" min="0" step="0.1" /></label>
+      <label>CIT rate (%): <input type="number" id="bizCitRate" min="0" step="0.1" /></label>
+      <label>Default useful life (yrs): <input type="number" id="bizDefaultUsefulLife" min="1" step="1" /></label>
+    </div>
+    <div class="row">
       <label><input type="checkbox" id="bizVatEnabled" /> Enable VAT</label>
       <label><input type="checkbox" id="bizPitEnabled" /> Enable PIT (tax)</label>
+      <label><input type="checkbox" id="bizPayeEnabled" /> Enable PAYE</label>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
     </div>
-    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria 2026 slices unless overridden programmatically.</small>
+    <small class="note">VAT & PIT toggles control whether VAT and personal income tax are computed for this business. VAT rate will be used to compute VAT per business. PIT logic defaults to Nigeria 2026 slices unless overridden programmatically. WHT (Withholding Tax) and CIT (Company Income Tax) rates can be customized per business.</small>
   </div>
 
   <div id="editModal" class="modal" aria-hidden="true">
@@ -191,6 +203,7 @@ GitHub Copilot Chat Assistant — updated index.html below.
       <select id="editTxnType">
         <option value="Income">Income (Sales)</option>
         <option value="Expense">Expense (Purchase)</option>
+        <option value="COGS">COGS (Cost of Goods Sold)</option>
         <option value="Deduction">Deduction</option>
       </select>
     </label><br/>
@@ -211,6 +224,9 @@ GitHub Copilot Chat Assistant — updated index.html below.
     </label><br/>
     <label>Description: <input type="text" id="editTxnDesc" /></label><br/>
     <label>Amount (₦): <input type="number" id="editTxnAmount" min="0" step="0.01" /></label><br/>
+    <label><input type="checkbox" id="editTxnWhtApplied" /> WHT Applied</label><br/>
+    <label><input type="checkbox" id="editTxnDepreciable" /> Depreciable (capital allowance)</label><br/>
+    <label id="editTxnUsefulLifeLabel" style="display:none;">Useful life (yrs): <input type="number" id="editTxnUsefulLife" min="1" step="1" placeholder="Optional" style="width:80px;" /></label><br/>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
       <button onclick="closeEditModal()">Cancel</button>
       <button class="primary" onclick="saveEdit()">Save</button>
@@ -271,6 +287,13 @@ GitHub Copilot Chat Assistant — updated index.html below.
             if (!data.users) data.users = [];
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
+            // *** BACKWARDS COMPATIBILITY: Set defaults for new business properties ***
+            data.businesses.forEach(b => {
+              if (typeof b.whtRate === 'undefined') b.whtRate = 5.0;
+              if (typeof b.citRate === 'undefined') b.citRate = 30.0;
+              if (typeof b.defaultUsefulLife === 'undefined') b.defaultUsefulLife = 5;
+              if (typeof b.payeEnabled === 'undefined') b.payeEnabled = false;
+            });
             return;
           }
         } catch(e) {
@@ -282,7 +305,21 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const bizId = uid('biz');
       data = {
         users: [{ id: userId, username: 'demo', display: 'Demo User', notes: 'Sample account' }],
-        businesses: [{ id: bizId, name: 'Demo Business', ownerId: userId, vatRate: 7.5, currency: '₦', threshold: 800000, notes: 'Sample business', vatEnabled: true, pitEnabled: true }],
+        businesses: [{ 
+          id: bizId, 
+          name: 'Demo Business', 
+          ownerId: userId, 
+          vatRate: 7.5, 
+          currency: '₦', 
+          threshold: 800000, 
+          notes: 'Sample business', 
+          vatEnabled: true, 
+          pitEnabled: true,
+          whtRate: 5.0,
+          citRate: 30.0,
+          defaultUsefulLife: 5,
+          payeEnabled: false
+        }],
         transactions: { [userId]: { [bizId]: [
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000 },
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000 }
@@ -333,6 +370,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
     const bizNotes = document.getElementById('bizNotes');
     const bizVatEnabled = document.getElementById('bizVatEnabled');
     const bizPitEnabled = document.getElementById('bizPitEnabled');
+    const bizWhtRate = document.getElementById('bizWhtRate');
+    const bizCitRate = document.getElementById('bizCitRate');
+    const bizDefaultUsefulLife = document.getElementById('bizDefaultUsefulLife');
+    const bizPayeEnabled = document.getElementById('bizPayeEnabled');
     const bizSave = document.getElementById('bizSave');
     const bizCancel = document.getElementById('bizCancel');
 
@@ -343,6 +384,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
     const editTxnCategory = document.getElementById('editTxnCategory');
     const editTxnDesc = document.getElementById('editTxnDesc');
     const editTxnAmount = document.getElementById('editTxnAmount');
+    const editTxnWhtApplied = document.getElementById('editTxnWhtApplied');
+    const editTxnDepreciable = document.getElementById('editTxnDepreciable');
+    const editTxnUsefulLife = document.getElementById('editTxnUsefulLife');
+    const editTxnUsefulLifeLabel = document.getElementById('editTxnUsefulLifeLabel');
 
     // Search & pagination UI
     const ledgerSearch = document.getElementById('ledgerSearch');
@@ -369,6 +414,18 @@ GitHub Copilot Chat Assistant — updated index.html below.
     currentPage = 1;
     renderLedger();
     calculateSummary();
+
+    // *** DEPRECIABLE CHECKBOX HANDLERS ***
+    // Add transaction form: show/hide useful life input based on depreciable checkbox
+    const txnDepreciable = document.getElementById('txnDepreciable');
+    const txnUsefulLifeLabel = document.getElementById('txnUsefulLifeLabel');
+    txnDepreciable.addEventListener('change', () => {
+      txnUsefulLifeLabel.style.display = txnDepreciable.checked ? '' : 'none';
+    });
+    // Edit transaction modal: show/hide useful life input based on depreciable checkbox
+    editTxnDepreciable.addEventListener('change', () => {
+      editTxnUsefulLifeLabel.style.display = editTxnDepreciable.checked ? '' : 'none';
+    });
 
     // --- User & Business management functions ---
     function refreshUserBusinessSelectors() {
@@ -521,6 +578,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       bizOwner.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
       bizVatEnabled.checked = true;
       bizPitEnabled.checked = true;
+      bizWhtRate.value = 5.0;
+      bizCitRate.value = 30.0;
+      bizDefaultUsefulLife.value = 5;
+      bizPayeEnabled.checked = false;
       bizEditingId = null;
       openModal(businessModal);
     });
@@ -538,6 +599,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       bizOwner.value = b.ownerId || (data.users[0] && data.users[0].id) || '';
       bizVatEnabled.checked = !!b.vatEnabled;
       bizPitEnabled.checked = (typeof b.pitEnabled === 'undefined') ? true : !!b.pitEnabled;
+      bizWhtRate.value = (typeof b.whtRate === 'number') ? b.whtRate : 5.0;
+      bizCitRate.value = (typeof b.citRate === 'number') ? b.citRate : 30.0;
+      bizDefaultUsefulLife.value = (typeof b.defaultUsefulLife === 'number') ? b.defaultUsefulLife : 5;
+      bizPayeEnabled.checked = !!b.payeEnabled;
       bizEditingId = b.id;
       openModal(businessModal);
     });
@@ -569,6 +634,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const threshold = Number(bizThreshold.value) || 800000;
       const vatEnabledVal = !!bizVatEnabled.checked;
       const pitEnabledVal = !!bizPitEnabled.checked;
+      const whtRateVal = parseFloat(bizWhtRate.value) || 5.0;
+      const citRateVal = parseFloat(bizCitRate.value) || 30.0;
+      const defaultUsefulLifeVal = parseInt(bizDefaultUsefulLife.value, 10) || 5;
+      const payeEnabledVal = !!bizPayeEnabled.checked;
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
       if (bizEditingId) {
@@ -582,6 +651,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
         b.notes = (bizNotes.value || '').trim();
         b.vatEnabled = vatEnabledVal;
         b.pitEnabled = pitEnabledVal;
+        b.whtRate = whtRateVal;
+        b.citRate = citRateVal;
+        b.defaultUsefulLife = defaultUsefulLifeVal;
+        b.payeEnabled = payeEnabledVal;
       } else {
         const id = uid('biz');
         data.businesses.push({
@@ -591,7 +664,11 @@ GitHub Copilot Chat Assistant — updated index.html below.
           threshold,
           notes: (bizNotes.value || '').trim(),
           vatEnabled: vatEnabledVal,
-          pitEnabled: pitEnabledVal
+          pitEnabled: pitEnabledVal,
+          whtRate: whtRateVal,
+          citRate: citRateVal,
+          defaultUsefulLife: defaultUsefulLifeVal,
+          payeEnabled: payeEnabledVal
         });
       }
       saveData();
@@ -619,6 +696,9 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const category = document.getElementById('txnCategory').value;
       const desc = document.getElementById('txnDesc').value.trim();
       const amount = parseFloat(document.getElementById('txnAmount').value) || 0;
+      const whtApplied = document.getElementById('txnWhtApplied').checked;
+      const depreciable = document.getElementById('txnDepreciable').checked;
+      const usefulLife = document.getElementById('txnUsefulLife').value ? parseInt(document.getElementById('txnUsefulLife').value, 10) : null;
 
       if (!selectedUserId || !selectedBusinessId) {
         alert('Select user and business before adding a transaction.');
@@ -628,7 +708,17 @@ GitHub Copilot Chat Assistant — updated index.html below.
         alert('Please fill all fields and enter a valid amount.');
         return;
       }
-      const txn = { id: uid('txn'), date, type, category, desc, amount };
+      const txn = { 
+        id: uid('txn'), 
+        date, 
+        type, 
+        category, 
+        desc, 
+        amount,
+        whtApplied: whtApplied || false,
+        depreciable: depreciable || false
+      };
+      if (usefulLife && usefulLife > 0) txn.usefulLife = usefulLife;
       if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
       if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
       data.transactions[selectedUserId][selectedBusinessId].push(txn);
@@ -645,6 +735,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       document.getElementById('txnAmount').value = "";
       document.getElementById('txnType').value = "Income";
       document.getElementById('txnCategory').value = "Salary";
+      document.getElementById('txnWhtApplied').checked = false;
+      document.getElementById('txnDepreciable').checked = false;
+      document.getElementById('txnUsefulLife').value = "";
+      document.getElementById('txnUsefulLifeLabel').style.display = 'none';
     }
 
     function renderLedger() {
@@ -680,6 +774,20 @@ GitHub Copilot Chat Assistant — updated index.html below.
       pageSlice.forEach((txn, idx) => {
         let vat = 0;
         if (biz && biz.vatEnabled && (txn.type === 'Income' || txn.type === 'Expense')) vat = txn.amount * vatRate;
+        
+        // *** WHT CALCULATION ***
+        let wht = 0;
+        const whtRate = (biz && typeof biz.whtRate === 'number') ? (biz.whtRate/100) : 0.05;
+        if (txn.whtApplied) wht = txn.amount * whtRate;
+        
+        // *** CAPITAL ALLOWANCE CALCULATION ***
+        let capAllow = '';
+        if (txn.depreciable) {
+          const usefulLifeYears = txn.usefulLife || (biz && biz.defaultUsefulLife) || 5;
+          const annualDep = txn.amount / usefulLifeYears;
+          capAllow = `${formatNumber(annualDep)}/yr`;
+        }
+        
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${txn.date}</td>
@@ -688,6 +796,8 @@ GitHub Copilot Chat Assistant — updated index.html below.
           <td>${escapeHtml(txn.desc)}</td>
           <td>${biz && biz.currency ? biz.currency : '₦'}${formatNumber(txn.amount)}</td>
           <td>${(vat && biz && biz.vatEnabled) ? (biz.currency || '₦') + formatNumber(vat) : ''}</td>
+          <td>${wht > 0 ? (biz.currency || '₦') + formatNumber(wht) : ''}</td>
+          <td>${capAllow}</td>
           <td>
             <div class="actions">
               <button class="small" onclick="openEditModal('${txn.id}')">Edit</button>
@@ -749,6 +859,10 @@ GitHub Copilot Chat Assistant — updated index.html below.
       editTxnCategory.value = t.category;
       editTxnDesc.value = t.desc;
       editTxnAmount.value = t.amount;
+      editTxnWhtApplied.checked = !!t.whtApplied;
+      editTxnDepreciable.checked = !!t.depreciable;
+      editTxnUsefulLife.value = t.usefulLife || '';
+      editTxnUsefulLifeLabel.style.display = t.depreciable ? '' : 'none';
       openModal(editModal);
     };
 
@@ -780,10 +894,24 @@ GitHub Copilot Chat Assistant — updated index.html below.
       const category = editTxnCategory.value;
       const desc = editTxnDesc.value.trim();
       const amount = parseFloat(editTxnAmount.value) || 0;
+      const whtApplied = editTxnWhtApplied.checked;
+      const depreciable = editTxnDepreciable.checked;
+      const usefulLife = editTxnUsefulLife.value ? parseInt(editTxnUsefulLife.value, 10) : null;
       if (!date || !desc || amount <= 0) { alert('Fill fields and enter valid amount'); return; }
       const txns = data.transactions[selectedUserId][selectedBusinessId];
       if (!txns || !txns[editIndex]) return;
-      txns[editIndex] = { ...txns[editIndex], date, type, category, desc, amount };
+      txns[editIndex] = { 
+        ...txns[editIndex], 
+        date, 
+        type, 
+        category, 
+        desc, 
+        amount,
+        whtApplied: whtApplied || false,
+        depreciable: depreciable || false
+      };
+      if (usefulLife && usefulLife > 0) txns[editIndex].usefulLife = usefulLife;
+      else delete txns[editIndex].usefulLife;
       saveData();
       closeEditModal();
       renderLedger();
@@ -797,16 +925,25 @@ GitHub Copilot Chat Assistant — updated index.html below.
   const currency = (biz && biz.currency) ? biz.currency : '₦';
   const vatRate = (biz && typeof biz.vatRate === 'number') ? (biz.vatRate/100) : 0.075;
   const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
+  const whtRate = (biz && typeof biz.whtRate === 'number') ? (biz.whtRate/100) : 0.05;
+  const citRate = (biz && typeof biz.citRate === 'number') ? (biz.citRate/100) : 0.30;
+  const defaultUsefulLife = (biz && typeof biz.defaultUsefulLife === 'number') ? biz.defaultUsefulLife : 5;
 
-  // Determine if PIT is enabled (default true if undefined)
+  // Determine if PIT, VAT, and PAYE are enabled
   const pitEnabled = biz ? (typeof biz.pitEnabled === 'undefined' ? true : !!biz.pitEnabled) : false;
   const vatEnabled = biz ? !!biz.vatEnabled : false;
+  const payeEnabled = biz ? !!biz.payeEnabled : false;
 
   // Use ledgerFiltered so summaries match the filtered view
   const txns = ledgerFiltered || [];
 
-  let incomeTotal = 0, expenseTotal = 0, deductionTotal = 0, rentTotal = 0;
+  // *** TRANSACTION AGGREGATION ***
+  let incomeTotal = 0, expenseTotal = 0, cogsTotal = 0, deductionTotal = 0, rentTotal = 0;
   let vatOutputTotal = 0, vatInputTotal = 0;
+  let whtWithheldTotal = 0; // WHT withheld across transactions
+  let salaryTotal = 0; // For PAYE calculation
+  let capitalAllowancesTotal = 0; // Sum of annual depreciation for depreciable assets
+  
   txns.forEach(txn => {
     if (txn.type === 'Income') {
       incomeTotal += txn.amount;
@@ -815,32 +952,63 @@ GitHub Copilot Chat Assistant — updated index.html below.
       expenseTotal += txn.amount;
       if (vatEnabled) vatInputTotal += txn.amount * vatRate;
       if (txn.category === 'Rent') rentTotal += txn.amount;
+      // Check if this is a Salary expense for PAYE
+      if (payeEnabled && txn.category.toLowerCase() === 'salary') {
+        salaryTotal += txn.amount;
+      }
+    } else if (txn.type === 'COGS') {
+      cogsTotal += txn.amount;
     } else if (txn.type === 'Deduction') {
       deductionTotal += txn.amount;
     }
+    
+    // *** WHT CALCULATION (per transaction) ***
+    if (txn.whtApplied) {
+      whtWithheldTotal += txn.amount * whtRate;
+    }
+    
+    // *** CAPITAL ALLOWANCE CALCULATION (per transaction) ***
+    if (txn.depreciable) {
+      const usefulLifeYears = txn.usefulLife || defaultUsefulLife;
+      const annualDep = txn.amount / usefulLifeYears;
+      capitalAllowancesTotal += annualDep;
+    }
   });
 
-  let netBalance = incomeTotal - expenseTotal;
+  // *** PAYE CALCULATION ***
+  let payeTotal = 0;
+  if (payeEnabled && salaryTotal > 0) {
+    // Use existing computeTax function for PAYE on aggregated salaries
+    payeTotal = computeTax(salaryTotal, biz);
+  }
+
+  let netBalance = incomeTotal - expenseTotal - cogsTotal;
   let vatPayable = (vatOutputTotal - vatInputTotal);
-  // rent relief: 20% of rent up to 500,000
+  
+  // Rent relief: 20% of rent up to 500,000 (for PIT calculation)
   let rentRelief = rentTotal * 0.20;
   if (rentRelief > 500000) rentRelief = 500000;
 
-  // taxable income after deductions and relief
+  // *** PIT CALCULATION (Personal Income Tax) ***
+  // Taxable income after deductions and relief for PIT
   let adjIncome = incomeTotal - deductionTotal - rentRelief;
   if (adjIncome < 0) adjIncome = 0;
 
-  // Tax calculation
-  let tax = 0;
+  let pitTax = 0;
   if (pitEnabled) {
-    tax = computeTax(adjIncome, biz);
-  } else {
-    tax = 0;
+    pitTax = computeTax(adjIncome, biz);
   }
 
-  let effRate = incomeTotal > 0 ? (tax / incomeTotal) * 100 : 0;
+  let pitEffRate = incomeTotal > 0 ? (pitTax / incomeTotal) * 100 : 0;
 
-  // VAT summary: show only when VAT enabled for the business
+  // *** CIT CALCULATION (Company Income Tax) ***
+  // Taxable profit = Income - COGS - Expenses - Capital Allowances - PAYE - Deductions
+  let taxableProfit = incomeTotal - cogsTotal - expenseTotal - capitalAllowancesTotal - payeTotal - deductionTotal;
+  if (taxableProfit < 0) taxableProfit = 0;
+  let citPayable = taxableProfit * citRate;
+  if (citPayable < 0) citPayable = 0;
+
+  // *** VAT SUMMARY ***
   if (vatEnabled) {
     vatSummaryDiv.style.display = '';
     vatSummaryDiv.innerHTML =
@@ -853,24 +1021,60 @@ GitHub Copilot Chat Assistant — updated index.html below.
     vatSummaryDiv.innerHTML = '';
   }
 
-  totalsSummaryDiv.style.display = ''; // totals always shown
+  // *** TOTALS SUMMARY ***
+  totalsSummaryDiv.style.display = '';
   totalsSummaryDiv.innerHTML =
     `<strong>Income:</strong> ${currency}${formatNumber(incomeTotal)}  | 
+     <strong>COGS:</strong> ${currency}${formatNumber(cogsTotal)}  | 
      <strong>Expenses:</strong> ${currency}${formatNumber(expenseTotal)}  | 
      <strong>Deductions:</strong> ${currency}${formatNumber(deductionTotal)}  | 
      <strong>Net Balance:</strong> ${currency}${formatNumber(netBalance)}`;
 
-  // PIT summary: show only when PIT enabled
+  // *** TAX SUMMARY (PIT + WHT + PAYE + CIT) ***
+  let taxSummaryContent = '';
+  
+  // Show PIT summary if PIT enabled
   if (pitEnabled) {
-    taxSummaryDiv.style.display = '';
-    taxSummaryDiv.innerHTML =
-      `<strong>Tax Calculation (PIT):</strong><br>
+    taxSummaryContent += `<strong>Personal Income Tax (PIT):</strong><br>
        Tax-free threshold: ${currency}${formatNumber(threshold)}<br>
        Rent relief applied: ${currency}${formatNumber(rentRelief)}<br>
        Taxable income after deductions: ${currency}${formatNumber(adjIncome)}<br>
-       <strong>Tax payable:</strong> ${currency}${formatNumber(tax,0)}<br>
-       Effective tax rate on gross income: ${effRate.toFixed(2)}%<br>
-       ${adjIncome <= threshold ? `<strong>No tax payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong>` : ''}`;
+       <strong>PIT payable:</strong> ${currency}${formatNumber(pitTax,0)}<br>
+       Effective PIT rate on gross income: ${pitEffRate.toFixed(2)}%<br>
+       ${adjIncome <= threshold ? `<strong>No PIT payable (taxable income ≤ ${currency}${formatNumber(threshold)})</strong><br>` : ''}<br>`;
+  }
+  
+  // Show WHT summary (always show if any WHT withheld)
+  if (whtWithheldTotal > 0) {
+    taxSummaryContent += `<strong>Withholding Tax (WHT) at ${(whtRate*100).toFixed(1)}%:</strong><br>
+       Total WHT withheld: ${currency}${formatNumber(whtWithheldTotal)}<br>
+       <em>(WHT is treated as tax credit)</em><br><br>`;
+  }
+  
+  // Show PAYE summary if PAYE enabled
+  if (payeEnabled) {
+    taxSummaryContent += `<strong>PAYE (Pay As You Earn):</strong><br>
+       Total Salary expenses: ${currency}${formatNumber(salaryTotal)}<br>
+       PAYE withheld: ${currency}${formatNumber(payeTotal,0)}<br>
+       <em>(PAYE is deducted from taxable profit for CIT)</em><br><br>`;
+  }
+  
+  // Show Capital Allowances summary if any depreciable assets
+  if (capitalAllowancesTotal > 0) {
+    taxSummaryContent += `<strong>Capital Allowances (Straight-line Depreciation):</strong><br>
+       Total annual depreciation: ${currency}${formatNumber(capitalAllowancesTotal)}<br>
+       <em>(Reduces taxable profit for CIT)</em><br><br>`;
+  }
+  
+  // Show CIT summary (always show for businesses)
+  taxSummaryContent += `<strong>Company Income Tax (CIT) at ${(citRate*100).toFixed(1)}%:</strong><br>
+     Taxable Profit = Income (${currency}${formatNumber(incomeTotal)}) - COGS (${currency}${formatNumber(cogsTotal)}) - Expenses (${currency}${formatNumber(expenseTotal)}) - Capital Allowances (${currency}${formatNumber(capitalAllowancesTotal)}) - PAYE (${currency}${formatNumber(payeTotal,0)}) - Deductions (${currency}${formatNumber(deductionTotal)})<br>
+     Taxable Profit: ${currency}${formatNumber(taxableProfit)}<br>
+     <strong>CIT Payable:</strong> ${currency}${formatNumber(citPayable,0)}<br>`;
+  
+  if (taxSummaryContent) {
+    taxSummaryDiv.style.display = '';
+    taxSummaryDiv.innerHTML = taxSummaryContent;
   } else {
     taxSummaryDiv.style.display = 'none';
     taxSummaryDiv.innerHTML = '';
