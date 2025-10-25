@@ -27,7 +27,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(760px,96vw); max-height:78vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(760px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -115,7 +115,7 @@
         <label id="txnUsefulLifeLabel" style="display:none;">Useful life (yrs): <input type="number" id="txnUsefulLife" class="smallInput" min="1" step="1" /></label>
         <button class="primary" id="btnAddTxn">Add Transaction</button>
       </div>
-      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Mark 'Depreciable' for capital allowance (straight-line).</small>
+      <small class="note">Transactions are saved per selected user and business. VAT rate & tax rules are per business (editable in Business settings). Mark 'Depreciable' for capital allowance (straight-line)</small>
     </section>
 
     <section class="panel section">
@@ -301,8 +301,6 @@
       payeEnabled: true
     };
 
-    // data structure:
-    // { users: [], businesses: [{id,name,ownerId,vatRate,whtRate,citRate,defaultUsefulLifeYears,currency,threshold,notes,vatEnabled,pitEnabled,payeEnabled,accounts:[{id,name}]}], transactions: { [userId]: { [bizId]: [txn...] } }, inventories: { [bizId]: [ {id,sku,name,qty,unitCost,avgCost} ] } }
     let data = { users: [], businesses: [], transactions: {}, inventories: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
@@ -383,11 +381,10 @@
       saveData();
     }
 
-    // migrate older transactions that used type/category into business accounts
     function migrateTransactionsToAccounts(){
       for (const b of data.businesses || []) ensureBizDefaults(b);
-      for (const uid of Object.keys(data.transactions || {})){
-        const perUser = data.transactions[uid] || {};
+      for (const uidKey of Object.keys(data.transactions || {})){
+        const perUser = data.transactions[uidKey] || {};
         for (const bid of Object.keys(perUser || {})){
           const arr = perUser[bid] || [];
           for (const txn of arr){
@@ -550,7 +547,6 @@
     let inventoryEditingId = null;
     let editingTxnRef = null;
 
-    // helper - compute PIT on an income value using DEFAULT_PIT slices and business threshold
     function computePIT(income, biz){
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
       if (income <= threshold) return 0;
@@ -596,7 +592,6 @@
     renderLedger();
     calculateSummary();
     renderInventory();
-    // set today's date in form
     const today = new Date().toISOString().slice(0,10);
     document.getElementById('txnDate').value = today;
 
@@ -675,11 +670,9 @@
       const u = findUser(selectedUserId);
       if (!u) return;
       if (!confirm(`Delete user "${u.display || u.username}" and all their businesses & transactions? This action cannot be undone.`)) return;
-      // Delete user's businesses and transactions
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
       delete data.transactions[u.id];
       data.users = data.users.filter(x => x.id !== u.id);
-      // Remove inventories for deleted businesses (since businesses removed)
       const remainingBizIds = new Set(data.businesses.map(b => b.id));
       const newInventories = {};
       for (const bid of Object.keys(data.inventories || {})) {
@@ -780,8 +773,8 @@
       if (!b) return;
       if (!confirm(`Delete business "${b.name}" and all its transactions for all users? This action cannot be undone.`)) return;
       data.businesses = data.businesses.filter(x => x.id !== b.id);
-      for (const uid of Object.keys(data.transactions)) {
-        if (data.transactions[uid] && data.transactions[uid][b.id]) delete data.transactions[uid][b.id];
+      for (const uidKey of Object.keys(data.transactions)) {
+        if (data.transactions[uidKey] && data.transactions[uidKey][b.id]) delete data.transactions[uidKey][b.id];
       }
       if (data.inventories && data.inventories[b.id]) delete data.inventories[b.id];
       saveData();
@@ -826,17 +819,16 @@
         b.vatEnabled = vatEnabledVal;
         b.pitEnabled = pitEnabledVal;
         b.payeEnabled = payeEnabledVal;
-        // update accounts - preserve ids where names match; create new ids for new names
         const newAccounts = [];
-        parsedAccounts.forEach(name => {
-          const existing = b.accounts.find(a=>a.name===name);
+        parsedAccounts.forEach(nameVal => {
+          const existing = b.accounts.find(a=>a.name===nameVal);
           if (existing) newAccounts.push(existing);
-          else newAccounts.push({ id: uid('acct'), name });
+          else newAccounts.push({ id: uid('acct'), name: nameVal });
         });
         b.accounts = newAccounts;
       } else {
         const id = uid('biz');
-        const accounts = parsedAccounts.map(name => ({ id: uid('acct'), name }));
+        const accounts = parsedAccounts.map(nameVal => ({ id: uid('acct'), name: nameVal }));
         data.businesses.push({
           id, name, ownerId: ownerIdVal,
           vatRate: isNaN(vat) ? 7.5 : vat,
@@ -891,7 +883,6 @@
     // Inventory action behaviour (hide/show fields)
     txnInventoryAction.addEventListener('change', () => {
       const v = txnInventoryAction.value;
-      // hide all inventory-related fields first
       invItemLabel.style.display = 'none';
       invNewSkuLabel.style.display = 'none';
       invNewNameLabel.style.display = 'none';
@@ -899,10 +890,8 @@
       invUnitCostLabel.style.display = 'none';
       invSalePriceLabel.style.display = 'none';
 
-      // When no inventory action, show standard txn fields
       if (v === 'None') {
         invItemLabel.style.display = 'none';
-        // Restore transaction-related labels/controls
         descLabel.style.display = '';
         amountLabel.style.display = '';
         acctLabel.style.display = '';
@@ -914,7 +903,6 @@
         return;
       }
 
-      // Inventory action selected -> show inventory fields; hide txn fields
       invItemLabel.style.display = '';
       if (v === 'Add' || v === 'Purchase') {
         invNewSkuLabel.style.display = '';
@@ -930,7 +918,6 @@
         invSalePriceLabel.style.display = '';
       }
 
-      // Hide transaction fields when performing inventory action
       descLabel.style.display = 'none';
       amountLabel.style.display = 'none';
       acctLabel.style.display = 'none';
@@ -974,7 +961,6 @@
     }
 
     function populateAccountSelect(){
-      // populate txnAccount and editTxnAccount for current selectedBusinessId
       [txnAccount, editTxnAccount].forEach(sel=>{
         if (!sel) return;
         sel.innerHTML = '';
@@ -998,338 +984,282 @@
       });
     }
 
-    // Inventory helpers: find and update
-    function findInventoryItem(bizId, itemId) {
-      ensureInventoriesForBusiness(bizId);
-      return (data.inventories[bizId] || []).find(it => it.id === itemId);
-    }
+    // Add Transaction logic (core change: reset inventory action to None after add)
+    btnAddTxn.addEventListener('click', () => {
+      if (!selectedUserId) return alert('Select a user');
+      if (!selectedBusinessId) return alert('Select a business');
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) return alert('Invalid business');
 
-    function addNewInventoryItem(bizId, sku, name, qty, unitCost){
-      ensureInventoriesForBusiness(bizId);
-      const item = { id: uid('inv'), sku: sku || '', name: name || '', qty: Number(qty) || 0, unitCost: Number(unitCost) || 0, avgCost: Number(unitCost) || 0 };
-      data.inventories[bizId].push(item);
-      saveData();
-      return item;
-    }
+      const date = document.getElementById('txnDate').value || new Date().toISOString().slice(0,10);
+      const inventoryAction = txnInventoryAction.value || 'None';
 
-    function updateAverageCostOnPurchase(bizId, itemId, purchaseQty, purchaseCost) {
-      const item = findInventoryItem(bizId, itemId);
-      if (!item) return;
-      const oldQty = Number(item.qty || 0);
-      const oldAvgCost = Number(item.avgCost || item.unitCost || 0);
-      const pQty = Number(purchaseQty || 0);
-      const pCost = Number(purchaseCost || 0);
-      const totalCost = (oldQty * oldAvgCost) + (pQty * pCost);
-      const newQty = oldQty + pQty;
-      item.qty = newQty;
-      item.avgCost = newQty > 0 ? (totalCost / newQty) : pCost;
-      item.unitCost = item.avgCost;
-    }
+      // Ensure transactions structure
+      if (!data.transactions) data.transactions = {};
+      if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+      if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
 
-    function recordSaleAndCOGS(userId, bizId, itemId, saleQty, salePrice) {
-      const item = findInventoryItem(bizId, itemId);
-      if (!item) { alert('Item not found'); return false; }
-      const qtyAvailable = Number(item.qty || 0);
-      const qtyToSell = Number(saleQty || 0);
-      if (qtyToSell <= 0) { alert('Quantity must be > 0'); return false; }
-      if (qtyAvailable < qtyToSell) { alert('Not enough inventory to sell'); return false; }
-      const avgCost = Number(item.avgCost || item.unitCost || 0);
-      // decrement inventory
-      item.qty = qtyAvailable - qtyToSell;
-
-      // sales account
-      const biz = findBiz(bizId);
-      ensureBizDefaults(biz);
-      let salesAccount = biz.accounts.find(a => a.name.toLowerCase() === 'sales');
-      if (!salesAccount) salesAccount = biz.accounts[0] || { id: '', name: 'Sales' };
-
-      // cogs account
-      let cogsAccount = biz.accounts.find(a => a.name.toLowerCase() === 'cogs');
-
-      // create sale txn
-      addTransaction(userId, bizId, {
-        id: uid('txn'),
-        date: new Date().toISOString().slice(0,10),
-        accountId: salesAccount.id,
-        accountName: salesAccount.name,
-        desc: `Inventory Sale - ${item.sku || item.name}`,
-        amount: Number(salePrice || 0) * qtyToSell,
-        vatApplied: biz.vatEnabled ? Boolean(biz.vatEnabled) : false,
-        whtApplied: false,
-        depreciable: false
-      });
-
-      // create COGS txn if account exists
-      if (cogsAccount) {
-        addTransaction(userId, bizId, {
+      // handle inventory actions
+      if (inventoryAction === 'None') {
+        // normal transaction
+        const accountId = txnAccount.value || '';
+        if (!accountId) return alert('Select an account for the transaction.');
+        const amount = parseFloat(document.getElementById('txnAmount').value || '0');
+        if (isNaN(amount) || amount <= 0) return alert('Enter a valid amount.');
+        const desc = (document.getElementById('txnDesc').value || '').trim();
+        const whtApplied = !!txnWht.checked;
+        const depApplied = !!txnDep.checked;
+        const useful = depApplied ? (parseInt(txnUsefulLife.value) || biz.defaultUsefulLifeYears) : null;
+        const acct = findAccount(selectedBusinessId, accountId);
+        const txn = {
           id: uid('txn'),
-          date: new Date().toISOString().slice(0,10),
-          accountId: cogsAccount.id,
-          accountName: cogsAccount.name,
-          desc: `COGS - ${item.sku || item.name}`,
-          amount: Number(avgCost) * qtyToSell,
-          vatApplied: false,
-          whtApplied: false,
-          depreciable: false
-        });
+          date, accountId, accountName: acct ? acct.name : '',
+          description: desc,
+          amount,
+          vat: (biz.vatEnabled && typeof biz.vatRate === 'number') ? (amount * (biz.vatRate/100)) : 0,
+          wht: whtApplied ? (amount * ((biz.whtRate || DEFAULT_BUSINESS_TAX.whtRate)/100)) : 0,
+          depreciable: depApplied,
+          usefulLifeYears: useful
+        };
+        data.transactions[selectedUserId][selectedBusinessId].push(txn);
       } else {
-        // if no COGS account exists, optionally create one
-        const newCogs = { id: uid('acct'), name: 'COGS' };
-        biz.accounts.push(newCogs);
-        saveData();
-        addTransaction(userId, bizId, {
-          id: uid('txn'),
-          date: new Date().toISOString().slice(0,10),
-          accountId: newCogs.id,
-          accountName: newCogs.name,
-          desc: `COGS - ${item.sku || item.name}`,
-          amount: Number(avgCost) * qtyToSell,
-          vatApplied: false,
-          whtApplied: false,
-          depreciable: false
-        });
+        // Inventory operations: Add / Purchase / Sale
+        ensureInventoriesForBusiness(selectedBusinessId);
+        const items = data.inventories[selectedBusinessId];
+        const selectedItemId = invItemSelect.value;
+        const qty = parseInt(invQty.value || '0') || 0;
+        if (qty <= 0) return alert('Enter a valid quantity for inventory operation.');
+        if (inventoryAction === 'Add' || inventoryAction === 'Purchase') {
+          let item = null;
+          if (selectedItemId && selectedItemId !== '__new__') {
+            item = items.find(i => i.id === selectedItemId);
+            if (!item) return alert('Selected inventory item not found.');
+            // update avg cost if unit cost provided
+            const unitCost = parseFloat(invUnitCost.value || '0') || 0;
+            if (unitCost > 0) {
+              const prevVal = (item.avgCost || item.unitCost || 0) * (item.qty || 0);
+              const addVal = unitCost * qty;
+              const newQty = (item.qty || 0) + qty;
+              item.qty = newQty;
+              item.unitCost = unitCost;
+              item.avgCost = newQty ? ((prevVal + addVal) / newQty) : unitCost;
+            } else {
+              item.qty = (item.qty || 0) + qty;
+            }
+          } else {
+            // new item
+            const sku = (invNewSku.value || '').trim();
+            const name = (invNewName.value || '').trim();
+            const unitCost = parseFloat(invUnitCost.value || '0') || 0;
+            const newItem = { id: uid('inv'), sku, name, qty: qty, unitCost: unitCost || 0, avgCost: unitCost || 0 };
+            items.push(newItem);
+          }
+
+          // record a transaction for purchase/add: record value if unit cost provided
+          const unitCostVal = parseFloat(invUnitCost.value || '0') || 0;
+          const value = unitCostVal * qty;
+          if (value > 0) {
+            const acct = (biz.accounts && biz.accounts.find(a=>a.name==='Purchases')) ? biz.accounts.find(a=>a.name==='Purchases') : (biz.accounts && biz.accounts[0]);
+            const txn = {
+              id: uid('txn'),
+              date,
+              accountId: acct ? acct.id : '',
+              accountName: acct ? acct.name : 'Purchases',
+              description: `${inventoryAction} inventory (${qty} units)`,
+              amount: value,
+              vat: (biz.vatEnabled && typeof biz.vatRate === 'number') ? (value * (biz.vatRate/100)) : 0,
+              wht: 0,
+              inventoryAction,
+              inventoryItemId: selectedItemId === '__new__' ? (items[items.length-1] && items[items.length-1].id) : selectedItemId,
+              qty
+            };
+            data.transactions[selectedUserId][selectedBusinessId].push(txn);
+          }
+        } else if (inventoryAction === 'Sale') {
+          // sale: reduce qty
+          if (!selectedItemId || selectedItemId === '__new__') return alert('Select an existing item to sell.');
+          const item = items.find(i => i.id === selectedItemId);
+          if (!item) return alert('Selected item not found.');
+          if ((item.qty || 0) < qty) return alert('Insufficient quantity available.');
+          const salePrice = parseFloat(invSalePrice.value || '0') || 0;
+          const value = salePrice * qty;
+          item.qty = (item.qty || 0) - qty;
+          // create sales txn
+          const acct = (biz.accounts && biz.accounts.find(a=>a.name==='Sales')) ? biz.accounts.find(a=>a.name==='Sales') : (biz.accounts && biz.accounts[0]);
+          const txn = {
+            id: uid('txn'),
+            date,
+            accountId: acct ? acct.id : '',
+            accountName: acct ? acct.name : 'Sales',
+            description: `Sale of ${item.name || item.sku || ''} (${qty})`,
+            amount: value,
+            vat: (biz.vatEnabled && typeof biz.vatRate === 'number') ? (value * (biz.vatRate/100)) : 0,
+            wht: 0,
+            inventoryAction,
+            inventoryItemId: selectedItemId,
+            qty
+          };
+          data.transactions[selectedUserId][selectedBusinessId].push(txn);
+        }
       }
+
+      // Persist and update UI
       saveData();
       renderLedger();
-      renderInventory();
       calculateSummary();
-      return true;
-    }
+      renderInventory();
 
-    // Add transaction helper
-    function addTransaction(userId, bizId, txn) {
-      if (!userId || !bizId) return;
-      if (!data.transactions[userId]) data.transactions[userId] = {};
-      if (!data.transactions[userId][bizId]) data.transactions[userId][bizId] = [];
-      data.transactions[userId][bizId].push(txn);
-    }
+      // Reset form fields to defaults
+      document.getElementById('txnDesc').value = '';
+      document.getElementById('txnAmount').value = '';
+      txnWht.checked = false;
+      txnDep.checked = false;
+      txnUsefulLife.value = '';
+      invItemSelect.value = '';
+      invNewSku.value = '';
+      invNewName.value = '';
+      invQty.value = '';
+      invUnitCost.value = '';
+      invSalePrice.value = '';
 
-    // Add txn button handler (handles normal txns and inventory actions)
-    btnAddTxn.addEventListener('click', () => {
-      if (!selectedUserId || !selectedBusinessId) { alert('Select user and business'); return; }
-      const action = txnInventoryAction.value;
-      if (action === 'None') {
-        const acctId = txnAccount.value;
-        const desc = (document.getElementById('txnDesc').value || '').trim();
-        const amount = Number(document.getElementById('txnAmount').value) || 0;
-        if (!acctId) { alert('Select an account'); return; }
-        if (!desc) { if (!confirm('No description provided. Continue?')) return; }
-        addTransaction(selectedUserId, selectedBusinessId, {
-          id: uid('txn'),
-          date: document.getElementById('txnDate').value || new Date().toISOString().slice(0,10),
-          accountId: acctId,
-          accountName: (findAccount(selectedBusinessId, acctId) || {}).name || '',
-          desc,
-          amount,
-          whtApplied: !!txnWht.checked,
-          depreciable: !!txnDep.checked
-        });
-        saveData();
-        renderLedger();
-        calculateSummary();
-        return;
-      }
+      // Reset Inventory action to 'None' and update UI
+      document.getElementById('txnInventoryAction').value = 'None';
+      document.getElementById('txnInventoryAction').dispatchEvent(new Event('change'));
 
-      if (action === 'Add' || action === 'Purchase') {
-        const sel = invItemSelect.value;
-        let item = null;
-        if (!sel) { alert('Select an item or choose New item'); return; }
-        const qtyVal = Number(invQty.value) || 0;
-        const unitCostVal = Number(invUnitCost.value) || 0;
-        if (qtyVal <= 0) { alert('Quantity must be a positive number'); return; }
-        if (sel === '__new__') {
-          const sku = (invNewSku.value || '').trim();
-          const name = (invNewName.value || '').trim();
-          item = addNewInventoryItem(selectedBusinessId, sku, name, qtyVal, unitCostVal);
-        } else {
-          item = findInventoryItem(selectedBusinessId, sel);
-          if (!item) { alert('Selected item not found'); return; }
-        }
-
-        // For 'Add' we just increase qty and optionally recalc avg if unit cost provided; for 'Purchase' treat as purchase (avg cost)
-        if (action === 'Add') {
-          item.qty = Number(item.qty || 0) + qtyVal;
-          if (unitCostVal > 0) {
-            // update avg cost if provided
-            updateAverageCostOnPurchase(selectedBusinessId, item.id, qtyVal, unitCostVal);
-          }
-          saveData();
-          renderInventory();
-          renderLedger();
-          calculateSummary();
-          return;
-        }
-
-        if (action === 'Purchase') {
-          // update avg cost
-          updateAverageCostOnPurchase(selectedBusinessId, item.id, qtyVal, unitCostVal);
-
-          // create purchase transaction mapped to Purchases or COGS
-          const biz = findBiz(selectedBusinessId);
-          ensureBizDefaults(biz);
-          let purchasesAcct = biz.accounts.find(a => a.name.toLowerCase() === 'purchases') || biz.accounts.find(a => a.name.toLowerCase() === 'cogs') || biz.accounts[0];
-          addTransaction(selectedUserId, selectedBusinessId, {
-            id: uid('txn'),
-            date: document.getElementById('txnDate').value || new Date().toISOString().slice(0,10),
-            accountId: purchasesAcct.id,
-            accountName: purchasesAcct.name,
-            desc: `Purchase - ${item.sku || item.name}`,
-            amount: qtyVal * unitCostVal,
-            whtApplied: false,
-            depreciable: false
-          });
-          saveData();
-          renderInventory();
-          renderLedger();
-          calculateSummary();
-          return;
-        }
-      }
-
-      if (action === 'Sale') {
-        const sel = invItemSelect.value;
-        if (!sel || sel === '__new__') { alert('Select an existing item to sell'); return; }
-        const qtyVal = Number(invQty.value) || 0;
-        const salePriceVal = Number(invSalePrice.value) || 0;
-        if (qtyVal <= 0) { alert('Quantity must be positive'); return; }
-        if (salePriceVal < 0) { alert('Enter valid sale price'); return; }
-        const ok = recordSaleAndCOGS(selectedUserId, selectedBusinessId, sel, qtyVal, salePriceVal);
-        if (ok) {
-          // optionally create VAT handling within sale txn already created
-          renderLedger();
-          calculateSummary();
-          renderInventory();
-        }
-        return;
-      }
+      // Reset to first page
+      currentPage = 1;
     });
 
-    // Ledger rendering & actions
+    // Ledger rendering and utilities
     function getCurrentTxns(){
       if (!selectedUserId || !selectedBusinessId) return [];
-      return (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) ? data.transactions[selectedUserId][selectedBusinessId] : [];
+      if (!data.transactions) return [];
+      const byUser = data.transactions[selectedUserId] || {};
+      return byUser[selectedBusinessId] || [];
     }
 
     function renderLedger(){
       ledgerTbody.innerHTML = '';
-      let txns = getCurrentTxns().slice().reverse(); // latest first
-      if (ledgerSearch.value && ledgerSearch.value.trim()) {
-        const q = ledgerSearch.value.trim().toLowerCase();
-        txns = txns.filter(t => (t.date||'').toLowerCase().includes(q) || (t.accountName||'').toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q) || String(t.amount||'').includes(q));
-      }
-      const totalPages = Math.max(1, Math.ceil(txns.length / PAGE_SIZE));
+      const all = getCurrentTxns().slice().sort((a,b)=> (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
+      const filtered = ledgerFilterText ? all.filter(t => {
+        const q = ledgerFilterText.toLowerCase();
+        return (t.date && t.date.toLowerCase().includes(q)) ||
+               (t.accountName && t.accountName.toLowerCase().includes(q)) ||
+               (t.description && t.description.toLowerCase().includes(q)) ||
+               (String(t.amount || '').toLowerCase().includes(q));
+      }) : all;
+
+      const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
       if (currentPage > totalPages) currentPage = totalPages;
-      const start = (currentPage - 1) * PAGE_SIZE;
-      const pageTxns = txns.slice(start, start + PAGE_SIZE);
-      pageTxns.forEach((t, idx)=>{
+      const start = (currentPage-1) * PAGE_SIZE;
+      const pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+      pageItems.forEach(txn => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHtml(t.date || '')}</td>
-                        <td>${escapeHtml(t.accountName || (findAccount(selectedBusinessId, t.accountId) || {}).name || '')}</td>
-                        <td>${escapeHtml(t.desc || '')}</td>
-                        <td style="text-align:right">${formatNumber(t.amount || 0)}</td>
-                        <td>${t.vatApplied ? 'Yes' : ''}</td>
-                        <td>${t.whtApplied ? 'Yes' : ''}</td>
-                        <td>${t.depreciable ? (t.usefulLife || '') : ''}</td>
-                        <td><button class="small" data-idx="${start + idx}" data-id="${t.id}" onclick="editTxnHandler(event)">Edit</button>
-                            <button class="small danger" data-idx="${start + idx}" data-id="${t.id}" onclick="deleteTxnHandler(event)">Delete</button></td>`;
+        tr.innerHTML = `
+          <td>${escapeHtml(txn.date || '')}</td>
+          <td>${escapeHtml(txn.accountName || '')}</td>
+          <td>${escapeHtml(txn.description || '')}${txn.inventoryAction ? '<div class="muted">['+escapeHtml(txn.inventoryAction)+']</div>' : ''}</td>
+          <td style="white-space:nowrap;">${formatNumber(txn.amount || 0)}</td>
+          <td style="white-space:nowrap;">${formatNumber(txn.vat || 0)}</td>
+          <td style="white-space:nowrap;">${formatNumber(txn.wht || 0)}</td>
+          <td>${txn.depreciable ? (txn.usefulLifeYears || '') : ''}</td>
+          <td>
+            <div class="actions">
+              <button class="small" data-id="${txn.id}" data-action="edit">Edit</button>
+              <button class="small danger" data-id="${txn.id}" data-action="delete">Delete</button>
+            </div>
+          </td>
+        `;
         ledgerTbody.appendChild(tr);
       });
+
       pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+
+      // action handlers
+      ledgerTbody.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          const id = btn.getAttribute('data-id');
+          const action = btn.getAttribute('data-action');
+          if (action === 'delete') {
+            if (!confirm('Delete this transaction?')) return;
+            deleteTransaction(id);
+          } else if (action === 'edit') {
+            openEditTransaction(id);
+          }
+        });
+      });
     }
 
-    window.editTxnHandler = function(e){
-      const btn = e.target;
-      const idx = Number(btn.getAttribute('data-idx'));
-      const txns = getCurrentTxns().slice().reverse();
-      const t = txns[idx];
-      if (!t) return alert('Transaction not found');
-      editingTxnRef = { indexFromEnd: idx }; // store to map back
-      editTxnDate.value = t.date || '';
-      editTxnDesc.value = t.desc || '';
-      editTxnAmount.value = t.amount || 0;
-      editTxnWht.checked = !!t.whtApplied;
-      editTxnDep.checked = !!t.depreciable;
-      editTxnUseful.value = t.usefulLife || '';
-      editTxnUsefulLabel.style.display = editTxnDep.checked ? '' : 'none';
+    function deleteTransaction(txnId){
+      if (!selectedUserId || !selectedBusinessId) return;
+      const arr = data.transactions[selectedUserId][selectedBusinessId] || [];
+      const idx = arr.findIndex(t => t.id === txnId);
+      if (idx === -1) return;
+      arr.splice(idx,1);
+      saveData();
+      renderLedger();
+      calculateSummary();
+    }
+
+    function openEditTransaction(txnId){
+      if (!selectedUserId || !selectedBusinessId) return;
+      const arr = data.transactions[selectedUserId][selectedBusinessId] || [];
+      const txn = arr.find(t=>t.id===txnId);
+      if (!txn) return alert('Transaction not found.');
+      editingTxnRef = { userId: selectedUserId, bizId: selectedBusinessId, txnId: txnId };
+      editTxnDate.value = txn.date || '';
       populateAccountSelect();
-      // set account select
-      if (t.accountId) editTxnAccount.value = t.accountId;
+      if (txn.accountId) editTxnAccount.value = txn.accountId;
+      editTxnDesc.value = txn.description || '';
+      editTxnAmount.value = txn.amount || '';
+      editTxnWht.checked = !!txn.wht;
+      editTxnDep.checked = !!txn.depreciable;
+      editTxnUseful.value = txn.usefulLifeYears || '';
+      editTxnUsefulLabel.style.display = editTxnDep.checked ? '' : 'none';
       openModal(editModal);
-    };
+    }
 
     editCancelBtn.addEventListener('click', () => closeModal(editModal));
+
     editSaveBtn.addEventListener('click', () => {
-      if (!editingTxnRef) return closeModal(editModal);
-      // map reverse index back to original array index
-      const txns = getCurrentTxns();
-      const revIndex = editingTxnRef.indexFromEnd;
-      const targetIndex = txns.length - 1 - revIndex;
-      if (targetIndex < 0 || targetIndex >= txns.length) { alert('Could not find transaction'); closeModal(editModal); return; }
-      const t = txns[targetIndex];
-      t.date = editTxnDate.value || t.date;
-      t.desc = editTxnDesc.value || t.desc;
-      t.amount = Number(editTxnAmount.value) || 0;
-      t.whtApplied = !!editTxnWht.checked;
-      t.depreciable = !!editTxnDep.checked;
-      t.usefulLife = editTxnUseful.value ? Number(editTxnUseful.value) : undefined;
-      if (editTxnAccount.value) {
-        const acct = findAccount(selectedBusinessId, editTxnAccount.value);
-        if (acct) { t.accountId = acct.id; t.accountName = acct.name; }
-      }
+      if (!editingTxnRef) return;
+      const { userId, bizId, txnId } = editingTxnRef;
+      const arr = data.transactions[userId][bizId] || [];
+      const txn = arr.find(t=>t.id===txnId);
+      if (!txn) return alert('Transaction missing');
+      txn.date = editTxnDate.value || txn.date;
+      txn.accountId = editTxnAccount.value || txn.accountId;
+      const acct = findAccount(bizId, txn.accountId);
+      txn.accountName = acct ? acct.name : txn.accountName;
+      txn.description = (editTxnDesc.value || '').trim();
+      txn.amount = parseFloat(editTxnAmount.value || '0') || 0;
+      txn.wht = editTxnWht.checked ? (txn.amount * ((findBiz(bizId).whtRate || DEFAULT_BUSINESS_TAX.whtRate)/100)) : 0;
+      txn.depreciable = !!editTxnDep.checked;
+      txn.usefulLifeYears = txn.depreciable ? (parseInt(editTxnUseful.value) || findBiz(bizId).defaultUsefulLifeYears) : null;
+      // recalc vat
+      const biz = findBiz(bizId);
+      txn.vat = (biz && biz.vatEnabled && typeof biz.vatRate === 'number') ? (txn.amount * (biz.vatRate/100)) : 0;
       saveData();
       closeModal(editModal);
       renderLedger();
       calculateSummary();
     });
 
-    window.deleteTxnHandler = function(e){
-      const btn = e.target;
-      const id = btn.getAttribute('data-id');
-      if (!confirm('Delete this transaction?')) return;
-      if (!data.transactions[selectedUserId] || !data.transactions[selectedUserId][selectedBusinessId]) return;
-      const arr = data.transactions[selectedUserId][selectedBusinessId];
-      const idx = arr.findIndex(x => x.id === id);
-      if (idx >= 0) arr.splice(idx,1);
-      saveData();
-      renderLedger();
-      calculateSummary();
-    };
+    function calculateSummary(){
+      const txns = getCurrentTxns();
+      let total = 0, totalVat = 0, totalWht = 0;
+      txns.forEach(t=>{
+        total += (t.amount || 0);
+        totalVat += (t.vat || 0);
+        totalWht += (t.wht || 0);
+      });
+      totalsSummaryDiv.innerHTML = `<strong>Total (ex VAT):</strong> ${formatNumber(total)}`;
+      vatSummaryDiv.innerHTML = `<strong>Total VAT:</strong> ${formatNumber(totalVat)}`;
+      taxSummaryDiv.innerHTML = `<strong>Total WHT:</strong> ${formatNumber(totalWht)}`;
+    }
 
-    // Inventory modal handlers
-    btnOpenInventoryModal.addEventListener('click', () => {
-      if (!selectedBusinessId) return alert('Select a business first.');
-      invModalSku.value = '';
-      invModalName.value = '';
-      invModalQty.value = 0;
-      invModalUnitCost.value = 0;
-      inventoryEditingId = null;
-      openModal(inventoryModal);
-    });
-
-    invModalCancel.addEventListener('click', () => closeModal(inventoryModal));
-    invModalSave.addEventListener('click', () => {
-      const sku = (invModalSku.value || '').trim();
-      const name = (invModalName.value || '').trim();
-      const qty = Number(invModalQty.value) || 0;
-      const unitCost = Number(invModalUnitCost.value) || 0;
-      if (!name) { alert('Name required'); return; }
-      if (inventoryEditingId) {
-        const it = findInventoryItem(selectedBusinessId, inventoryEditingId);
-        if (!it) return;
-        it.sku = sku;
-        it.name = name;
-        it.qty = qty;
-        it.unitCost = unitCost;
-        it.avgCost = unitCost;
-      } else {
-        addNewInventoryItem(selectedBusinessId, sku, name, qty, unitCost);
-      }
-      saveData();
-      closeModal(inventoryModal);
-      renderInventory();
-      populateInvItemSelect();
-    });
-
+    // Inventory rendering & modal
     function renderInventory(){
       inventoryTableBody.innerHTML = '';
       if (!selectedBusinessId) return;
@@ -1337,132 +1267,200 @@
       const items = data.inventories[selectedBusinessId] || [];
       items.forEach(it=>{
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHtml(it.sku || '')}</td>
-                        <td>${escapeHtml(it.name || '')}</td>
-                        <td>${it.qty}</td>
-                        <td style="text-align:right">${formatNumber(it.avgCost || it.unitCost || 0)}</td>
-                        <td style="text-align:right">${formatNumber((it.qty || 0) * (it.avgCost || it.unitCost || 0))}</td>
-                        <td><button class="small" data-id="${it.id}" onclick="editInventoryHandler(event)">Edit</button>
-                            <button class="small danger" data-id="${it.id}" onclick="deleteInventoryHandler(event)">Delete</button></td>`;
+        const value = (it.avgCost || it.unitCost || 0) * (it.qty || 0);
+        tr.innerHTML = `
+          <td>${escapeHtml(it.sku || '')}</td>
+          <td>${escapeHtml(it.name || '')}</td>
+          <td>${it.qty || 0}</td>
+          <td>${formatNumber(it.avgCost || it.unitCost || 0)}</td>
+          <td>${formatNumber(value)}</td>
+          <td>
+            <div class="actions">
+              <button class="small" data-id="${it.id}" data-action="edit">Edit</button>
+              <button class="small danger" data-id="${it.id}" data-action="delete">Delete</button>
+            </div>
+          </td>
+        `;
         inventoryTableBody.appendChild(tr);
+      });
+
+      inventoryTableBody.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-id');
+          const action = btn.getAttribute('data-action');
+          if (action === 'edit') {
+            openInventoryModal(id);
+          } else if (action === 'delete') {
+            if (!confirm('Delete inventory item?')) return;
+            deleteInventoryItem(id);
+          }
+        });
       });
     }
 
-    window.editInventoryHandler = function(e){
-      const id = e.target.getAttribute('data-id');
-      const it = findInventoryItem(selectedBusinessId, id);
-      if (!it) return alert('Item not found');
-      inventoryEditingId = it.id;
-      invModalSku.value = it.sku || '';
-      invModalName.value = it.name || '';
-      invModalQty.value = it.qty || 0;
-      invModalUnitCost.value = it.unitCost || it.avgCost || 0;
+    function openInventoryModal(itemId){
+      inventoryEditingId = itemId || null;
+      if (inventoryEditingId) {
+        const it = (data.inventories[selectedBusinessId] || []).find(i=>i.id===inventoryEditingId);
+        if (!it) return alert('Inventory item not found');
+        invModalSku.value = it.sku || '';
+        invModalName.value = it.name || '';
+        invModalQty.value = it.qty || 0;
+        invModalUnitCost.value = it.unitCost || 0;
+      } else {
+        invModalSku.value = '';
+        invModalName.value = '';
+        invModalQty.value = '';
+        invModalUnitCost.value = '';
+      }
       openModal(inventoryModal);
-    };
+    }
 
-    window.deleteInventoryHandler = function(e){
-      const id = e.target.getAttribute('data-id');
-      if (!confirm('Delete inventory item?')) return;
-      if (!data.inventories[selectedBusinessId]) return;
-      data.inventories[selectedBusinessId] = data.inventories[selectedBusinessId].filter(it => it.id !== id);
+    invModalCancel.addEventListener('click', () => closeModal(inventoryModal));
+    invModalSave.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('No business selected');
+      ensureInventoriesForBusiness(selectedBusinessId);
+      const items = data.inventories[selectedBusinessId];
+      const sku = (invModalSku.value || '').trim();
+      const name = (invModalName.value || '').trim();
+      const qty = parseInt(invModalQty.value || '0') || 0;
+      const unitCost = parseFloat(invModalUnitCost.value || '0') || 0;
+      if (inventoryEditingId) {
+        const it = items.find(i=>i.id===inventoryEditingId);
+        if (!it) return alert('Item not found');
+        it.sku = sku;
+        it.name = name;
+        it.qty = qty;
+        it.unitCost = unitCost;
+        it.avgCost = unitCost || it.avgCost || 0;
+      } else {
+        items.push({ id: uid('inv'), sku, name, qty, unitCost, avgCost: unitCost || 0 });
+      }
+      saveData();
+      closeModal(inventoryModal);
+      renderInventory();
+    });
+
+    btnOpenInventoryModal.addEventListener('click', () => {
+      inventoryEditingId = null;
+      openInventoryModal(null);
+    });
+
+    function deleteInventoryItem(id){
+      if (!selectedBusinessId) return;
+      const items = data.inventories[selectedBusinessId] || [];
+      const idx = items.findIndex(i=>i.id===id);
+      if (idx === -1) return;
+      items.splice(idx,1);
       saveData();
       renderInventory();
-      populateInvItemSelect();
-    };
+    }
 
-    // Accounts modal handlers
+    // Accounts modal
     btnManageAccounts.addEventListener('click', () => {
-      if (!selectedBusinessId) return alert('Select a business first.');
+      if (!selectedBusinessId) return alert('Select a business');
       renderAccountsList();
       openModal(accountsModal);
     });
 
+    function renderAccountsList(){
+      accountsList.innerHTML = '';
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) { accountsList.textContent = '-- no business --'; return; }
+      ensureBizDefaults(biz);
+      biz.accounts.forEach(a=>{
+        const div = document.createElement('div');
+        div.className = 'account-row';
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.value = a.name;
+        inp.style.flex = '1';
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = 'Rename';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.className = 'danger';
+        div.appendChild(inp);
+        div.appendChild(renameBtn);
+        div.appendChild(deleteBtn);
+        accountsList.appendChild(div);
+
+        renameBtn.addEventListener('click', ()=>{
+          const newName = (inp.value || '').trim();
+          if (!newName) return alert('Name required');
+          a.name = newName;
+          saveData();
+          populateAccountSelect();
+          renderLedger();
+          renderAccountsList();
+        });
+
+        deleteBtn.addEventListener('click', ()=>{
+          // prevent delete if account in use
+          const txnsAll = [];
+          for (const uidKey of Object.keys(data.transactions || {})){
+            for (const bid of Object.keys(data.transactions[uidKey] || {})){
+              const arr = data.transactions[uidKey][bid] || [];
+              arr.forEach(t => txnsAll.push(t));
+            }
+          }
+          const used = txnsAll.some(t => t.accountId === a.id);
+          if (used) return alert('Cannot delete account with transactions. Rename it instead.');
+          biz.accounts = biz.accounts.filter(x => x.id !== a.id);
+          saveData();
+          populateAccountSelect();
+          renderAccountsList();
+        });
+      });
+    }
+
     addAccountBtn.addEventListener('click', () => {
       const name = (newAccountName.value || '').trim();
-      if (!name) return;
+      if (!name) return alert('Provide account name');
       const biz = findBiz(selectedBusinessId);
       if (!biz) return;
-      if (!biz.accounts) biz.accounts = [];
-      const exists = biz.accounts.find(a => a.name.toLowerCase() === name.toLowerCase());
-      if (exists) { alert('Account already exists'); return; }
+      ensureBizDefaults(biz);
       biz.accounts.push({ id: uid('acct'), name });
-      saveData();
       newAccountName.value = '';
-      renderAccountsList();
+      saveData();
       populateAccountSelect();
+      renderAccountsList();
     });
 
     closeAccountsBtn.addEventListener('click', () => closeModal(accountsModal));
 
-    function renderAccountsList(){
-      accountsList.innerHTML = '';
-      const biz = findBiz(selectedBusinessId);
-      if (!biz) return;
-      if (!biz.accounts || !biz.accounts.length) {
-        accountsList.textContent = 'No accounts defined.';
-        return;
-      }
-      biz.accounts.forEach((acct, i) => {
-        const div = document.createElement('div');
-        div.className = 'account-row';
-        const nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.value = acct.name;
-        nameInput.style.flex = '1';
-        nameInput.addEventListener('change', () => {
-          const newName = (nameInput.value || '').trim();
-          if (!newName) { alert('Name required'); nameInput.value = acct.name; return; }
-          // preserve uniqueness
-          const other = biz.accounts.find(a => a.name.toLowerCase() === newName.toLowerCase() && a.id !== acct.id);
-          if (other) { alert('Another account with this name exists'); nameInput.value = acct.name; return; }
-          acct.name = newName;
-          // update existing transactions accountName where accountId matches
-          for (const uid of Object.keys(data.transactions || {})) {
-            const per = data.transactions[uid] || {};
-            if (per[selectedBusinessId]) {
-              per[selectedBusinessId].forEach(txn => {
-                if (txn.accountId === acct.id) txn.accountName = acct.name;
-              });
-            }
-          }
-          saveData();
-          populateAccountSelect();
-        });
+    // Search & pagination
+    btnSearch.addEventListener('click', () => {
+      ledgerFilterText = (ledgerSearch.value || '').trim();
+      currentPage = 1;
+      renderLedger();
+    });
 
-        const delBtn = document.createElement('button');
-        delBtn.textContent = 'Delete';
-        delBtn.className = 'small danger';
-        delBtn.style.marginLeft = '8px';
-        delBtn.onclick = () => {
-          // check if any transaction references this account
-          let used = false;
-          for (const uid of Object.keys(data.transactions || {})) {
-            const per = data.transactions[uid] || {};
-            const arr = per[selectedBusinessId] || [];
-            if (arr.find(txn => txn.accountId === acct.id)) { used = true; break; }
-          }
-          if (used) { alert('Cannot delete account: there are transactions referencing it. Rename instead.'); return; }
-          if (!confirm(`Delete account "${acct.name}"?`)) return;
-          biz.accounts.splice(i,1);
-          saveData();
-          renderAccountsList();
-          populateAccountSelect();
-        };
+    btnClearSearch.addEventListener('click', () => {
+      ledgerFilterText = '';
+      ledgerSearch.value = '';
+      currentPage = 1;
+      renderLedger();
+    });
 
-        div.appendChild(nameInput);
-        div.appendChild(delBtn);
-        accountsList.appendChild(div);
-      });
-    }
+    btnPrevPage.addEventListener('click', () => {
+      if (currentPage > 1) { currentPage--; renderLedger(); }
+    });
+    btnNextPage.addEventListener('click', () => {
+      currentPage++;
+      renderLedger();
+    });
 
-    // Export/Import
+    // Export/Import/Clear
     btnExport.addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'ntc_data.json';
+      a.download = 'ntc_export.json';
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       URL.revokeObjectURL(url);
     });
 
@@ -1470,23 +1468,31 @@
     fileInput.addEventListener('change', (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      const r = new FileReader();
-      r.onload = () => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
         try {
-          const parsed = JSON.parse(r.result);
-          if (!confirm('Importing will replace current data. Continue?')) return;
+          const parsed = JSON.parse(ev.target.result);
+          if (!confirm('Importing will overwrite current data. Continue?')) return;
           data = parsed;
+          data.users = data.users || [];
+          data.businesses = data.businesses || [];
+          data.transactions = data.transactions || {};
+          data.inventories = data.inventories || {};
+          data.businesses.forEach(b => { ensureBizDefaults(b); ensureInventoriesForBusiness(b.id); });
           saveData();
-          loadData();
           refreshUserBusinessSelectors();
           ensureSelection();
           populateInvItemSelect();
           populateAccountSelect();
           renderLedger();
+          calculateSummary();
           renderInventory();
-        } catch(err) { alert('Invalid JSON file'); }
+        } catch (err) {
+          alert('Invalid JSON file');
+        }
       };
-      r.readAsText(f);
+      reader.readAsText(f);
+      fileInput.value = '';
     });
 
     btnClearAll.addEventListener('click', () => {
@@ -1499,50 +1505,16 @@
       populateInvItemSelect();
       populateAccountSelect();
       renderLedger();
-      renderInventory();
       calculateSummary();
+      renderInventory();
     });
 
-    // Search & pagination
-    btnSearch.addEventListener('click', () => { currentPage = 1; renderLedger(); });
-    btnClearSearch.addEventListener('click', () => { ledgerSearch.value = ''; currentPage = 1; renderLedger(); });
-    btnPrevPage.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderLedger(); } });
-    btnNextPage.addEventListener('click', () => { currentPage++; renderLedger(); });
-
-    // Summary calculations (basic)
-    function calculateSummary(){
-      const txns = getCurrentTxns();
-      let total = 0, vatTotal = 0, whtTotal = 0;
-      const biz = findBiz(selectedBusinessId) || {};
-      txns.forEach(t=>{
-        total += Number(t.amount || 0);
-        if (t.vatApplied && biz.vatRate) vatTotal += Number(t.amount || 0) * (Number(biz.vatRate || 0)/100);
-        if (t.whtApplied && biz.whtRate) whtTotal += Number(t.amount || 0) * (Number(biz.whtRate || 0)/100);
-      });
-      vatSummaryDiv.innerText = `VAT (approx): ${formatNumber(vatTotal)}`;
-      totalsSummaryDiv.innerText = `Total transactions: ${formatNumber(total)}`;
-      taxSummaryDiv.innerText = `WHT (approx): ${formatNumber(whtTotal)}`;
-    }
-
-    // ensure initial selectors
+    // Initial population
+    populateInvItemSelect();
     populateAccountSelect();
-
-    // re-render on changes
-    document.getElementById('txnDate').addEventListener('change', () => {});
-    userSelect.addEventListener('change', () => { renderLedger(); calculateSummary(); renderInventory(); });
-
-    // initial render calls already invoked in loadData -> now ensure accounts/inventory rendered
     renderLedger();
-    renderInventory();
     calculateSummary();
-
-    // Expose a small API for console debugging
-    window._ntc_data = data;
-    window._ntc_save = saveData;
+    renderInventory();
   </script>
-
-  <footer>
-    Built for demonstration. Data is stored locally (browser localStorage). Use Export/Import to backup.
-  </footer>
 </body>
-  </html>
+</html>
