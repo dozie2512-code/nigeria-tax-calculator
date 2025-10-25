@@ -74,6 +74,22 @@ GitHub Copilot Chat Assistant
       <h2 style="margin:0 0 8px 0;">Add Transaction</h2>
       <div class="form-inline">
         <label>Date: <input type="date" id="txnDate" /></label>
+        <label>Inventory action:
+          <select id="txnInventoryAction">
+            <option value="None">None</option>
+            <option value="Add inventory">Add inventory</option>
+            <option value="Record inventory">Record inventory</option>
+            <option value="Sale inventory">Sale inventory</option>
+          </select>
+        </label>
+        <label id="invItemLabel" style="display:none;">Item:
+          <select id="invItemSelect"></select>
+        </label>
+        <label id="invNewSkuLabel" style="display:none;">New SKU: <input type="text" id="invNewSku" placeholder="SKU" /></label>
+        <label id="invNewNameLabel" style="display:none;">New Name: <input type="text" id="invNewName" placeholder="Item name" /></label>
+        <label id="invQtyLabel" style="display:none;">Quantity: <input type="number" id="invQty" min="0" step="0.01" class="smallInput" /></label>
+        <label id="invUnitCostLabel" style="display:none;">Unit cost (₦): <input type="number" id="invUnitCost" min="0" step="0.01" class="smallInput" /></label>
+        <label id="invSalePriceLabel" style="display:none;">Sale price (₦): <input type="number" id="invSalePrice" min="0" step="0.01" class="smallInput" /></label>
         <label>Type:
           <select id="txnType">
             <option value="Income">Income (Sales)</option>
@@ -148,6 +164,25 @@ GitHub Copilot Chat Assistant
       <div class="vat-summary" id="vatSummary"></div>
       <div class="totals" id="totalsSummary"></div>
       <div class="tax-summary" id="taxSummary"></div>
+    </section>
+
+    <section class="panel section" id="inventorySection">
+      <h2 style="margin:0 0 8px 0;">Inventory</h2>
+      <table class="ledger-table" id="inventoryTable">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Name</th>
+            <th>Quantity</th>
+            <th>Unit Cost (Avg)</th>
+            <th>Total Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div style="margin-top:8px;" id="inventoryEmpty">
+        <small class="muted">No inventory items yet. Use "Add inventory" action when adding transactions.</small>
+      </div>
     </section>
   </main>
 
@@ -263,7 +298,7 @@ GitHub Copilot Chat Assistant
       payeEnabled: true
     };
 
-    let data = { users: [], businesses: [], transactions: {} };
+    let data = { users: [], businesses: [], transactions: {}, inventories: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
     let editIndex = null;
@@ -300,6 +335,7 @@ GitHub Copilot Chat Assistant
             if (!data.users) data.users = [];
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
+            if (!data.inventories) data.inventories = {};
             data.businesses.forEach(b => ensureBizDefaults(b));
             return;
           }
@@ -321,7 +357,8 @@ GitHub Copilot Chat Assistant
         transactions: { [u]: { [b]: [
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000, whtApplied: false, depreciable: false },
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, whtApplied: false, depreciable: false }
-        ] } }
+        ] } },
+        inventories: { [b]: [] }
       };
       saveData();
     }
@@ -403,6 +440,23 @@ GitHub Copilot Chat Assistant
     const btnNextPage = document.getElementById('btnNextPage');
     const pageIndicator = document.getElementById('pageIndicator');
 
+    // Inventory UI
+    const txnInventoryAction = document.getElementById('txnInventoryAction');
+    const invItemLabel = document.getElementById('invItemLabel');
+    const invItemSelect = document.getElementById('invItemSelect');
+    const invNewSkuLabel = document.getElementById('invNewSkuLabel');
+    const invNewSku = document.getElementById('invNewSku');
+    const invNewNameLabel = document.getElementById('invNewNameLabel');
+    const invNewName = document.getElementById('invNewName');
+    const invQtyLabel = document.getElementById('invQtyLabel');
+    const invQty = document.getElementById('invQty');
+    const invUnitCostLabel = document.getElementById('invUnitCostLabel');
+    const invUnitCost = document.getElementById('invUnitCost');
+    const invSalePriceLabel = document.getElementById('invSalePriceLabel');
+    const invSalePrice = document.getElementById('invSalePrice');
+    const inventoryTbody = document.querySelector('#inventoryTable tbody');
+    const inventoryEmpty = document.getElementById('inventoryEmpty');
+
     // Export/Import
     const btnExport = document.getElementById('btnExport');
     const btnImport = document.getElementById('btnImport');
@@ -411,6 +465,62 @@ GitHub Copilot Chat Assistant
 
     let userEditingId = null;
     let bizEditingId = null;
+
+    // Inventory helper functions
+    function getInventory(bizId) {
+      if (!data.inventories[bizId]) data.inventories[bizId] = [];
+      return data.inventories[bizId];
+    }
+    
+    function findInventoryItem(bizId, idOrSku) {
+      const inv = getInventory(bizId);
+      return inv.find(item => item.id === idOrSku || item.sku === idOrSku);
+    }
+    
+    function refreshInventoryItemSelect() {
+      if (!selectedBusinessId) return;
+      invItemSelect.innerHTML = '<option value="">Select item...</option>';
+      const inv = getInventory(selectedBusinessId);
+      inv.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = `${item.sku} - ${item.name} (Stock: ${item.qty})`;
+        invItemSelect.appendChild(opt);
+      });
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new__';
+      newOpt.textContent = '+ Add new item';
+      invItemSelect.appendChild(newOpt);
+    }
+    
+    function renderInventory() {
+      inventoryTbody.innerHTML = '';
+      if (!selectedBusinessId) {
+        inventoryEmpty.style.display = '';
+        return;
+      }
+      const inv = getInventory(selectedBusinessId);
+      if (inv.length === 0) {
+        inventoryEmpty.style.display = '';
+        return;
+      }
+      inventoryEmpty.style.display = 'none';
+      const biz = findBiz(selectedBusinessId);
+      const currency = (biz && biz.currency) ? biz.currency : '₦';
+      
+      inv.forEach(item => {
+        const totalValue = item.qty * item.unitCost;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(item.sku)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${formatNumber(item.qty)}</td>
+          <td>${currency}${formatNumber(item.unitCost)}</td>
+          <td>${currency}${formatNumber(totalValue)}</td>
+        `;
+        inventoryTbody.appendChild(tr);
+      });
+    }
 
     // helper - compute PIT on an income value using DEFAULT_PIT slices and business threshold
     function computePIT(income, biz){
@@ -579,6 +689,7 @@ GitHub Copilot Chat Assistant
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
     });
 
     // Businesses
@@ -699,12 +810,49 @@ GitHub Copilot Chat Assistant
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
     });
 
     // Transactions: UI behavior
     txnDep.addEventListener('change', () => {
       txnUsefulLifeLabel.style.display = txnDep.checked ? '' : 'none';
       if (!txnDep.checked) txnUsefulLife.value = '';
+    });
+
+    // Inventory action handler
+    txnInventoryAction.addEventListener('change', () => {
+      const action = txnInventoryAction.value;
+      // Hide all inventory fields first
+      invItemLabel.style.display = 'none';
+      invNewSkuLabel.style.display = 'none';
+      invNewNameLabel.style.display = 'none';
+      invQtyLabel.style.display = 'none';
+      invUnitCostLabel.style.display = 'none';
+      invSalePriceLabel.style.display = 'none';
+      
+      if (action === 'None') return;
+      
+      // Show common fields
+      invItemLabel.style.display = '';
+      invQtyLabel.style.display = '';
+      refreshInventoryItemSelect();
+      
+      if (action === 'Add inventory' || action === 'Record inventory') {
+        invUnitCostLabel.style.display = '';
+      } else if (action === 'Sale inventory') {
+        invSalePriceLabel.style.display = '';
+      }
+    });
+    
+    // Item select handler - show new item fields when "Add new item" is selected
+    invItemSelect.addEventListener('change', () => {
+      if (invItemSelect.value === '__new__') {
+        invNewSkuLabel.style.display = '';
+        invNewNameLabel.style.display = '';
+      } else {
+        invNewSkuLabel.style.display = 'none';
+        invNewNameLabel.style.display = 'none';
+      }
     });
 
     editTxnDep.addEventListener('change', () => {
@@ -721,12 +869,210 @@ GitHub Copilot Chat Assistant
       const whtAppliedVal = !!txnWht.checked;
       const depreciableVal = !!txnDep.checked;
       const usefulLifeVal = depreciableVal ? (parseInt(txnUsefulLife.value) || null) : null;
+      const inventoryAction = txnInventoryAction.value;
 
       if (!selectedUserId || !selectedBusinessId) {
         alert('Select user and business before adding a transaction.');
         return;
       }
-      if (!date || !desc || amount <= 0) {
+      if (!date) {
+        alert('Please enter a date.');
+        return;
+      }
+      
+      // Process inventory action
+      if (inventoryAction !== 'None') {
+        const qty = parseFloat(invQty.value) || 0;
+        const unitCostVal = parseFloat(invUnitCost.value) || 0;
+        const salePriceVal = parseFloat(invSalePrice.value) || 0;
+        const itemId = invItemSelect.value;
+        
+        if (inventoryAction === 'Add inventory') {
+          if (qty <= 0) {
+            alert('Please enter a valid quantity > 0 for Add inventory.');
+            return;
+          }
+          
+          let item = null;
+          if (itemId === '__new__') {
+            const sku = invNewSku.value.trim();
+            const name = invNewName.value.trim();
+            if (!sku || !name) {
+              alert('Please provide SKU and name for new inventory item.');
+              return;
+            }
+            // Check if SKU already exists
+            const existing = findInventoryItem(selectedBusinessId, sku);
+            if (existing) {
+              item = existing;
+            } else {
+              item = { id: uid('inv'), sku, name, qty: 0, unitCost: 0 };
+              getInventory(selectedBusinessId).push(item);
+            }
+          } else if (itemId) {
+            item = findInventoryItem(selectedBusinessId, itemId);
+          }
+          
+          if (item) {
+            // Weighted average cost
+            const oldTotal = item.qty * item.unitCost;
+            const newTotal = qty * unitCostVal;
+            item.qty += qty;
+            if (item.qty > 0) {
+              item.unitCost = (oldTotal + newTotal) / item.qty;
+            }
+            saveData();
+            renderInventory();
+            refreshInventoryItemSelect();
+          }
+          
+          // Allow normal transaction if amount is provided
+          if (amount > 0 && desc) {
+            const txn = { id: uid('txn'), date, type, category, desc, amount, whtApplied: whtAppliedVal, depreciable: depreciableVal };
+            if (usefulLifeVal && usefulLifeVal > 0) txn.usefulLifeYears = usefulLifeVal;
+            if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+            if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+            data.transactions[selectedUserId][selectedBusinessId].push(txn);
+            saveData();
+          }
+          
+          clearForm();
+          renderLedger();
+          calculateSummary();
+          const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+          currentPage = Math.max(1, Math.ceil(allTxns.length / PAGE_SIZE));
+          renderLedger();
+          return;
+        }
+        
+        if (inventoryAction === 'Record inventory') {
+          if (qty < 0) {
+            alert('Quantity cannot be negative for Record inventory.');
+            return;
+          }
+          
+          let item = null;
+          if (itemId === '__new__') {
+            const sku = invNewSku.value.trim();
+            const name = invNewName.value.trim();
+            if (!sku || !name) {
+              alert('Please provide SKU and name for new inventory item.');
+              return;
+            }
+            const existing = findInventoryItem(selectedBusinessId, sku);
+            if (existing) {
+              item = existing;
+            } else {
+              item = { id: uid('inv'), sku, name, qty: 0, unitCost: 0 };
+              getInventory(selectedBusinessId).push(item);
+            }
+          } else if (itemId) {
+            item = findInventoryItem(selectedBusinessId, itemId);
+          }
+          
+          if (item) {
+            item.qty = qty;
+            if (unitCostVal > 0) item.unitCost = unitCostVal;
+            saveData();
+            renderInventory();
+            refreshInventoryItemSelect();
+          }
+          
+          // Optional transaction if amount is filled
+          if (amount > 0 && desc) {
+            const txn = { id: uid('txn'), date, type: 'Expense', category: 'Inventory Adjustment', desc, amount, whtApplied: whtAppliedVal, depreciable: depreciableVal };
+            if (usefulLifeVal && usefulLifeVal > 0) txn.usefulLifeYears = usefulLifeVal;
+            if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+            if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+            data.transactions[selectedUserId][selectedBusinessId].push(txn);
+            saveData();
+          }
+          
+          clearForm();
+          renderLedger();
+          calculateSummary();
+          const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+          currentPage = Math.max(1, Math.ceil(allTxns.length / PAGE_SIZE));
+          renderLedger();
+          return;
+        }
+        
+        if (inventoryAction === 'Sale inventory') {
+          if (qty <= 0 || salePriceVal <= 0) {
+            alert('Please enter valid quantity and sale price > 0 for Sale inventory.');
+            return;
+          }
+          
+          if (!itemId || itemId === '__new__') {
+            alert('Please select an existing item for Sale inventory.');
+            return;
+          }
+          
+          const item = findInventoryItem(selectedBusinessId, itemId);
+          if (!item) {
+            alert('Item not found.');
+            return;
+          }
+          
+          // Check stock
+          if (item.qty < qty) {
+            if (!confirm(`Warning: Sale quantity (${qty}) exceeds current stock (${item.qty}). Continue anyway?`)) {
+              return;
+            }
+          }
+          
+          // Calculate COGS using average cost
+          const costOfGoods = qty * item.unitCost;
+          const revenue = qty * salePriceVal;
+          
+          // Decrease inventory
+          item.qty -= qty;
+          saveData();
+          renderInventory();
+          refreshInventoryItemSelect();
+          
+          // Create Income transaction
+          const incomeTxn = {
+            id: uid('txn'),
+            date,
+            type: 'Income',
+            category: 'Sales',
+            desc: `Sale of ${item.sku} - ${item.name} (qty: ${qty})`,
+            amount: revenue,
+            whtApplied: false,
+            depreciable: false
+          };
+          
+          // Create COGS transaction
+          const cogsTxn = {
+            id: uid('txn'),
+            date,
+            type: 'COGS',
+            category: 'Cost of Goods Sold',
+            desc: `COGS for ${item.sku} - ${item.name} (qty: ${qty})`,
+            amount: costOfGoods,
+            whtApplied: false,
+            depreciable: false
+          };
+          
+          if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+          if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+          data.transactions[selectedUserId][selectedBusinessId].push(incomeTxn);
+          data.transactions[selectedUserId][selectedBusinessId].push(cogsTxn);
+          saveData();
+          
+          clearForm();
+          renderLedger();
+          calculateSummary();
+          const allTxns = (data.transactions[selectedUserId] && data.transactions[selectedUserId][selectedBusinessId]) || [];
+          currentPage = Math.max(1, Math.ceil(allTxns.length / PAGE_SIZE));
+          renderLedger();
+          return;
+        }
+      }
+      
+      // Normal transaction (no inventory action)
+      if (!desc || amount <= 0) {
         alert('Please fill all fields and enter a valid amount.');
         return;
       }
@@ -756,6 +1102,19 @@ GitHub Copilot Chat Assistant
       txnDep.checked = false;
       txnUsefulLife.value = '';
       txnUsefulLifeLabel.style.display = 'none';
+      txnInventoryAction.value = 'None';
+      invItemLabel.style.display = 'none';
+      invNewSkuLabel.style.display = 'none';
+      invNewNameLabel.style.display = 'none';
+      invQtyLabel.style.display = 'none';
+      invUnitCostLabel.style.display = 'none';
+      invSalePriceLabel.style.display = 'none';
+      invItemSelect.value = '';
+      invNewSku.value = '';
+      invNewName.value = '';
+      invQty.value = '';
+      invUnitCost.value = '';
+      invSalePrice.value = '';
     }
 
     function renderLedger(){
@@ -1034,6 +1393,7 @@ GitHub Copilot Chat Assistant
           if (!data.users) data.users = [];
           if (!data.businesses) data.businesses = [];
           if (!data.transactions) data.transactions = {};
+          if (!data.inventories) data.inventories = {};
           data.businesses.forEach(b => ensureBizDefaults(b));
           saveData();
           refreshUserBusinessSelectors();
@@ -1041,6 +1401,7 @@ GitHub Copilot Chat Assistant
           currentPage = 1;
           renderLedger();
           calculateSummary();
+          renderInventory();
           alert('Import successful.');
         } else {
           alert('Invalid file.');
@@ -1055,13 +1416,14 @@ GitHub Copilot Chat Assistant
     btnClearAll.addEventListener('click', () => {
       if (!confirm('Clear all stored data? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
-      data = { users: [], businesses: [], transactions: {} };
+      data = { users: [], businesses: [], transactions: {}, inventories: {} };
       loadData();
       refreshUserBusinessSelectors();
       ensureSelection();
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
     });
 
     // initial render handlers for page load
@@ -1081,6 +1443,7 @@ GitHub Copilot Chat Assistant
     // ensure ledger and summary refresh on load
     renderLedger();
     calculateSummary();
+    renderInventory();
   </script>
 </body>
 </html>
