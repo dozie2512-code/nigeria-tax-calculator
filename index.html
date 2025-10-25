@@ -1,4 +1,3 @@
-GitHub Copilot Chat Assistant
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,7 +26,7 @@ GitHub Copilot Chat Assistant
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+    .modal { display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(720px,96vw); max-height:80vh; overflow:auto; }
     .modal h3 { margin-top:0; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
@@ -37,6 +36,9 @@ GitHub Copilot Chat Assistant
     .pagination { display:flex; gap:8px; align-items:center; margin-top:8px; }
     .smallInput { width:76px; }
     .flag { background:#eef6ff; padding:3px 6px; border-radius:4px; color:#05507a; font-size:0.85rem; border:1px solid #dbeffb; }
+    .inventory-table { border-collapse: collapse; width:100%; margin-top:10px; }
+    .inventory-table th, .inventory-table td { border:1px solid #ddd; padding:8px; text-align:left; font-size:0.95rem; vertical-align: middle; }
+    .inventory-table th { background:#f9fbff; }
     @media (max-width:640px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
   </style>
 </head>
@@ -74,6 +76,27 @@ GitHub Copilot Chat Assistant
       <h2 style="margin:0 0 8px 0;">Add Transaction</h2>
       <div class="form-inline">
         <label>Date: <input type="date" id="txnDate" /></label>
+
+        <label>Inventory action:
+          <select id="txnInventoryAction">
+            <option value="None">None</option>
+            <option value="Add">Add inventory</option>
+            <option value="Record">Record inventory</option>
+            <option value="Sale">Sale inventory</option>
+          </select>
+        </label>
+
+        <label id="invItemLabel">Item:
+          <select id="invItemSelect"></select>
+        </label>
+
+        <label id="invNewSkuLabel" style="display:none;">SKU: <input type="text" id="invNewSku" /></label>
+        <label id="invNewNameLabel" style="display:none;">Name: <input type="text" id="invNewName" /></label>
+
+        <label id="invQtyLabel" style="display:none;">Qty: <input type="number" id="invQty" class="smallInput" min="0" step="1" /></label>
+        <label id="invUnitCostLabel" style="display:none;">Unit cost (₦): <input type="number" id="invUnitCost" class="smallInput" min="0" step="0.01" /></label>
+        <label id="invSalePriceLabel" style="display:none;">Sale price/unit (₦): <input type="number" id="invSalePrice" class="smallInput" min="0" step="0.01" /></label>
+
         <label>Type:
           <select id="txnType">
             <option value="Income">Income (Sales)</option>
@@ -148,6 +171,26 @@ GitHub Copilot Chat Assistant
       <div class="vat-summary" id="vatSummary"></div>
       <div class="totals" id="totalsSummary"></div>
       <div class="tax-summary" id="taxSummary"></div>
+    </section>
+
+    <section class="panel section">
+      <h2 style="margin:0 0 8px 0;">Inventory (selected business)</h2>
+      <div>
+        <button class="small" id="btnOpenInventoryModal">Manage Inventory</button>
+      </div>
+      <table class="inventory-table" id="inventoryTable">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Name</th>
+            <th>Qty</th>
+            <th>Unit cost</th>
+            <th>Value</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </section>
   </main>
 
@@ -241,6 +284,22 @@ GitHub Copilot Chat Assistant
     </div>
   </div>
 
+  <div id="inventoryModal" class="modal" aria-hidden="true">
+    <h3>Manage Inventory Item</h3>
+    <div class="row">
+      <label>SKU: <input type="text" id="invModalSku" /></label>
+      <label>Name: <input type="text" id="invModalName" /></label>
+    </div>
+    <div class="row">
+      <label>Qty: <input type="number" id="invModalQty" class="smallInput" min="0" step="1" /></label>
+      <label>Unit cost (₦): <input type="number" id="invModalUnitCost" class="smallInput" min="0" step="0.01" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="invModalCancel">Cancel</button>
+      <button class="primary" id="invModalSave">Save</button>
+    </div>
+  </div>
+
   <script>
     // GitHub Copilot Chat Assistant
     const STORAGE_KEY = 'ntc_data_v1';
@@ -263,7 +322,8 @@ GitHub Copilot Chat Assistant
       payeEnabled: true
     };
 
-    let data = { users: [], businesses: [], transactions: {} };
+    // data structure: { users: [], businesses: [], transactions: { [userId]: { [bizId]: [txns] } }, inventories: { [bizId]: [items] } }
+    let data = { users: [], businesses: [], transactions: {}, inventories: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
     let editIndex = null;
@@ -290,6 +350,11 @@ GitHub Copilot Chat Assistant
       if (typeof biz.threshold === 'undefined') biz.threshold = DEFAULT_PIT.threshold;
     }
 
+    function ensureInventoriesForBusiness(bizId){
+      if (!data.inventories) data.inventories = {};
+      if (!data.inventories[bizId]) data.inventories[bizId] = [];
+    }
+
     function loadData(){
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw){
@@ -300,7 +365,11 @@ GitHub Copilot Chat Assistant
             if (!data.users) data.users = [];
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
-            data.businesses.forEach(b => ensureBizDefaults(b));
+            if (!data.inventories) data.inventories = {};
+            data.businesses.forEach(b => {
+              ensureBizDefaults(b);
+              ensureInventoriesForBusiness(b.id);
+            });
             return;
           }
         } catch(e){
@@ -321,8 +390,12 @@ GitHub Copilot Chat Assistant
         transactions: { [u]: { [b]: [
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Income', category: 'Freelance', desc: 'Demo sale', amount: 1500000, whtApplied: false, depreciable: false },
           { id: uid('txn'), date: new Date().toISOString().slice(0,10), type: 'Expense', category: 'Rent', desc: 'Office rent', amount: 200000, whtApplied: false, depreciable: false }
-        ] } }
+        ] } },
+        inventories: { }
       };
+      data.inventories[b] = [
+        { id: uid('inv'), sku: 'DEMO-001', name: 'Demo Item', qty: 10, unitCost: 5000.00 }
+      ];
       saveData();
     }
 
@@ -395,6 +468,21 @@ GitHub Copilot Chat Assistant
     const txnUsefulLife = document.getElementById('txnUsefulLife');
     const txnUsefulLifeLabel = document.getElementById('txnUsefulLifeLabel');
 
+    const txnInventoryAction = document.getElementById('txnInventoryAction');
+    const invItemSelect = document.getElementById('invItemSelect');
+    const invNewSku = document.getElementById('invNewSku');
+    const invNewName = document.getElementById('invNewName');
+    const invQty = document.getElementById('invQty');
+    const invUnitCost = document.getElementById('invUnitCost');
+    const invSalePrice = document.getElementById('invSalePrice');
+
+    const invItemLabel = document.getElementById('invItemLabel');
+    const invNewSkuLabel = document.getElementById('invNewSkuLabel');
+    const invNewNameLabel = document.getElementById('invNewNameLabel');
+    const invQtyLabel = document.getElementById('invQtyLabel');
+    const invUnitCostLabel = document.getElementById('invUnitCostLabel');
+    const invSalePriceLabel = document.getElementById('invSalePriceLabel');
+
     // Search & pagination UI
     const ledgerSearch = document.getElementById('ledgerSearch');
     const btnSearch = document.getElementById('btnSearch');
@@ -409,8 +497,20 @@ GitHub Copilot Chat Assistant
     const fileInput = document.getElementById('fileInput');
     const btnClearAll = document.getElementById('btnClearAll');
 
+    // Inventory UI
+    const inventoryTableBody = document.querySelector('#inventoryTable tbody');
+    const btnOpenInventoryModal = document.getElementById('btnOpenInventoryModal');
+    const inventoryModal = document.getElementById('inventoryModal');
+    const invModalSku = document.getElementById('invModalSku');
+    const invModalName = document.getElementById('invModalName');
+    const invModalQty = document.getElementById('invModalQty');
+    const invModalUnitCost = document.getElementById('invModalUnitCost');
+    const invModalCancel = document.getElementById('invModalCancel');
+    const invModalSave = document.getElementById('invModalSave');
+
     let userEditingId = null;
     let bizEditingId = null;
+    let inventoryEditingId = null;
 
     // helper - compute PIT on an income value using DEFAULT_PIT slices and business threshold
     function computePIT(income, biz){
@@ -446,20 +546,23 @@ GitHub Copilot Chat Assistant
       modal.setAttribute('aria-hidden','true');
       userEditingId = null;
       bizEditingId = null;
+      inventoryEditingId = null;
     }
 
     modalOverlay.addEventListener('click', () => {
       // close any open modal
-      [userModal, businessModal, editModal].forEach(m => { if (m.style.display === 'block') closeModal(m); });
+      [userModal, businessModal, editModal, inventoryModal].forEach(m => { if (m.style.display === 'block') closeModal(m); });
     });
 
     // Initialization
     loadData();
     refreshUserBusinessSelectors();
     ensureSelection();
+    populateInvItemSelect();
     currentPage = 1;
     renderLedger();
     calculateSummary();
+    renderInventory();
 
     // --- User & Business management functions ---
     function refreshUserBusinessSelectors(){
@@ -484,6 +587,7 @@ GitHub Copilot Chat Assistant
         opt.value = b.id;
         opt.textContent = `${b.name}${owner ? ' — ' + (owner.display || owner.username) : ''} (${(typeof b.vatRate === 'number' ? b.vatRate : 0)}% VAT, ${(typeof b.citRate === 'number' ? b.citRate : 0)}% CIT)${status}`;
         businessSelect.appendChild(opt);
+        ensureInventoriesForBusiness(b.id);
       });
 
       bizOwner.innerHTML = '';
@@ -539,13 +643,21 @@ GitHub Copilot Chat Assistant
       data.businesses = data.businesses.filter(b => b.ownerId !== u.id);
       delete data.transactions[u.id];
       data.users = data.users.filter(x => x.id !== u.id);
-      if (!data.users.length) data = { users: [], businesses: [], transactions: {} };
+      // Remove inventories for deleted businesses (since businesses removed)
+      const remainingBizIds = new Set(data.businesses.map(b => b.id));
+      const newInventories = {};
+      for (const bid of Object.keys(data.inventories || {})) {
+        if (remainingBizIds.has(bid)) newInventories[bid] = data.inventories[bid];
+      }
+      data.inventories = newInventories;
+      if (!data.users.length) data = { users: [], businesses: [], transactions: {}, inventories: {} };
       saveData();
       selectedUserId = data.users.length ? data.users[0].id : null;
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
       refreshUserBusinessSelectors();
       renderLedger();
       calculateSummary();
+      renderInventory();
     });
 
     userSave.addEventListener('click', () => {
@@ -579,6 +691,8 @@ GitHub Copilot Chat Assistant
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
+      populateInvItemSelect();
     });
 
     // Businesses
@@ -630,12 +744,15 @@ GitHub Copilot Chat Assistant
       for (const uid of Object.keys(data.transactions)) {
         if (data.transactions[uid] && data.transactions[uid][b.id]) delete data.transactions[uid][b.id];
       }
+      if (data.inventories && data.inventories[b.id]) delete data.inventories[b.id];
       saveData();
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
       refreshUserBusinessSelectors();
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
+      populateInvItemSelect();
     });
 
     bizSave.addEventListener('click', () => {
@@ -682,6 +799,7 @@ GitHub Copilot Chat Assistant
           pitEnabled: pitEnabledVal,
           payeEnabled: payeEnabledVal
         });
+        ensureInventoriesForBusiness(id);
       }
       saveData();
       closeModal(businessModal);
@@ -690,6 +808,8 @@ GitHub Copilot Chat Assistant
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
+      populateInvItemSelect();
     });
 
     bizCancel.addEventListener('click', () => closeModal(businessModal));
@@ -699,6 +819,8 @@ GitHub Copilot Chat Assistant
       currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
+      populateInvItemSelect();
     });
 
     // Transactions: UI behavior
@@ -712,8 +834,61 @@ GitHub Copilot Chat Assistant
       if (!editTxnDep.checked) editTxnUseful.value = '';
     });
 
+    txnInventoryAction.addEventListener('change', () => {
+      const v = txnInventoryAction.value;
+      // hide all inventory-related fields first
+      invItemLabel.style.display = 'none';
+      invNewSkuLabel.style.display = 'none';
+      invNewNameLabel.style.display = 'none';
+      invQtyLabel.style.display = 'none';
+      invUnitCostLabel.style.display = 'none';
+      invSalePriceLabel.style.display = 'none';
+
+      if (v === 'None') return;
+      invItemLabel.style.display = '';
+      if (v === 'Add') {
+        invNewSkuLabel.style.display = '';
+        invNewNameLabel.style.display = '';
+        invQtyLabel.style.display = '';
+        invUnitCostLabel.style.display = '';
+        invSalePriceLabel.style.display = 'none';
+      } else if (v === 'Record') {
+        invNewSkuLabel.style.display = '';
+        invNewNameLabel.style.display = '';
+        invQtyLabel.style.display = '';
+        invUnitCostLabel.style.display = '';
+        invSalePriceLabel.style.display = 'none';
+      } else if (v === 'Sale') {
+        invNewSkuLabel.style.display = 'none';
+        invNewNameLabel.style.display = 'none';
+        invQtyLabel.style.display = '';
+        invUnitCostLabel.style.display = 'none';
+        invSalePriceLabel.style.display = '';
+      }
+      populateInvItemSelect();
+    });
+
+    invItemSelect.addEventListener('change', () => {
+      const val = invItemSelect.value;
+      if (val === '__new__') {
+        invNewSkuLabel.style.display = '';
+        invNewNameLabel.style.display = '';
+      } else {
+        invNewSkuLabel.style.display = 'none';
+        invNewNameLabel.style.display = 'none';
+      }
+    });
+
     btnAddTxn.addEventListener('click', () => {
       const date = document.getElementById('txnDate').value;
+      const inventoryAction = txnInventoryAction.value;
+      const invItemValue = invItemSelect.value;
+      const invQtyVal = parseInt(invQty.value) || 0;
+      const invUnitCostVal = parseFloat(invUnitCost.value);
+      const invSalePriceVal = parseFloat(invSalePrice.value);
+      const invNewSkuVal = (invNewSku.value || '').trim();
+      const invNewNameVal = (invNewName.value || '').trim();
+
       const type = document.getElementById('txnType').value;
       const category = document.getElementById('txnCategory').value;
       const desc = document.getElementById('txnDesc').value.trim();
@@ -726,6 +901,130 @@ GitHub Copilot Chat Assistant
         alert('Select user and business before adding a transaction.');
         return;
       }
+      if (!date) {
+        alert('Please select a date.');
+        return;
+      }
+
+      // handle inventory actions first (they may create transactions automatically)
+      if (inventoryAction === 'Add') {
+        if (!(invQtyVal > 0)) { alert('Enter a positive quantity for Add inventory.'); return; }
+        if (!(invUnitCostVal >= 0) || isNaN(invUnitCostVal)) { alert('Enter a valid unit cost for Add inventory.'); return; }
+        // determine item
+        let item = null;
+        ensureInventoriesForBusiness(selectedBusinessId);
+        if (invItemValue && invItemValue !== '__new__') {
+          item = data.inventories[selectedBusinessId].find(i => i.id === invItemValue);
+        }
+        if (!item) {
+          // create new with provided sku/name if present
+          const newSku = invNewSkuVal || ('SKU-' + Math.random().toString(36).slice(2,7));
+          const newName = invNewNameVal || ('Item ' + newSku);
+          item = { id: uid('inv'), sku: newSku, name: newName, qty: 0, unitCost: invUnitCostVal || 0 };
+          data.inventories[selectedBusinessId].push(item);
+        }
+        // update average cost
+        const oldQty = item.qty || 0;
+        const oldCost = (typeof item.unitCost === 'number') ? item.unitCost : 0;
+        const addedQty = invQtyVal;
+        const addedCost = (isNaN(invUnitCostVal) ? 0 : invUnitCostVal);
+        const newQty = oldQty + addedQty;
+        const newUnitCost = newQty > 0 ? ((oldQty * oldCost) + (addedQty * addedCost)) / newQty : 0;
+        item.qty = newQty;
+        item.unitCost = newUnitCost;
+        saveData();
+        renderInventory();
+        populateInvItemSelect();
+        // optional: still create a ledger transaction if main amount provided
+        if (amount > 0) {
+          const txn = { id: uid('txn'), date, type, category, desc, amount, whtApplied: whtAppliedVal, depreciable: depreciableVal };
+          if (usefulLifeVal && usefulLifeVal > 0) txn.usefulLifeYears = usefulLifeVal;
+          if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+          if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+          data.transactions[selectedUserId][selectedBusinessId].push(txn);
+          saveData();
+          renderLedger();
+          calculateSummary();
+        }
+        clearForm();
+        return;
+      } else if (inventoryAction === 'Record') {
+        if (!(invQtyVal >= 0)) { alert('Enter a non-negative quantity for Record inventory.'); return; }
+        // determine item
+        ensureInventoriesForBusiness(selectedBusinessId);
+        let item = null;
+        if (invItemValue && invItemValue !== '__new__') {
+          item = data.inventories[selectedBusinessId].find(i => i.id === invItemValue);
+        }
+        if (!item) {
+          // create new item using new sku/name
+          if (!invNewNameVal) { alert('Provide item name for new inventory record.'); return; }
+          const newSku = invNewSkuVal || ('SKU-' + Math.random().toString(36).slice(2,7));
+          item = { id: uid('inv'), sku: newSku, name: invNewNameVal, qty: invQtyVal, unitCost: (isNaN(invUnitCostVal) ? 0 : invUnitCostVal) };
+          data.inventories[selectedBusinessId].push(item);
+        } else {
+          // set qty and optionally unit cost
+          item.qty = invQtyVal;
+          if (!isNaN(invUnitCostVal)) item.unitCost = invUnitCostVal;
+        }
+        saveData();
+        renderInventory();
+        populateInvItemSelect();
+        // optional: create Adjustment expense if amount provided
+        if (amount > 0) {
+          const adjTxn = { id: uid('txn'), date, type: 'Expense', category: 'Inventory Adjustment', desc: desc || `Inventory adjustment for ${item.sku || item.name}`, amount, whtApplied: whtAppliedVal, depreciable: false };
+          if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+          if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+          data.transactions[selectedUserId][selectedBusinessId].push(adjTxn);
+          saveData();
+          renderLedger();
+          calculateSummary();
+        }
+        clearForm();
+        return;
+      } else if (inventoryAction === 'Sale') {
+        if (!(invQtyVal > 0)) { alert('Enter a positive sale quantity.'); return; }
+        if (!(invSalePriceVal > 0)) { alert('Enter a positive sale price per unit.'); return; }
+        ensureInventoriesForBusiness(selectedBusinessId);
+        let item = null;
+        if (invItemValue && invItemValue !== '__new__') {
+          item = data.inventories[selectedBusinessId].find(i => i.id === invItemValue);
+          if (!item) { alert('Selected inventory item not found.'); return; }
+        } else {
+          alert('Select an existing inventory item for sales. To add a new item use Add inventory first.'); return;
+        }
+        const available = item.qty || 0;
+        if (invQtyVal > available) {
+          if (!confirm(`Sale quantity (${invQtyVal}) exceeds available stock (${available}). Proceed and allow negative stock?`)) {
+            return;
+          }
+        }
+        // average cost method: use current average unitCost
+        const unitCostUsed = (typeof item.unitCost === 'number') ? item.unitCost : 0;
+        const costOfGoods = invQtyVal * unitCostUsed;
+        const revenue = invQtyVal * invSalePriceVal;
+        // decrease inventory
+        item.qty = available - invQtyVal;
+        saveData();
+        renderInventory();
+        populateInvItemSelect();
+
+        // create income transaction (revenue)
+        const incomeTxn = { id: uid('txn'), date, type: 'Income', category: category || 'Sales', desc: desc || `Sale: ${item.sku || item.name} x${invQtyVal}`, amount: revenue, whtApplied: whtAppliedVal, depreciable: false };
+        // create cogs transaction
+        const cogsTxn = { id: uid('txn'), date, type: 'COGS', category: 'COGS', desc: `COGS for ${item.sku || item.name} x${invQtyVal}`, amount: costOfGoods, whtApplied: false, depreciable: false };
+        if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+        if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+        data.transactions[selectedUserId][selectedBusinessId].push(incomeTxn);
+        data.transactions[selectedUserId][selectedBusinessId].push(cogsTxn);
+        saveData();
+        renderLedger();
+        calculateSummary();
+        clearForm();
+        return;
+      }
+
+      // default: no inventory action or None; proceed to create normal transaction
       if (!date || !desc || amount <= 0) {
         alert('Please fill all fields and enter a valid amount.');
         return;
@@ -756,6 +1055,20 @@ GitHub Copilot Chat Assistant
       txnDep.checked = false;
       txnUsefulLife.value = '';
       txnUsefulLifeLabel.style.display = 'none';
+
+      txnInventoryAction.value = 'None';
+      invItemSelect.innerHTML = '';
+      invNewSku.value = '';
+      invNewName.value = '';
+      invQty.value = '';
+      invUnitCost.value = '';
+      invSalePrice.value = '';
+      invItemLabel.style.display = 'none';
+      invNewSkuLabel.style.display = 'none';
+      invNewNameLabel.style.display = 'none';
+      invQtyLabel.style.display = 'none';
+      invUnitCostLabel.style.display = 'none';
+      invSalePriceLabel.style.display = 'none';
     }
 
     function renderLedger(){
@@ -918,6 +1231,120 @@ GitHub Copilot Chat Assistant
       calculateSummary();
     }
 
+    // Inventory rendering & management
+    function populateInvItemSelect(){
+      invItemSelect.innerHTML = '';
+      if (!selectedBusinessId) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No business selected';
+        invItemSelect.appendChild(opt);
+        return;
+      }
+      ensureInventoriesForBusiness(selectedBusinessId);
+      const items = data.inventories[selectedBusinessId] || [];
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '-- select item --';
+      invItemSelect.appendChild(placeholder);
+      items.forEach(i => {
+        const o = document.createElement('option');
+        o.value = i.id;
+        o.textContent = `${i.sku || ''} — ${i.name} (qty:${i.qty || 0})`;
+        invItemSelect.appendChild(o);
+      });
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new__';
+      newOpt.textContent = '-- Add new item --';
+      invItemSelect.appendChild(newOpt);
+    }
+
+    function renderInventory(){
+      inventoryTableBody.innerHTML = '';
+      if (!selectedBusinessId) return;
+      ensureInventoriesForBusiness(selectedBusinessId);
+      const items = data.inventories[selectedBusinessId] || [];
+      items.forEach(item => {
+        const tr = document.createElement('tr');
+        const value = (item.qty || 0) * (item.unitCost || 0);
+        tr.innerHTML = `
+          <td>${escapeHtml(item.sku || '')}</td>
+          <td>${escapeHtml(item.name || '')}</td>
+          <td>${item.qty || 0}</td>
+          <td>${formatNumber(item.unitCost || 0)}</td>
+          <td>${formatNumber(value || 0)}</td>
+          <td>
+            <div class="actions">
+              <button class="small" data-invid="${item.id}" data-action="edit">Edit</button>
+              <button class="small danger" data-invid="${item.id}" data-action="delete">Delete</button>
+            </div>
+          </td>`;
+        inventoryTableBody.appendChild(tr);
+      });
+
+      inventoryTableBody.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-invid');
+          const a = btn.getAttribute('data-action');
+          if (a === 'edit') openInventoryModal(id);
+          else if (a === 'delete') {
+            if (!confirm('Delete this inventory item?')) return;
+            data.inventories[selectedBusinessId] = (data.inventories[selectedBusinessId] || []).filter(it => it.id !== id);
+            saveData();
+            renderInventory();
+            populateInvItemSelect();
+          }
+        };
+      });
+    }
+
+    btnOpenInventoryModal.addEventListener('click', () => {
+      inventoryEditingId = null;
+      invModalSku.value = '';
+      invModalName.value = '';
+      invModalQty.value = '';
+      invModalUnitCost.value = '';
+      openModal(inventoryModal);
+    });
+
+    function openInventoryModal(itemId){
+      inventoryEditingId = itemId;
+      const items = data.inventories[selectedBusinessId] || [];
+      const it = items.find(x => x.id === itemId);
+      if (!it) { alert('Item not found'); return; }
+      invModalSku.value = it.sku || '';
+      invModalName.value = it.name || '';
+      invModalQty.value = (it.qty || 0);
+      invModalUnitCost.value = (it.unitCost || 0);
+      openModal(inventoryModal);
+    }
+
+    invModalCancel.addEventListener('click', () => closeModal(inventoryModal));
+    invModalSave.addEventListener('click', () => {
+      const sku = (invModalSku.value || '').trim();
+      const name = (invModalName.value || '').trim();
+      const qty = parseInt(invModalQty.value) || 0;
+      const cost = parseFloat(invModalUnitCost.value) || 0;
+      if (!name) { alert('Item name required'); return; }
+      ensureInventoriesForBusiness(selectedBusinessId);
+      if (inventoryEditingId) {
+        const items = data.inventories[selectedBusinessId];
+        const it = items.find(x => x.id === inventoryEditingId);
+        if (!it) return;
+        it.sku = sku || it.sku;
+        it.name = name;
+        it.qty = qty;
+        it.unitCost = cost;
+      } else {
+        const newItem = { id: uid('inv'), sku: sku || ('SKU-' + Math.random().toString(36).slice(2,7)), name, qty, unitCost: cost };
+        data.inventories[selectedBusinessId].push(newItem);
+      }
+      saveData();
+      closeModal(inventoryModal);
+      renderInventory();
+      populateInvItemSelect();
+    });
+
     // --- Summaries and tax calculations ---
     function calculateSummary(){
       const biz = findBiz(selectedBusinessId);
@@ -998,16 +1425,13 @@ GitHub Copilot Chat Assistant
         Net balance: ${currency}${formatNumber(netBalance)}`;
 
       taxSummaryDiv.innerHTML = `<strong>Taxes</strong><br/>
-        WHT withheld (approx): ${currency}${formatNumber(whtWithheldTotal)}<br/>
         PAYE (on salaries): ${currency}${formatNumber(payeTotal)}<br/>
-        PIT (progressive): ${currency}${formatNumber(pitLiability)}<br/>
-        CIT taxable: ${currency}${formatNumber(citTaxable)}<br/>
-        CIT (at ${ (biz && typeof biz.citRate==='number') ? biz.citRate : DEFAULT_BUSINESS_TAX.citRate }%): ${currency}${formatNumber(citLiability)}<br/>
-        Rent relief applied: ${currency}${formatNumber(rentRelief)}
-      `;
+        PIT (personal): ${currency}${formatNumber(pitLiability)}<br/>
+        CIT (company): ${currency}${formatNumber(citLiability)}<br/>
+        WHT withheld: ${currency}${formatNumber(whtWithheldTotal)}`;
     }
 
-    // Export / Import / Clear
+    // Export/Import/clear
     btnExport.addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -1021,66 +1445,57 @@ GitHub Copilot Chat Assistant
     });
 
     btnImport.addEventListener('click', () => fileInput.click());
-
-    fileInput.addEventListener('change', async (e) => {
+    fileInput.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
-      if (!confirm('Importing will replace current data. Continue?')) { fileInput.value = ''; return; }
-      try {
-        const text = await f.text();
-        const parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object') {
-          data = parsed;
-          if (!data.users) data.users = [];
-          if (!data.businesses) data.businesses = [];
-          if (!data.transactions) data.transactions = {};
-          data.businesses.forEach(b => ensureBizDefaults(b));
-          saveData();
-          refreshUserBusinessSelectors();
-          ensureSelection();
-          currentPage = 1;
-          renderLedger();
-          calculateSummary();
-          alert('Import successful.');
-        } else {
-          alert('Invalid file.');
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          if (parsed && typeof parsed === 'object') {
+            data = parsed;
+            if (!data.users) data.users = [];
+            if (!data.businesses) data.businesses = [];
+            if (!data.transactions) data.transactions = {};
+            if (!data.inventories) data.inventories = {};
+            data.businesses.forEach(b => { ensureBizDefaults(b); ensureInventoriesForBusiness(b.id); });
+            saveData();
+            refreshUserBusinessSelectors();
+            ensureSelection();
+            renderLedger();
+            calculateSummary();
+            renderInventory();
+            populateInvItemSelect();
+            alert('Import successful');
+          }
+        } catch (err) {
+          alert('Invalid JSON file.');
         }
-      } catch(err){
-        alert('Failed to import: ' + err.message);
-      } finally {
-        fileInput.value = '';
-      }
+      };
+      reader.readAsText(f);
     });
 
     btnClearAll.addEventListener('click', () => {
-      if (!confirm('Clear all stored data? This cannot be undone.')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      data = { users: [], businesses: [], transactions: {} };
+      if (!confirm('Clear all data? This cannot be undone.')) return;
+      data = { users: [], businesses: [], transactions: {}, inventories: {} };
+      saveData();
       loadData();
       refreshUserBusinessSelectors();
       ensureSelection();
-      currentPage = 1;
       renderLedger();
       calculateSummary();
+      renderInventory();
+      populateInvItemSelect();
     });
 
-    // initial render handlers for page load
-    function initialFixes(){
-      // wire modal close states for user and biz cancel buttons
-      userCancel.addEventListener('click', () => closeModal(userModal));
-      bizCancel.addEventListener('click', () => closeModal(businessModal));
-    }
-    initialFixes();
+    // initial listeners for page refreshes
+    userSelect.addEventListener('change', () => {});
+    businessSelect.addEventListener('change', () => {});
 
-    // wire edit modal useful life display
-    editTxnDep.addEventListener('change', () => {
-      editTxnUsefulLabel.style.display = editTxnDep.checked ? '' : 'none';
-      if (!editTxnDep.checked) editTxnUseful.value = '';
-    });
+    // Ensure real-time updates when filters change
+    ledgerSearch.addEventListener('input', () => ledgerFilterText = ledgerSearch.value || '');
 
-    // ensure ledger and summary refresh on load
-    renderLedger();
-    calculateSummary();
   </script>
+  <footer class="muted">Nigeria Accounting & Tax (VAT) — demo app. Data stored locally in your browser.</footer>
 </body>
-</html>
+  </html>
