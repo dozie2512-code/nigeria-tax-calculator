@@ -97,6 +97,17 @@ Paste this file into your repository as index.html (replacing existing) and relo
       <div class="form-inline">
         <label>Date: <input type="date" id="txnDate" /></label>
 
+        <label id="txnTypeLabel">Type:
+          <select id="txnType">
+            <option value="Other">Other</option>
+            <option value="Sale">Sale</option>
+            <option value="Receipt">Receipt</option>
+            <option value="Payment">Payment</option>
+            <option value="Purchase">Purchase</option>
+            <option value="Expense">Expense</option>
+          </select>
+        </label>
+
         <label>Inventory action:
           <select id="txnInventoryAction">
             <option value="None">None</option>
@@ -126,6 +137,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
         <label id="whtLabel" style="display:flex;align-items:center;gap:6px;">
           <input type="checkbox" id="txnWht" /> WHT applied
         </label>
+        <label id="txnWhtRateLabel" style="display:none;">WHT rate override (%): <input type="number" id="txnWhtRate" class="smallInput" min="0" step="0.01" placeholder="Optional" /></label>
         <label id="whtModeOverrideLabel" style="display:flex;align-items:center;gap:6px;">
           <input type="checkbox" id="txnWhtOverride" /> Use opposite WHT base (override biz default)
         </label>
@@ -151,6 +163,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
         <thead>
           <tr>
             <th>Date</th>
+            <th>Type</th>
             <th>Account</th>
             <th>Description</th>
             <th>Amount</th>
@@ -271,6 +284,24 @@ Paste this file into your repository as index.html (replacing existing) and relo
       <label>Opening capital allowance balance (₦): <input type="number" id="bizOpeningCA" class="smallInput" min="0" step="0.01" /></label>
     </div>
 
+    <div class="row">
+      <label><input type="checkbox" id="bizHideTaxableIncomeComputation" /> Hide taxable income computations (show only final number)</label>
+    </div>
+
+    <div style="margin-top:8px;margin-bottom:8px;">
+      <strong>Tax Summary Lines to Display:</strong>
+      <div class="row">
+        <label><input type="checkbox" id="bizShowVat" /> VAT</label>
+        <label><input type="checkbox" id="bizShowWht" /> WHT</label>
+        <label><input type="checkbox" id="bizShowPaye" /> PAYE</label>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="bizShowTaxableIncome" /> Taxable Income</label>
+        <label><input type="checkbox" id="bizShowPit" /> PIT</label>
+        <label><input type="checkbox" id="bizShowCit" /> CIT</label>
+      </div>
+    </div>
+
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
@@ -281,6 +312,16 @@ Paste this file into your repository as index.html (replacing existing) and relo
   <div id="editModal" class="modal" aria-hidden="true">
     <h3>Edit Transaction</h3>
     <label>Date: <input type="date" id="editTxnDate" /></label><br/>
+    <label>Type:
+      <select id="editTxnType">
+        <option value="Other">Other</option>
+        <option value="Sale">Sale</option>
+        <option value="Receipt">Receipt</option>
+        <option value="Payment">Payment</option>
+        <option value="Purchase">Purchase</option>
+        <option value="Expense">Expense</option>
+      </select>
+    </label><br/>
     <label>Account:
       <select id="editTxnAccount"></select>
     </label><br/>
@@ -288,6 +329,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
     <label>Amount (₦): <input type="number" id="editTxnAmount" min="0" step="0.01" /></label><br/>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="editTxnWht" /> WHT applied</label>
+      <label id="editTxnWhtRateLabel" style="display:none;">WHT rate override (%): <input type="number" id="editTxnWhtRate" class="smallInput" min="0" step="0.01" placeholder="Optional" /></label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="editTxnWhtOverride" /> Use opposite WHT base</label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="editTxnDep" /> Depreciable</label>
       <label id="editTxnUsefulLabel" style="display:none;">Useful life (yrs): <input type="number" id="editTxnUseful" class="smallInput" min="1" step="1" /></label>
@@ -319,12 +361,20 @@ Paste this file into your repository as index.html (replacing existing) and relo
     <div id="accountsList" style="margin-bottom:12px;"></div>
     <div style="display:flex;gap:8px;align-items:center;">
       <input type="text" id="newAccountName" placeholder="Account name" style="flex:1;" />
+      <select id="newAccountCategory">
+        <option value="">-- Category --</option>
+        <option value="Asset">Asset</option>
+        <option value="Liability">Liability</option>
+        <option value="Capital">Capital</option>
+        <option value="Revenue">Revenue</option>
+        <option value="Expense">Expense</option>
+      </select>
       <button id="addAccountBtn" class="small">Add Account</button>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
       <button id="closeAccountsBtn">Close</button>
     </div>
-    <small class="note">You cannot delete an account that has transactions. Rename and add accounts freely.</small>
+    <small class="note">You cannot delete an account that has transactions. Rename and add accounts freely. Each account should have a category.</small>
   </div>
 
   <div id="assetsModal" class="modal" aria-hidden="true">
@@ -389,7 +439,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
 
   <script>
     // GitHub Copilot Chat Assistant
-    const STORAGE_KEY = 'ntc_data_v3';
+    const STORAGE_KEY = 'ntc_data_v4';
 
     const DEFAULT_PIT = {
       threshold: 800000,
@@ -444,6 +494,20 @@ Paste this file into your repository as index.html (replacing existing) and relo
       if (!Array.isArray(biz.accounts)) biz.accounts = [];
       if (typeof biz.whtMode === 'undefined') biz.whtMode = 'gross';
       if (typeof biz.openingCapitalAllowanceBalance === 'undefined') biz.openingCapitalAllowanceBalance = 0;
+      // New tax summary visibility settings (default all to true)
+      if (typeof biz.showVat === 'undefined') biz.showVat = true;
+      if (typeof biz.showWht === 'undefined') biz.showWht = true;
+      if (typeof biz.showPaye === 'undefined') biz.showPaye = true;
+      if (typeof biz.showTaxableIncome === 'undefined') biz.showTaxableIncome = true;
+      if (typeof biz.showPit === 'undefined') biz.showPit = true;
+      if (typeof biz.showCit === 'undefined') biz.showCit = true;
+      if (typeof biz.hideTaxableIncomeComputation === 'undefined') biz.hideTaxableIncomeComputation = false;
+      // Ensure all accounts have category
+      if (Array.isArray(biz.accounts)) {
+        biz.accounts.forEach(acct => {
+          if (!acct.category) acct.category = '';
+        });
+      }
     }
 
     function ensureInventoriesForBusiness(bizId){
@@ -531,6 +595,12 @@ Paste this file into your repository as index.html (replacing existing) and relo
         for (const bid of Object.keys(perUser || {})){
           const arr = perUser[bid] || [];
           for (const txn of arr){
+            // Ensure transaction has type field (default to 'Other' for older data)
+            if (!txn.type) txn.type = 'Other';
+            
+            // Ensure whtRateOverride field exists
+            if (typeof txn.whtRateOverride === 'undefined') txn.whtRateOverride = null;
+            
             if (txn.accountId) continue;
             let acctName = txn.accountName || null;
             if (!acctName) {
@@ -548,7 +618,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
             ensureBizDefaults(biz);
             let acct = biz.accounts.find(a => a.name === acctName);
             if (!acct){
-              acct = { id: uid('acct'), name: acctName };
+              acct = { id: uid('acct'), name: acctName, category: '' };
               biz.accounts.push(acct);
             }
             txn.accountId = acct.id;
@@ -612,14 +682,24 @@ Paste this file into your repository as index.html (replacing existing) and relo
     const bizCancel = document.getElementById('bizCancel');
     const bizWhtMode = document.getElementById('bizWhtMode');
     const bizOpeningCA = document.getElementById('bizOpeningCA');
+    const bizHideTaxableIncomeComputation = document.getElementById('bizHideTaxableIncomeComputation');
+    const bizShowVat = document.getElementById('bizShowVat');
+    const bizShowWht = document.getElementById('bizShowWht');
+    const bizShowPaye = document.getElementById('bizShowPaye');
+    const bizShowTaxableIncome = document.getElementById('bizShowTaxableIncome');
+    const bizShowPit = document.getElementById('bizShowPit');
+    const bizShowCit = document.getElementById('bizShowCit');
 
     // Edit modal
     const editModal = document.getElementById('editModal');
     const editTxnDate = document.getElementById('editTxnDate');
+    const editTxnType = document.getElementById('editTxnType');
     const editTxnAccount = document.getElementById('editTxnAccount');
     const editTxnDesc = document.getElementById('editTxnDesc');
     const editTxnAmount = document.getElementById('editTxnAmount');
     const editTxnWht = document.getElementById('editTxnWht');
+    const editTxnWhtRate = document.getElementById('editTxnWhtRate');
+    const editTxnWhtRateLabel = document.getElementById('editTxnWhtRateLabel');
     const editTxnWhtOverride = document.getElementById('editTxnWhtOverride');
     const editTxnDep = document.getElementById('editTxnDep');
     const editTxnUseful = document.getElementById('editTxnUseful');
@@ -628,7 +708,10 @@ Paste this file into your repository as index.html (replacing existing) and relo
     const editSaveBtn = document.getElementById('editSaveBtn');
 
     // Add txn fields
+    const txnType = document.getElementById('txnType');
     const txnWht = document.getElementById('txnWht');
+    const txnWhtRate = document.getElementById('txnWhtRate');
+    const txnWhtRateLabel = document.getElementById('txnWhtRateLabel');
     const txnWhtOverride = document.getElementById('txnWhtOverride');
     const txnDep = document.getElementById('txnDep');
     const txnUsefulLife = document.getElementById('txnUsefulLife');
@@ -688,6 +771,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
     const accountsList = document.getElementById('accountsList');
     const addAccountBtn = document.getElementById('addAccountBtn');
     const newAccountName = document.getElementById('newAccountName');
+    const newAccountCategory = document.getElementById('newAccountCategory');
     const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
     // Assets UI
@@ -984,6 +1068,13 @@ Paste this file into your repository as index.html (replacing existing) and relo
       bizPayeEnabled.checked = true;
       bizWhtMode.value = 'gross';
       bizOpeningCA.value = 0;
+      bizHideTaxableIncomeComputation.checked = false;
+      bizShowVat.checked = true;
+      bizShowWht.checked = true;
+      bizShowPaye.checked = true;
+      bizShowTaxableIncome.checked = true;
+      bizShowPit.checked = true;
+      bizShowCit.checked = true;
       bizEditingId = null;
       openModal(businessModal);
     });
@@ -1008,6 +1099,13 @@ Paste this file into your repository as index.html (replacing existing) and relo
       bizAccounts.value = (b.accounts || []).map(a => a.name).join(',');
       bizWhtMode.value = b.whtMode || 'gross';
       bizOpeningCA.value = b.openingCapitalAllowanceBalance || 0;
+      bizHideTaxableIncomeComputation.checked = !!b.hideTaxableIncomeComputation;
+      bizShowVat.checked = (typeof b.showVat === 'undefined') ? true : !!b.showVat;
+      bizShowWht.checked = (typeof b.showWht === 'undefined') ? true : !!b.showWht;
+      bizShowPaye.checked = (typeof b.showPaye === 'undefined') ? true : !!b.showPaye;
+      bizShowTaxableIncome.checked = (typeof b.showTaxableIncome === 'undefined') ? true : !!b.showTaxableIncome;
+      bizShowPit.checked = (typeof b.showPit === 'undefined') ? true : !!b.showPit;
+      bizShowCit.checked = (typeof b.showCit === 'undefined') ? true : !!b.showCit;
       bizEditingId = b.id;
       openModal(businessModal);
     });
@@ -1051,6 +1149,13 @@ Paste this file into your repository as index.html (replacing existing) and relo
       const accountsStr = (bizAccounts.value || '').trim();
       const whtModeVal = bizWhtMode.value || 'gross';
       const openingCAVal = Number(bizOpeningCA.value) || 0;
+      const hideTaxableIncomeComputationVal = !!bizHideTaxableIncomeComputation.checked;
+      const showVatVal = !!bizShowVat.checked;
+      const showWhtVal = !!bizShowWht.checked;
+      const showPayeVal = !!bizShowPaye.checked;
+      const showTaxableIncomeVal = !!bizShowTaxableIncome.checked;
+      const showPitVal = !!bizShowPit.checked;
+      const showCitVal = !!bizShowCit.checked;
       if (!name) { alert('Business name required'); return; }
       if (!ownerIdVal) { alert('Select owner'); return; }
       const parsedAccounts = accountsStr ? accountsStr.split(',').map(s=>s.trim()).filter(Boolean) : [];
@@ -1071,6 +1176,13 @@ Paste this file into your repository as index.html (replacing existing) and relo
         b.payeEnabled = payeEnabledVal;
         b.whtMode = whtModeVal;
         b.openingCapitalAllowanceBalance = openingCAVal;
+        b.hideTaxableIncomeComputation = hideTaxableIncomeComputationVal;
+        b.showVat = showVatVal;
+        b.showWht = showWhtVal;
+        b.showPaye = showPayeVal;
+        b.showTaxableIncome = showTaxableIncomeVal;
+        b.showPit = showPitVal;
+        b.showCit = showCitVal;
         const newAccounts = [];
         parsedAccounts.forEach(nameVal => {
           const existing = b.accounts.find(a=>a.name===nameVal);
@@ -1095,7 +1207,14 @@ Paste this file into your repository as index.html (replacing existing) and relo
           payeEnabled: payeEnabledVal,
           accounts,
           whtMode: whtModeVal,
-          openingCapitalAllowanceBalance: openingCAVal
+          openingCapitalAllowanceBalance: openingCAVal,
+          hideTaxableIncomeComputation: hideTaxableIncomeComputationVal,
+          showVat: showVatVal,
+          showWht: showWhtVal,
+          showPaye: showPayeVal,
+          showTaxableIncome: showTaxableIncomeVal,
+          showPit: showPitVal,
+          showCit: showCitVal
         });
         ensureInventoriesForBusiness(id);
         ensureAssetsForBusiness(id);
@@ -1128,6 +1247,16 @@ Paste this file into your repository as index.html (replacing existing) and relo
     });
 
     // Transactions: UI behavior
+    txnWht.addEventListener('change', () => {
+      txnWhtRateLabel.style.display = txnWht.checked ? '' : 'none';
+      if (!txnWht.checked) txnWhtRate.value = '';
+    });
+
+    editTxnWht.addEventListener('change', () => {
+      editTxnWhtRateLabel.style.display = editTxnWht.checked ? '' : 'none';
+      if (!editTxnWht.checked) editTxnWhtRate.value = '';
+    });
+
     txnDep.addEventListener('change', () => {
       txnUsefulLifeLabel.style.display = txnDep.checked ? '' : 'none';
       if (!txnDep.checked) txnUsefulLife.value = '';
@@ -1263,39 +1392,54 @@ Paste this file into your repository as index.html (replacing existing) and relo
       const desc = (document.getElementById('txnDesc').value || '').trim();
       const amount = Number(document.getElementById('txnAmount').value) || 0;
       const acctId = txnAccount.value || '';
+      const txnTypeVal = txnType.value || 'Other';
       const whtApplied = !!txnWht.checked;
+      const whtRateOverride = txnWhtRate.value ? Number(txnWhtRate.value) : null;
       const whtOverride = !!txnWhtOverride.checked;
       const depFlag = !!txnDep.checked;
       const usefulLife = Number(txnUsefulLife.value) || biz.defaultUsefulLifeYears;
 
-      // function to compute WHT amount for given amount and baseMode (gross/net)
-      function computeWhtAmount(baseAmount, baseMode, biz){
-        const whtRate = (biz && typeof biz.whtRate === 'number') ? biz.whtRate : DEFAULT_BUSINESS_TAX.whtRate;
-        if (!whtRate) return 0;
+      // Check if transaction type is VAT-applicable (Sale, Receipt, Payment)
+      const isVatApplicable = biz.vatEnabled && ['Sale', 'Receipt', 'Payment'].includes(txnTypeVal);
+
+      // function to compute WHT amount with gross-up behavior when WHT is applied
+      function computeWhtAmount(baseAmount, baseMode, biz, whtRateOverride, whtApplied){
+        if (!whtApplied) return { whtAmount: 0, grossAmount: baseAmount };
+        
+        // Use override rate if provided, otherwise use business rate
+        const whtRate = whtRateOverride !== null ? whtRateOverride : (biz && typeof biz.whtRate === 'number' ? biz.whtRate : DEFAULT_BUSINESS_TAX.whtRate);
+        if (!whtRate || whtRate === 0) return { whtAmount: 0, grossAmount: baseAmount };
+        
         const vatRate = (biz && typeof biz.vatRate === 'number') ? biz.vatRate : 0;
-        let whtBase = baseAmount;
-        if (baseMode === 'net'){
-          // net = amount net of VAT (assume baseAmount includes VAT if applied)
-          const vatAmount = biz && biz.vatEnabled ? (baseAmount * vatRate / 100) : 0;
-          whtBase = Math.max(0, baseAmount - vatAmount);
-        }
-        return Number((whtBase * (whtRate/100)).toFixed(2));
+        
+        // Gross-up behavior: net amount is entered, compute gross
+        // gross = net / (1 - whtRate/100)
+        // whtAmount = gross * (whtRate/100)
+        const netAmount = baseAmount;
+        const grossAmount = netAmount / (1 - whtRate / 100);
+        const whtAmount = grossAmount * (whtRate / 100);
+        
+        return { whtAmount: Number(whtAmount.toFixed(2)), grossAmount: Number(grossAmount.toFixed(2)) };
       }
 
       // handle inventory actions
       if (inventoryAction === 'None'){
         // regular transaction
+        const whtCalc = computeWhtAmount(amount, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz, whtRateOverride, whtApplied);
         const txn = {
           id: uid('txn'),
-          date, accountId: acctId, accountName: findAccount(selectedBusinessId, acctId) ? findAccount(selectedBusinessId, acctId).name : '',
+          date, 
+          accountId: acctId, 
+          accountName: findAccount(selectedBusinessId, acctId) ? findAccount(selectedBusinessId, acctId).name : '',
           description: desc,
           amount,
-          vatRate: biz.vatEnabled ? (biz.vatRate || 0) : 0,
-          vatAmount: biz.vatEnabled ? Number((amount * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
+          type: txnTypeVal,
+          vatRate: isVatApplicable ? (biz.vatRate || 0) : 0,
+          vatAmount: isVatApplicable ? Number((amount * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
           whtApplied,
+          whtRateOverride: whtRateOverride,
           whtOverride, // per-txn override of WHT base
-          // compute wht amount using business default or override
-          whtAmount: whtApplied ? computeWhtAmount(amount, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz) : 0,
+          whtAmount: whtCalc.whtAmount,
           depreciable: depFlag,
           usefulLife: depFlag ? usefulLife : null
         };
@@ -1329,18 +1473,23 @@ Paste this file into your repository as index.html (replacing existing) and relo
           saveData();
           // create purchase transaction (optionally)
           const purchasesAcct = findAccountByName(biz, 'Purchases') || findAccountByName(biz, 'Inventory') || (biz.accounts[0] || null);
+          const purchaseAmt = unitCostVal * qtyVal;
+          const isPurchaseVatApplicable = biz.vatEnabled && inventoryAction === 'Purchase';
+          const whtCalcPurchase = computeWhtAmount(purchaseAmt, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz, whtRateOverride, whtApplied);
           const txn = {
             id: uid('txn'),
             date,
             accountId: purchasesAcct ? purchasesAcct.id : '',
             accountName: purchasesAcct ? purchasesAcct.name : '',
             description: `Inventory purchase: ${item.sku || ''} ${item.name || ''}`,
-            amount: unitCostVal * qtyVal,
-            vatRate: biz.vatEnabled ? (biz.vatRate || 0) : 0,
-            vatAmount: biz.vatEnabled ? Number(((unitCostVal * qtyVal) * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
+            amount: purchaseAmt,
+            type: 'Purchase',
+            vatRate: isPurchaseVatApplicable ? (biz.vatRate || 0) : 0,
+            vatAmount: isPurchaseVatApplicable ? Number((purchaseAmt * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
             whtApplied,
+            whtRateOverride: whtRateOverride,
             whtOverride,
-            whtAmount: whtApplied ? computeWhtAmount(unitCostVal * qtyVal, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz) : 0,
+            whtAmount: whtCalcPurchase.whtAmount,
             depreciable: false
           };
           data.transactions[selectedUserId][selectedBusinessId].push(txn);
@@ -1359,18 +1508,23 @@ Paste this file into your repository as index.html (replacing existing) and relo
           saveData();
           // create sales transaction (revenue)
           const salesAcct = findAccountByName(biz, 'Sales') || (biz.accounts[0] || null);
+          const saleAmt = Number((salePrice * qtyVal).toFixed(2));
+          const isSaleVatApplicable = biz.vatEnabled; // Sale is always VAT-applicable if VAT enabled
+          const whtCalcSale = computeWhtAmount(saleAmt, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz, whtRateOverride, whtApplied);
           const saleTxn = {
             id: uid('txn'),
             date,
             accountId: salesAcct ? salesAcct.id : '',
             accountName: salesAcct ? salesAcct.name : '',
             description: `Sale: ${item.sku || ''} ${item.name || ''}`,
-            amount: Number((salePrice * qtyVal).toFixed(2)),
-            vatRate: biz.vatEnabled ? (biz.vatRate || 0) : 0,
-            vatAmount: biz.vatEnabled ? Number(((salePrice * qtyVal) * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
+            amount: saleAmt,
+            type: 'Sale',
+            vatRate: isSaleVatApplicable ? (biz.vatRate || 0) : 0,
+            vatAmount: isSaleVatApplicable ? Number((saleAmt * (biz.vatRate || 0) / 100).toFixed(2)) : 0,
             whtApplied,
+            whtRateOverride: whtRateOverride,
             whtOverride,
-            whtAmount: whtApplied ? computeWhtAmount(salePrice * qtyVal, (whtOverride ? (biz.whtMode === 'gross' ? 'net' : 'gross') : biz.whtMode), biz) : 0,
+            whtAmount: whtCalcSale.whtAmount,
             depreciable: false
           };
           data.transactions[selectedUserId][selectedBusinessId].push(saleTxn);
@@ -1379,7 +1533,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
           let cogsAccountToUse = cogsAcct;
           if (!cogsAccountToUse){
             // create 'COGS' account if not present
-            const newAcct = { id: uid('acct'), name: 'COGS' };
+            const newAcct = { id: uid('acct'), name: 'COGS', category: 'Expense' };
             biz.accounts.push(newAcct);
             cogsAccountToUse = newAcct;
           }
@@ -1390,9 +1544,11 @@ Paste this file into your repository as index.html (replacing existing) and relo
             accountName: cogsAccountToUse.name,
             description: `COGS for sale ${item.sku || ''} ${item.name || ''}`,
             amount: totalCOGS,
+            type: 'Expense',
             vatRate: 0,
             vatAmount: 0,
             whtApplied: false,
+            whtRateOverride: null,
             whtOverride: false,
             whtAmount: 0,
             depreciable: false
@@ -1402,6 +1558,42 @@ Paste this file into your repository as index.html (replacing existing) and relo
       }
 
       saveData();
+      
+      // Reset form to sensible defaults after adding transaction
+      document.getElementById('txnDate').value = new Date().toISOString().slice(0,10);
+      txnType.value = 'Other';
+      txnInventoryAction.value = 'None';
+      document.getElementById('txnDesc').value = '';
+      document.getElementById('txnAmount').value = '';
+      txnWht.checked = false;
+      txnWhtRate.value = '';
+      txnWhtRateLabel.style.display = 'none';
+      txnWhtOverride.checked = false;
+      txnDep.checked = false;
+      txnUsefulLife.value = '';
+      txnUsefulLifeLabel.style.display = 'none';
+      
+      // Clear and hide inventory fields
+      invNewSku.value = '';
+      invNewName.value = '';
+      invQty.value = '';
+      invUnitCost.value = '';
+      invSalePrice.value = '';
+      invItemLabel.style.display = 'none';
+      invNewSkuLabel.style.display = 'none';
+      invNewNameLabel.style.display = 'none';
+      invQtyLabel.style.display = 'none';
+      invUnitCostLabel.style.display = 'none';
+      invSalePriceLabel.style.display = 'none';
+      
+      // Show standard fields
+      descLabel.style.display = '';
+      amountLabel.style.display = '';
+      acctLabel.style.display = '';
+      whtLabel.style.display = 'inline-flex';
+      whtModeOverrideLabel.style.display = 'inline-flex';
+      depLabel.style.display = 'inline-flex';
+      
       populateInvItemSelect();
       populateAccountSelect();
       renderLedger();
@@ -1428,7 +1620,7 @@ Paste this file into your repository as index.html (replacing existing) and relo
       pageIndicator.textContent = `Page ${currentPage} / ${pageCount}`;
       pageItems.forEach(tx=>{
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHtml(tx.date||'')}</td><td>${escapeHtml(tx.accountName||'')}</td><td>${escapeHtml(tx.description||'')}</td><td>${formatNumber(tx.amount||0)}</td><td>${formatNumber(tx.vatAmount||0)}</td><td>${formatNumber(tx.whtAmount||0)}</td><td>${tx.depreciable?escapeHtml(String(tx.usefulLife||'')):''}</td><td><button class="small" data-id="${tx.id}" data-action="edit">Edit</button> <button class="small danger" data-id="${tx.id}" data-action="del">Delete</button></td>`;
+        tr.innerHTML = `<td>${escapeHtml(tx.date||'')}</td><td>${escapeHtml(tx.type||'Other')}</td><td>${escapeHtml(tx.accountName||'')}</td><td>${escapeHtml(tx.description||'')}</td><td>${formatNumber(tx.amount||0)}</td><td>${formatNumber(tx.vatAmount||0)}</td><td>${formatNumber(tx.whtAmount||0)}</td><td>${tx.depreciable?escapeHtml(String(tx.usefulLife||'')):''}</td><td><button class="small" data-id="${tx.id}" data-action="edit">Edit</button> <button class="small danger" data-id="${tx.id}" data-action="del">Delete</button></td>`;
         ledgerTbody.appendChild(tr);
       });
     }
@@ -1453,11 +1645,14 @@ Paste this file into your repository as index.html (replacing existing) and relo
         const tx = arr.find(x=>x.id===id);
         if (!tx) return;
         editTxnDate.value = tx.date || '';
+        editTxnType.value = tx.type || 'Other';
         populateAccountSelect();
         if (tx.accountId) editTxnAccount.value = tx.accountId;
         editTxnDesc.value = tx.description || '';
         editTxnAmount.value = tx.amount || 0;
         editTxnWht.checked = !!tx.whtApplied;
+        editTxnWhtRate.value = tx.whtRateOverride || '';
+        editTxnWhtRateLabel.style.display = editTxnWht.checked ? '' : 'none';
         editTxnWhtOverride.checked = !!tx.whtOverride;
         editTxnDep.checked = !!tx.depreciable;
         editTxnUseful.value = tx.usefulLife || '';
@@ -1472,16 +1667,35 @@ Paste this file into your repository as index.html (replacing existing) and relo
       const arr = data.transactions[selectedUserId][selectedBusinessId];
       const tx = arr.find(x=>x.id===editingTxnRef);
       if (!tx) return closeModal(editModal);
+      const biz = findBiz(selectedBusinessId);
       tx.date = editTxnDate.value || tx.date;
+      tx.type = editTxnType.value || tx.type || 'Other';
       tx.accountId = editTxnAccount.value || tx.accountId;
       const acct = findAccount(selectedBusinessId, tx.accountId);
       tx.accountName = acct ? acct.name : tx.accountName;
       tx.description = editTxnDesc.value || tx.description;
       tx.amount = Number(editTxnAmount.value) || 0;
       tx.whtApplied = !!editTxnWht.checked;
+      tx.whtRateOverride = editTxnWhtRate.value ? Number(editTxnWhtRate.value) : null;
       tx.whtOverride = !!editTxnWhtOverride.checked;
       tx.depreciable = !!editTxnDep.checked;
-      tx.usefulLife = tx.depreciable ? (Number(editTxnUseful.value) || findBiz(selectedBusinessId).defaultUsefulLifeYears) : null;
+      tx.usefulLife = tx.depreciable ? (Number(editTxnUseful.value) || biz.defaultUsefulLifeYears) : null;
+      
+      // Recalculate VAT and WHT based on updated transaction
+      const isVatApplicable = biz.vatEnabled && ['Sale', 'Receipt', 'Payment'].includes(tx.type);
+      tx.vatRate = isVatApplicable ? (biz.vatRate || 0) : 0;
+      tx.vatAmount = isVatApplicable ? Number((tx.amount * (biz.vatRate || 0) / 100).toFixed(2)) : 0;
+      
+      // Recalculate WHT with gross-up
+      if (tx.whtApplied) {
+        const whtRate = tx.whtRateOverride !== null ? tx.whtRateOverride : (biz.whtRate || 0);
+        const netAmount = tx.amount;
+        const grossAmount = netAmount / (1 - whtRate / 100);
+        tx.whtAmount = Number((grossAmount * (whtRate / 100)).toFixed(2));
+      } else {
+        tx.whtAmount = 0;
+      }
+      
       saveData();
       closeModal(editModal);
       renderLedger();
@@ -1568,10 +1782,24 @@ Paste this file into your repository as index.html (replacing existing) and relo
         row.style.display = 'flex';
         row.style.gap = '8px';
         row.style.marginBottom = '6px';
+        row.style.alignItems = 'center';
+        
         const inp = document.createElement('input');
         inp.value = a.name;
         inp.style.flex = '1';
         inp.addEventListener('change', () => { a.name = inp.value; saveData(); refreshUserBusinessSelectors(); populateAccountSelect(); });
+        
+        const catSel = document.createElement('select');
+        catSel.innerHTML = `<option value="">-- Category --</option><option value="Asset">Asset</option><option value="Liability">Liability</option><option value="Capital">Capital</option><option value="Revenue">Revenue</option><option value="Expense">Expense</option>`;
+        catSel.value = a.category || '';
+        catSel.addEventListener('change', () => { a.category = catSel.value; saveData(); });
+        
+        const catLabel = document.createElement('span');
+        catLabel.textContent = a.category ? `[${a.category}]` : '[No category]';
+        catLabel.style.fontSize = '0.85rem';
+        catLabel.style.color = 'var(--muted)';
+        catLabel.style.minWidth = '100px';
+        
         const del = document.createElement('button');
         del.className = 'small';
         del.textContent = 'Delete';
@@ -1585,7 +1813,10 @@ Paste this file into your repository as index.html (replacing existing) and relo
           saveData();
           btnManageAccounts.click();
         });
+        
         row.appendChild(inp);
+        row.appendChild(catSel);
+        row.appendChild(catLabel);
         row.appendChild(del);
         accountsList.appendChild(row);
       });
@@ -1593,11 +1824,13 @@ Paste this file into your repository as index.html (replacing existing) and relo
     });
     addAccountBtn.addEventListener('click', () => {
       const name = (newAccountName.value || '').trim();
+      const category = newAccountCategory.value || '';
       if (!name) return;
       const biz = findBiz(selectedBusinessId);
       if (!biz) return;
-      biz.accounts.push({ id: uid('acct'), name });
+      biz.accounts.push({ id: uid('acct'), name, category });
       newAccountName.value = '';
+      newAccountCategory.value = '';
       saveData();
       btnManageAccounts.click();
     });
@@ -1873,26 +2106,66 @@ Paste this file into your repository as index.html (replacing existing) and relo
 
       // render summaries
       vatSummaryDiv.innerHTML = `<strong>VAT summary</strong><div>Total VAT (collected/paid): ₦${formatNumber(totalVAT)}</div>`;
-      totalsSummaryDiv.innerHTML = `<strong>Accounting summary</strong>
+      
+      // Conditionally show/hide taxable income computation details
+      let totalsSummaryHTML = `<strong>Accounting summary</strong>
         <div>Total Revenue: ₦${formatNumber(totalRevenue)}</div>
         <div>COGS: ₦${formatNumber(totalCOGS)}</div>
-        <div>Gross Profit: ₦${formatNumber(totalRevenue - totalCOGS)}</div>
-        <div>Operating & Other Expenses (incl. depreciation): ₦${formatNumber(totalExpenses)}</div>
-        <div>Depreciation (accounting): ₦${formatNumber(depreciationTotal)}</div>
-        <div>Accounting Profit: ₦${formatNumber(accountingProfit)}</div>
-      `;
-      taxSummaryDiv.innerHTML = `<strong>Tax summary</strong>
-        <div>Computed Capital Allowance (YTD): ₦${formatNumber(totalComputedCA)}</div>
-        <div>Allowed Capital Allowance (2/3 rule applied): ₦${formatNumber(totalAllowedCA)}</div>
-        <div>Opening CA consumed: ₦${formatNumber(openingConsumed)}</div>
-        <div>Total tax adjustments (pension, NHF, mortgage, rent relief (20% of rent): ₦${formatNumber(totalTaxAdjustments)} (rent relief ₦${formatNumber(rentRelief)}))</div>
-        <div>Taxable profit before CIT: ₦${formatNumber(taxableProfitBeforeCIT)}</div>
-        <div>Taxable profit (>=0): ₦${formatNumber(taxableProfit)}</div>
-        <div>Turnover: ₦${formatNumber(turnover)}</div>
-        <div>CIT rate applied: ${citRate}%</div>
-        <div>CIT due: ₦${formatNumber(citAmount)}</div>
-        <div>PIT (user) computed: ₦${formatNumber(pitTax)}</div>
-      `;
+        <div>Gross Profit: ₦${formatNumber(totalRevenue - totalCOGS)}</div>`;
+      
+      if (!biz.hideTaxableIncomeComputation) {
+        totalsSummaryHTML += `
+          <div>Operating & Other Expenses (incl. depreciation): ₦${formatNumber(totalExpenses)}</div>
+          <div>Depreciation (accounting): ₦${formatNumber(depreciationTotal)}</div>`;
+      }
+      
+      totalsSummaryHTML += `<div>Accounting Profit: ₦${formatNumber(accountingProfit)}</div>`;
+      totalsSummaryDiv.innerHTML = totalsSummaryHTML;
+      
+      // Build tax summary with conditional display
+      let taxSummaryHTML = '<strong>Tax summary</strong>';
+      
+      // Always show these computation lines if not hiding
+      if (!biz.hideTaxableIncomeComputation) {
+        taxSummaryHTML += `
+          <div>Computed Capital Allowance (YTD): ₦${formatNumber(totalComputedCA)}</div>
+          <div>Allowed Capital Allowance (2/3 rule applied): ₦${formatNumber(totalAllowedCA)}</div>
+          <div>Opening CA consumed: ₦${formatNumber(openingConsumed)}</div>
+          <div>Total tax adjustments (pension, NHF, mortgage, rent relief 20% of rent): ₦${formatNumber(totalTaxAdjustments)} (rent relief ₦${formatNumber(rentRelief)})</div>
+          <div>Taxable profit before CIT: ₦${formatNumber(taxableProfitBeforeCIT)}</div>`;
+      }
+      
+      // Conditionally show tax summary lines based on business settings
+      if (biz.showVat) {
+        taxSummaryHTML += `<div><strong>VAT:</strong> ₦${formatNumber(totalVAT)}</div>`;
+      }
+      
+      if (biz.showWht) {
+        taxSummaryHTML += `<div><strong>WHT:</strong> ₦${formatNumber(totalWHT)}</div>`;
+      }
+      
+      if (biz.showPaye && biz.payeEnabled) {
+        // PAYE calculation (placeholder - could be enhanced)
+        const payeAmount = 0; // Could compute from salary transactions if implemented
+        taxSummaryHTML += `<div><strong>PAYE:</strong> ₦${formatNumber(payeAmount)}</div>`;
+      }
+      
+      if (biz.showTaxableIncome) {
+        taxSummaryHTML += `<div><strong>Taxable Income:</strong> ₦${formatNumber(taxableProfit)}</div>`;
+      }
+      
+      if (biz.showPit && biz.pitEnabled) {
+        taxSummaryHTML += `<div><strong>PIT:</strong> ₦${formatNumber(pitTax)}</div>`;
+      }
+      
+      if (biz.showCit) {
+        taxSummaryHTML += `
+          <div>Turnover: ₦${formatNumber(turnover)}</div>
+          <div>CIT rate applied: ${citRate}%</div>
+          <div><strong>CIT due:</strong> ₦${formatNumber(citAmount)}</div>`;
+      }
+      
+      taxSummaryDiv.innerHTML = taxSummaryHTML;
 
       // Save CA carryforwards to data.assets (already updated above)
       saveData();
