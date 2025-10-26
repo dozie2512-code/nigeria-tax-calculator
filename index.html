@@ -191,6 +191,12 @@
   <script>
     const STORAGE_KEY = 'ntc_2026_data';
     
+    // Tax law constants for Nigeria 2026
+    const CRA_MIN_AMOUNT = 200000;  // Minimum CRA in Naira
+    const CRA_INCOME_PERCENT = 0.01;  // 1% of gross income
+    const CRA_ADDITIONAL_PERCENT = 0.20;  // Additional 20% of gross income
+    const AVERAGE_DAYS_PER_MONTH = 30.44;  // Average days per month for depreciation calculation
+    
     // Nigeria 2026 PIT bands
     const PIT_BANDS = [
       { limit: 3000000, rate: 0.19 },
@@ -536,7 +542,8 @@
           if (inv[itemName].qty < 0) {
             alert(`Warning: Negative inventory for ${itemName}`);
             inv[itemName].qty = 0;
-            inv[itemName].totalCost = 0;
+            // Keep totalCost at 0 or the remaining value if any
+            if (inv[itemName].totalCost < 0) inv[itemName].totalCost = 0;
           }
           
           if (item.vat && biz.vatEnabled) {
@@ -550,7 +557,7 @@
           inv[itemName].totalCost -= itemCOGS;
           if (inv[itemName].qty < 0) {
             inv[itemName].qty = 0;
-            inv[itemName].totalCost = 0;
+            if (inv[itemName].totalCost < 0) inv[itemName].totalCost = 0;
           }
         }
         
@@ -704,7 +711,7 @@
         
         // Days held
         const daysHeld = Math.max(0, Math.floor((endDate - startDate) / (1000*60*60*24)));
-        const monthsHeld = daysHeld / 30.44; // average days per month
+        const monthsHeld = daysHeld / AVERAGE_DAYS_PER_MONTH;
         
         // Straight-line depreciation prorated by days
         const annualDepreciation = asset.cost / asset.usefulLife;
@@ -731,10 +738,13 @@
       
       if (biz.entityType === 'Sole proprietor') {
         // PIT calculation with 2026 bands
+        // CRA = max(₦200,000, 1% of gross income) + 20% of gross income
         const grossIncome = revenue;
-        const cra = Math.max(200000, grossIncome * 0.01) + grossIncome * 0.20;
+        const craBase = Math.max(CRA_MIN_AMOUNT, grossIncome * CRA_INCOME_PERCENT);
+        const cra = craBase + grossIncome * CRA_ADDITIONAL_PERCENT;
         const taxableForPIT = Math.max(0, taxableIncome - cra);
         
+        // Progressive PIT bands
         let remaining = taxableForPIT;
         let cumulative = 0;
         for (const band of PIT_BANDS) {
@@ -743,13 +753,13 @@
           pit += taxableInBand * band.rate;
           remaining -= taxableInBand;
           cumulative += taxableInBand;
-          if (cumulative >= band.limit) cumulative = band.limit;
         }
       } else {
-        // CIT calculation
+        // CIT calculation: 0% on first ₦50M, 25% on amount above ₦50M
         if (taxableIncome > CIT_THRESHOLD) {
           cit = (taxableIncome - CIT_THRESHOLD) * CIT_RATE_ABOVE;
         }
+        // else cit remains 0 for income below threshold
       }
       
       return {
