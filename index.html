@@ -175,6 +175,31 @@
         <tbody></tbody>
       </table>
     </section>
+
+    <section class="panel section">
+      <h2 style="margin:0 0 8px 0;">Assets (selected business)</h2>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="small primary" id="btnPurchaseAsset">Purchase Asset</button>
+        <button class="small" id="btnDisposeAsset">Dispose Asset</button>
+        <button class="small" id="btnTaxAdjustments">Tax Adjustments</button>
+      </div>
+      <table class="inventory-table" id="assetsTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Cost</th>
+            <th>Purchase Date</th>
+            <th>Useful Life</th>
+            <th>Acc. Depreciation</th>
+            <th>Book Value</th>
+            <th>CA Allowed</th>
+            <th>CA Carryforward</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
   </main>
 
   <!-- Modals -->
@@ -206,12 +231,19 @@
     <div class="row">
       <label>VAT rate (%): <input type="number" id="bizVat" min="0" step="0.01" class="smallInput" /></label>
       <label>WHT rate (%): <input type="number" id="bizWht" min="0" step="0.01" class="smallInput" /></label>
+      <label>WHT base:
+        <select id="bizWhtMode">
+          <option value="gross">Gross (before VAT)</option>
+          <option value="net">Net (after VAT)</option>
+        </select>
+      </label>
       <label>CIT rate (%): <input type="number" id="bizCit" min="0" step="0.01" class="smallInput" /></label>
       <label>Currency: <input type="text" id="bizCurrency" value="₦" /></label>
     </div>
     <div class="row">
       <label>Tax-free threshold (₦): <input type="number" id="bizThreshold" min="0" step="1" /></label>
       <label>Default useful life (yrs): <input type="number" id="bizUsefulLife" min="1" step="1" class="smallInput" /></label>
+      <label>Opening CA balance (₦): <input type="number" id="bizOpeningCA" min="0" step="0.01" /></label>
     </div>
     <div class="row">
       <label>Accounts (comma-separated): <input type="text" id="bizAccounts" placeholder="Sales,COGS,Expense,Assets" /></label>
@@ -279,6 +311,65 @@
     <small class="note">You cannot delete an account that has transactions. Rename and add accounts freely.</small>
   </div>
 
+  <div id="purchaseAssetModal" class="modal" aria-hidden="true">
+    <h3>Purchase Asset</h3>
+    <div class="row">
+      <label>Asset name: <input type="text" id="assetName" placeholder="Equipment, Vehicle, etc." style="width:200px;" /></label>
+    </div>
+    <div class="row">
+      <label>Cost (₦): <input type="number" id="assetCost" min="0" step="0.01" /></label>
+      <label>Purchase date: <input type="date" id="assetPurchaseDate" /></label>
+    </div>
+    <div class="row">
+      <label>Useful life (yrs): <input type="number" id="assetUsefulLife" min="1" step="1" class="smallInput" /></label>
+      <label>Opening CA (₦): <input type="number" id="assetOpeningCA" min="0" step="0.01" placeholder="Optional" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+      <button id="assetCancelBtn">Cancel</button>
+      <button class="primary" id="assetSaveBtn">Purchase Asset</button>
+    </div>
+    <small class="note">Asset will be depreciated monthly (straight-line) for accounting. Capital allowance computed separately for tax purposes using 2/3 rule.</small>
+  </div>
+
+  <div id="disposeAssetModal" class="modal" aria-hidden="true">
+    <h3>Dispose Asset</h3>
+    <div class="row">
+      <label>Select asset:
+        <select id="disposeAssetSelect" style="width:300px;"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Disposal date: <input type="date" id="assetDisposalDate" /></label>
+      <label>Disposal proceeds (₦): <input type="number" id="assetDisposalProceeds" min="0" step="0.01" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+      <button id="disposeAssetCancelBtn">Cancel</button>
+      <button class="primary" id="disposeAssetSaveBtn">Dispose Asset</button>
+    </div>
+    <small class="note">Disposal will mark asset as disposed, compute accumulated depreciation to disposal date, and record gain/loss transaction.</small>
+  </div>
+
+  <div id="taxAdjustmentsModal" class="modal" aria-hidden="true">
+    <h3>Tax Adjustments (Deductions)</h3>
+    <p class="muted" style="margin-top:0;">Enter annual deductible amounts for the selected user and business.</p>
+    <div class="row">
+      <label>Pension contributions (₦): <input type="number" id="taxPension" min="0" step="0.01" /></label>
+      <label>NHF contributions (₦): <input type="number" id="taxNHF" min="0" step="0.01" /></label>
+    </div>
+    <div class="row">
+      <label>Mortgage interest (₦): <input type="number" id="taxMortgage" min="0" step="0.01" /></label>
+      <label>Life insurance (₦): <input type="number" id="taxLifeInsurance" min="0" step="0.01" /></label>
+    </div>
+    <div class="row">
+      <label>Rent paid (₦): <input type="number" id="taxRentPaid" min="0" step="0.01" /></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+      <button id="taxAdjustmentsCancelBtn">Cancel</button>
+      <button class="primary" id="taxAdjustmentsSaveBtn">Save</button>
+    </div>
+    <small class="note">Rent relief is computed as 20% of rent paid. These adjustments reduce taxable income for PIT/PAYE calculations.</small>
+  </div>
+
   <script>
     // GitHub Copilot Chat Assistant
     const STORAGE_KEY = 'ntc_data_v2';
@@ -301,7 +392,10 @@
       payeEnabled: true
     };
 
-    let data = { users: [], businesses: [], transactions: {}, inventories: {} };
+    // Data structure:
+    // - assets: object keyed by business id, each containing array of asset objects
+    // - taxAdjustments: object keyed by bizId, then userId, containing deduction fields
+    let data = { users: [], businesses: [], transactions: {}, inventories: {}, assets: {}, taxAdjustments: {} };
     let selectedUserId = null;
     let selectedBusinessId = null;
     let editTxnRef = null;
@@ -325,11 +419,24 @@
       if (typeof biz.pitEnabled === 'undefined') biz.pitEnabled = true;
       if (typeof biz.threshold === 'undefined') biz.threshold = DEFAULT_PIT.threshold;
       if (!Array.isArray(biz.accounts)) biz.accounts = [];
+      // New fields for WHT mode and capital allowances
+      if (typeof biz.whtMode === 'undefined') biz.whtMode = 'gross'; // 'gross' or 'net'
+      if (typeof biz.openingCapitalAllowanceBalance === 'undefined') biz.openingCapitalAllowanceBalance = 0;
     }
 
     function ensureInventoriesForBusiness(bizId){
       if (!data.inventories) data.inventories = {};
       if (!data.inventories[bizId]) data.inventories[bizId] = [];
+    }
+
+    function ensureAssetsForBusiness(bizId){
+      if (!data.assets) data.assets = {};
+      if (!data.assets[bizId]) data.assets[bizId] = [];
+    }
+
+    function ensureTaxAdjustmentsForBusiness(bizId){
+      if (!data.taxAdjustments) data.taxAdjustments = {};
+      if (!data.taxAdjustments[bizId]) data.taxAdjustments[bizId] = {};
     }
 
     function loadData(){
@@ -343,9 +450,14 @@
             if (!data.businesses) data.businesses = [];
             if (!data.transactions) data.transactions = {};
             if (!data.inventories) data.inventories = {};
+            // Migration: add new data structures if missing
+            if (!data.assets) data.assets = {};
+            if (!data.taxAdjustments) data.taxAdjustments = {};
             data.businesses.forEach(b => {
               ensureBizDefaults(b);
               ensureInventoriesForBusiness(b.id);
+              ensureAssetsForBusiness(b.id);
+              ensureTaxAdjustmentsForBusiness(b.id);
             });
             migrateTransactionsToAccounts();
             return;
@@ -364,19 +476,43 @@
           defaultUsefulLifeYears: DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears,
           currency: '₦', threshold: DEFAULT_PIT.threshold, notes: 'Sample business',
           vatEnabled: true, pitEnabled: true, payeEnabled: true,
+          whtMode: 'gross', openingCapitalAllowanceBalance: 0,
           accounts: [
             { id: uid('acct'), name: 'Sales' },
             { id: uid('acct'), name: 'COGS' },
             { id: uid('acct'), name: 'Purchases' },
-            { id: uid('acct'), name: 'Expense' }
+            { id: uid('acct'), name: 'Expense' },
+            { id: uid('acct'), name: 'Depreciation' },
+            { id: uid('acct'), name: 'Asset Disposal Gain/Loss' }
           ]
         }],
         transactions: { },
-        inventories: {}
+        inventories: {},
+        assets: {},
+        taxAdjustments: {}
       };
       data.inventories[b] = [
         { id: uid('inv'), sku: 'DEMO-001', name: 'Demo Item', qty: 10, unitCost: 5000.00, avgCost: 5000.00 }
       ];
+      // Add sample asset for Demo Business
+      data.assets[b] = [
+        {
+          id: uid('asset'),
+          bizId: b,
+          name: 'Demo Equipment',
+          cost: 1200000,
+          purchaseDate: '2024-01-01',
+          usefulLifeYears: 5,
+          accumulatedDepreciation: 0,
+          disposed: false,
+          disposalDate: null,
+          disposalProceeds: 0,
+          openingCapitalAllowance: 0,
+          accumulatedCapitalAllowance: 0,
+          caCarryforward: 0
+        }
+      ];
+      data.taxAdjustments[b] = {};
       ensureBizDefaults(data.businesses[0]);
       saveData();
     }
@@ -455,9 +591,11 @@
     const bizOwner = document.getElementById('bizOwner');
     const bizVat = document.getElementById('bizVat');
     const bizWht = document.getElementById('bizWht');
+    const bizWhtMode = document.getElementById('bizWhtMode');
     const bizCit = document.getElementById('bizCit');
     const bizCurrency = document.getElementById('bizCurrency');
     const bizThreshold = document.getElementById('bizThreshold');
+    const bizOpeningCA = document.getElementById('bizOpeningCA');
     const bizNotes = document.getElementById('bizNotes');
     const bizVatEnabled = document.getElementById('bizVatEnabled');
     const bizPitEnabled = document.getElementById('bizPitEnabled');
@@ -542,10 +680,119 @@
     const newAccountName = document.getElementById('newAccountName');
     const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
+    // Assets modal elements
+    const btnPurchaseAsset = document.getElementById('btnPurchaseAsset');
+    const btnDisposeAsset = document.getElementById('btnDisposeAsset');
+    const btnTaxAdjustments = document.getElementById('btnTaxAdjustments');
+    const assetsTableBody = document.querySelector('#assetsTable tbody');
+    
+    const purchaseAssetModal = document.getElementById('purchaseAssetModal');
+    const assetName = document.getElementById('assetName');
+    const assetCost = document.getElementById('assetCost');
+    const assetPurchaseDate = document.getElementById('assetPurchaseDate');
+    const assetUsefulLife = document.getElementById('assetUsefulLife');
+    const assetOpeningCA = document.getElementById('assetOpeningCA');
+    const assetCancelBtn = document.getElementById('assetCancelBtn');
+    const assetSaveBtn = document.getElementById('assetSaveBtn');
+    
+    const disposeAssetModal = document.getElementById('disposeAssetModal');
+    const disposeAssetSelect = document.getElementById('disposeAssetSelect');
+    const assetDisposalDate = document.getElementById('assetDisposalDate');
+    const assetDisposalProceeds = document.getElementById('assetDisposalProceeds');
+    const disposeAssetCancelBtn = document.getElementById('disposeAssetCancelBtn');
+    const disposeAssetSaveBtn = document.getElementById('disposeAssetSaveBtn');
+    
+    const taxAdjustmentsModal = document.getElementById('taxAdjustmentsModal');
+    const taxPension = document.getElementById('taxPension');
+    const taxNHF = document.getElementById('taxNHF');
+    const taxMortgage = document.getElementById('taxMortgage');
+    const taxLifeInsurance = document.getElementById('taxLifeInsurance');
+    const taxRentPaid = document.getElementById('taxRentPaid');
+    const taxAdjustmentsCancelBtn = document.getElementById('taxAdjustmentsCancelBtn');
+    const taxAdjustmentsSaveBtn = document.getElementById('taxAdjustmentsSaveBtn');
+
     let userEditingId = null;
     let bizEditingId = null;
     let inventoryEditingId = null;
     let editingTxnRef = null;
+
+    // Helper functions for depreciation and capital allowances
+    
+    // Compute monthly depreciation for an asset (straight-line)
+    function computeMonthlyDepreciation(asset) {
+      if (!asset || asset.disposed) return 0;
+      return asset.cost / (asset.usefulLifeYears * 12);
+    }
+    
+    // Compute accumulated depreciation up to a given date
+    function computeAccumulatedDepreciation(asset, upToDate) {
+      if (!asset) return 0;
+      const purchaseDate = new Date(asset.purchaseDate);
+      const endDate = asset.disposed ? new Date(asset.disposalDate) : new Date(upToDate);
+      
+      if (endDate < purchaseDate) return 0;
+      
+      const monthlyDep = computeMonthlyDepreciation(asset);
+      let totalDep = 0;
+      
+      // Calculate months between purchase and end date
+      const monthsDiff = (endDate.getFullYear() - purchaseDate.getFullYear()) * 12 + 
+                         (endDate.getMonth() - purchaseDate.getMonth());
+      
+      // Full months depreciation
+      totalDep = monthsDiff * monthlyDep;
+      
+      // Prorate first partial month if purchase wasn't on the 1st
+      if (purchaseDate.getDate() > 1) {
+        const daysInPurchaseMonth = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + 1, 0).getDate();
+        const remainingDays = daysInPurchaseMonth - purchaseDate.getDate() + 1;
+        const firstMonthProrated = (monthlyDep * remainingDays) / daysInPurchaseMonth;
+        totalDep += firstMonthProrated;
+      } else {
+        totalDep += monthlyDep;
+      }
+      
+      // Prorate last partial month if disposal wasn't on the last day or if current month
+      if (asset.disposed && endDate.getDate() !== new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0).getDate()) {
+        const daysInDisposalMonth = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0).getDate();
+        const lastMonthProrated = (monthlyDep * endDate.getDate()) / daysInDisposalMonth;
+        totalDep += lastMonthProrated - monthlyDep; // Subtract full month, add prorated
+      }
+      
+      return Math.min(totalDep, asset.cost); // Cap at cost
+    }
+    
+    // Compute annual capital allowance for tax purposes (straight-line tax allowance)
+    function computeAnnualCapitalAllowance(asset) {
+      if (!asset) return 0;
+      return asset.cost / asset.usefulLifeYears;
+    }
+    
+    // Compute allowable capital allowance (2/3 rule) and carryforward
+    function computeCapitalAllowanceForPeriod(asset, periodStartDate, periodEndDate) {
+      const annualCA = computeAnnualCapitalAllowance(asset);
+      const purchaseDate = new Date(asset.purchaseDate);
+      const startDate = new Date(periodStartDate);
+      const endDate = new Date(periodEndDate);
+      
+      // Check if asset is in the period
+      if (asset.disposed && new Date(asset.disposalDate) < startDate) return { allowed: 0, carryforward: 0 };
+      if (purchaseDate > endDate) return { allowed: 0, carryforward: 0 };
+      
+      // Calculate proportion of year in period
+      const yearDays = 365;
+      const periodDays = Math.min(
+        (endDate - Math.max(purchaseDate, startDate)) / (1000 * 60 * 60 * 24),
+        yearDays
+      );
+      const periodCA = (annualCA * periodDays) / yearDays;
+      
+      // Apply 2/3 rule
+      const allowedCA = (periodCA * 2) / 3;
+      const carryforwardCA = periodCA / 3;
+      
+      return { allowed: allowedCA, carryforward: carryforwardCA };
+    }
 
     function computePIT(income, biz){
       const threshold = (biz && typeof biz.threshold === 'number') ? biz.threshold : DEFAULT_PIT.threshold;
@@ -579,7 +826,7 @@
     }
 
     modalOverlay.addEventListener('click', () => {
-      [userModal, businessModal, editModal, inventoryModal, accountsModal].forEach(m => { if (m.style.display === 'block') closeModal(m); });
+      [userModal, businessModal, editModal, inventoryModal, accountsModal, purchaseAssetModal, disposeAssetModal, taxAdjustmentsModal].forEach(m => { if (m.style.display === 'block') closeModal(m); });
     });
 
     // Initialization
@@ -592,6 +839,7 @@
     renderLedger();
     calculateSummary();
     renderInventory();
+    renderAssets();
     const today = new Date().toISOString().slice(0,10);
     document.getElementById('txnDate').value = today;
 
@@ -679,7 +927,7 @@
         if (remainingBizIds.has(bid)) newInventories[bid] = data.inventories[bid];
       }
       data.inventories = newInventories;
-      if (!data.users.length) data = { users: [], businesses: [], transactions: {}, inventories: {} };
+      if (!data.users.length) data = { users: [], businesses: [], transactions: {}, inventories: {}, assets: {}, taxAdjustments: {} };
       saveData();
       selectedUserId = data.users.length ? data.users[0].id : null;
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
@@ -687,6 +935,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
     });
 
     userSave.addEventListener('click', () => {
@@ -721,6 +970,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
       populateInvItemSelect();
       populateAccountSelect();
     });
@@ -731,12 +981,14 @@
       bizName.value = '';
       bizVat.value = 7.5;
       bizWht.value = DEFAULT_BUSINESS_TAX.whtRate;
+      bizWhtMode.value = 'gross';
       bizCit.value = DEFAULT_BUSINESS_TAX.citRate;
       bizCurrency.value = '₦';
       bizThreshold.value = DEFAULT_PIT.threshold;
       bizUsefulLife.value = DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
+      bizOpeningCA.value = 0;
       bizNotes.value = '';
-      bizAccounts.value = 'Sales,COGS,Purchases,Expense';
+      bizAccounts.value = 'Sales,COGS,Purchases,Expense,Depreciation,Asset Disposal Gain/Loss';
       bizOwner.value = selectedUserId || (data.users[0] && data.users[0].id) || '';
       bizVatEnabled.checked = true;
       bizPitEnabled.checked = true;
@@ -753,10 +1005,12 @@
       bizName.value = b.name || '';
       bizVat.value = (typeof b.vatRate === 'number') ? b.vatRate : 7.5;
       bizWht.value = (typeof b.whtRate === 'number') ? b.whtRate : DEFAULT_BUSINESS_TAX.whtRate;
+      bizWhtMode.value = b.whtMode || 'gross';
       bizCit.value = (typeof b.citRate === 'number') ? b.citRate : DEFAULT_BUSINESS_TAX.citRate;
       bizCurrency.value = b.currency || '₦';
       bizThreshold.value = (typeof b.threshold === 'number') ? b.threshold : DEFAULT_PIT.threshold;
       bizUsefulLife.value = (typeof b.defaultUsefulLifeYears === 'number') ? b.defaultUsefulLifeYears : DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
+      bizOpeningCA.value = (typeof b.openingCapitalAllowanceBalance === 'number') ? b.openingCapitalAllowanceBalance : 0;
       bizNotes.value = b.notes || '';
       bizOwner.value = b.ownerId || (data.users[0] && data.users[0].id) || '';
       bizVatEnabled.checked = !!b.vatEnabled;
@@ -777,6 +1031,8 @@
         if (data.transactions[uidKey] && data.transactions[uidKey][b.id]) delete data.transactions[uidKey][b.id];
       }
       if (data.inventories && data.inventories[b.id]) delete data.inventories[b.id];
+      if (data.assets && data.assets[b.id]) delete data.assets[b.id];
+      if (data.taxAdjustments && data.taxAdjustments[b.id]) delete data.taxAdjustments[b.id];
       saveData();
       selectedBusinessId = data.businesses.length ? data.businesses[0].id : null;
       refreshUserBusinessSelectors();
@@ -784,6 +1040,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
       populateInvItemSelect();
       populateAccountSelect();
     });
@@ -793,10 +1050,12 @@
       const ownerIdVal = bizOwner.value;
       const vat = parseFloat(bizVat.value);
       const wht = parseFloat(bizWht.value);
+      const whtModeVal = bizWhtMode.value || 'gross';
       const cit = parseFloat(bizCit.value);
       const currency = (bizCurrency.value || '₦').trim();
       const threshold = Number(bizThreshold.value) || DEFAULT_PIT.threshold;
       const usableLife = parseInt(bizUsefulLife.value) || DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
+      const openingCA = parseFloat(bizOpeningCA.value) || 0;
       const vatEnabledVal = !!bizVatEnabled.checked;
       const pitEnabledVal = !!bizPitEnabled.checked;
       const payeEnabledVal = !!bizPayeEnabled.checked;
@@ -811,10 +1070,12 @@
         b.ownerId = ownerIdVal;
         b.vatRate = isNaN(vat) ? 7.5 : vat;
         b.whtRate = isNaN(wht) ? DEFAULT_BUSINESS_TAX.whtRate : wht;
+        b.whtMode = whtModeVal;
         b.citRate = isNaN(cit) ? DEFAULT_BUSINESS_TAX.citRate : cit;
         b.currency = currency;
         b.threshold = threshold;
         b.defaultUsefulLifeYears = usableLife;
+        b.openingCapitalAllowanceBalance = openingCA;
         b.notes = (bizNotes.value || '').trim();
         b.vatEnabled = vatEnabledVal;
         b.pitEnabled = pitEnabledVal;
@@ -833,10 +1094,12 @@
           id, name, ownerId: ownerIdVal,
           vatRate: isNaN(vat) ? 7.5 : vat,
           whtRate: isNaN(wht) ? DEFAULT_BUSINESS_TAX.whtRate : wht,
+          whtMode: whtModeVal,
           citRate: isNaN(cit) ? DEFAULT_BUSINESS_TAX.citRate : cit,
           currency,
           threshold,
           defaultUsefulLifeYears: usableLife,
+          openingCapitalAllowanceBalance: openingCA,
           notes: (bizNotes.value || '').trim(),
           vatEnabled: vatEnabledVal,
           pitEnabled: pitEnabledVal,
@@ -844,6 +1107,8 @@
           accounts
         });
         ensureInventoriesForBusiness(id);
+        ensureAssetsForBusiness(id);
+        ensureTaxAdjustmentsForBusiness(id);
       }
       saveData();
       closeModal(businessModal);
@@ -853,6 +1118,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
       populateInvItemSelect();
       populateAccountSelect();
     });
@@ -865,6 +1131,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
       populateInvItemSelect();
       populateAccountSelect();
     });
@@ -1076,30 +1343,56 @@
             data.transactions[selectedUserId][selectedBusinessId].push(txn);
           }
         } else if (inventoryAction === 'Sale') {
-          // sale: reduce qty
+          // sale: reduce qty and create COGS transaction
           if (!selectedItemId || selectedItemId === '__new__') return alert('Select an existing item to sell.');
           const item = items.find(i => i.id === selectedItemId);
           if (!item) return alert('Selected item not found.');
-          if ((item.qty || 0) < qty) return alert('Insufficient quantity available.');
+          // Allow negative stock
           const salePrice = parseFloat(invSalePrice.value || '0') || 0;
           const value = salePrice * qty;
+          const cogsValue = (item.avgCost || item.unitCost || 0) * qty;
           item.qty = (item.qty || 0) - qty;
+          
           // create sales txn
-          const acct = (biz.accounts && biz.accounts.find(a=>a.name==='Sales')) ? biz.accounts.find(a=>a.name==='Sales') : (biz.accounts && biz.accounts[0]);
-          const txn = {
+          const salesAcct = (biz.accounts && biz.accounts.find(a=>a.name==='Sales')) ? biz.accounts.find(a=>a.name==='Sales') : (biz.accounts && biz.accounts[0]);
+          const salesTxn = {
             id: uid('txn'),
             date,
-            accountId: acct ? acct.id : '',
-            accountName: acct ? acct.name : 'Sales',
+            accountId: salesAcct ? salesAcct.id : '',
+            accountName: salesAcct ? salesAcct.name : 'Sales',
             description: `Sale of ${item.name || item.sku || ''} (${qty})`,
             amount: value,
             vat: (biz.vatEnabled && typeof biz.vatRate === 'number') ? (value * (biz.vatRate/100)) : 0,
             wht: 0,
+            whtApplied: false,
             inventoryAction,
             inventoryItemId: selectedItemId,
             qty
           };
-          data.transactions[selectedUserId][selectedBusinessId].push(txn);
+          data.transactions[selectedUserId][selectedBusinessId].push(salesTxn);
+          
+          // create COGS transaction
+          let cogsAcct = biz.accounts.find(a => a.name === 'COGS');
+          if (!cogsAcct) {
+            // Create COGS account if doesn't exist
+            cogsAcct = { id: uid('acct'), name: 'COGS' };
+            biz.accounts.push(cogsAcct);
+          }
+          const cogsTxn = {
+            id: uid('txn'),
+            date,
+            accountId: cogsAcct.id,
+            accountName: cogsAcct.name,
+            description: `COGS for ${item.name || item.sku || ''} (${qty})`,
+            amount: cogsValue,
+            vat: 0,
+            wht: 0,
+            whtApplied: false,
+            inventoryAction: 'COGS',
+            inventoryItemId: selectedItemId,
+            qty
+          };
+          data.transactions[selectedUserId][selectedBusinessId].push(cogsTxn);
         }
       }
 
@@ -1248,15 +1541,145 @@
 
     function calculateSummary(){
       const txns = getCurrentTxns();
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) return;
+      
+      // Basic totals
       let total = 0, totalVat = 0, totalWht = 0;
+      let salesTotal = 0, cogsTotal = 0, expenseTotal = 0, depreciationTotal = 0;
+      
       txns.forEach(t=>{
         total += (t.amount || 0);
         totalVat += (t.vat || 0);
         totalWht += (t.wht || 0);
+        
+        // Categorize transactions
+        const acctName = (t.accountName || '').toLowerCase();
+        if (acctName.includes('sales')) {
+          salesTotal += (t.amount || 0);
+        } else if (acctName.includes('cogs') || t.inventoryAction === 'COGS') {
+          cogsTotal += (t.amount || 0);
+        } else if (acctName.includes('expense')) {
+          expenseTotal += (t.amount || 0);
+        } else if (acctName.includes('depreciation')) {
+          depreciationTotal += (t.amount || 0);
+        }
       });
-      totalsSummaryDiv.innerHTML = `<strong>Total (ex VAT):</strong> ${formatNumber(total)}`;
-      vatSummaryDiv.innerHTML = `<strong>Total VAT:</strong> ${formatNumber(totalVat)}`;
-      taxSummaryDiv.innerHTML = `<strong>Total WHT:</strong> ${formatNumber(totalWht)}`;
+      
+      // Add synthetic depreciation from assets
+      ensureAssetsForBusiness(selectedBusinessId);
+      const assets = data.assets[selectedBusinessId] || [];
+      const today = new Date().toISOString().slice(0,10);
+      let totalAssetDepreciation = 0;
+      
+      assets.forEach(asset => {
+        if (!asset.disposed) {
+          const accDep = computeAccumulatedDepreciation(asset, today);
+          totalAssetDepreciation += accDep;
+        }
+      });
+      
+      // Compute totals
+      const grossProfit = salesTotal - cogsTotal;
+      const netIncome = grossProfit - expenseTotal - totalAssetDepreciation;
+      
+      // Compute capital allowances
+      const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10);
+      let totalCAComputed = 0, totalCAAllowed = 0, totalCACarryforward = 0;
+      
+      assets.forEach(asset => {
+        if (!asset.disposed || new Date(asset.disposalDate) >= new Date(yearStart)) {
+          const ca = computeCapitalAllowanceForPeriod(asset, yearStart, today);
+          totalCAComputed += ca.allowed + ca.carryforward;
+          totalCAAllowed += ca.allowed;
+          totalCACarryforward += ca.carryforward;
+          asset.caCarryforward = ca.carryforward;
+        }
+      });
+      
+      // Add opening CA balance
+      const openingCA = biz.openingCapitalAllowanceBalance || 0;
+      const totalCAApplied = totalCAAllowed + openingCA;
+      
+      // Get tax adjustments
+      ensureTaxAdjustmentsForBusiness(selectedBusinessId);
+      const adjustments = (selectedUserId && data.taxAdjustments[selectedBusinessId]) ? 
+                          data.taxAdjustments[selectedBusinessId][selectedUserId] || {} : {};
+      
+      const pension = adjustments.pension || 0;
+      const nhf = adjustments.nhf || 0;
+      const mortgageInterest = adjustments.mortgageInterest || 0;
+      const lifeInsurance = adjustments.lifeInsurance || 0;
+      const rentPaid = adjustments.rentPaid || 0;
+      const rentRelief = rentPaid * 0.2; // 20% of rent paid
+      
+      const totalDeductions = pension + nhf + mortgageInterest + lifeInsurance + rentRelief;
+      
+      // Compute taxable income
+      const taxableIncomeBeforeCA = netIncome - totalDeductions;
+      const taxableIncome = Math.max(0, taxableIncomeBeforeCA - totalCAApplied);
+      
+      // Compute PIT/PAYE
+      const pit = biz.pitEnabled ? computePIT(taxableIncome, biz) : 0;
+      
+      // Compute CIT based on turnover (sales)
+      let citRate = 0;
+      if (salesTotal < 50000000) {
+        citRate = 0; // 0% for turnover < 50 million
+      } else {
+        citRate = 25; // 25% for turnover >= 50 million (note: original spec said 25%, not 30%)
+      }
+      const taxableProfit = Math.max(0, taxableIncomeBeforeCA - totalCAApplied);
+      const cit = (taxableProfit * citRate) / 100;
+      
+      // Display summaries
+      vatSummaryDiv.innerHTML = `
+        <strong>VAT Summary</strong><br/>
+        Total VAT: ${formatNumber(totalVat)}
+      `;
+      
+      totalsSummaryDiv.innerHTML = `
+        <strong>Income Statement Summary</strong><br/>
+        Sales Revenue: ${formatNumber(salesTotal)}<br/>
+        COGS: ${formatNumber(cogsTotal)}<br/>
+        <strong>Gross Profit: ${formatNumber(grossProfit)}</strong><br/>
+        Operating Expenses: ${formatNumber(expenseTotal)}<br/>
+        Depreciation (Assets): ${formatNumber(totalAssetDepreciation)}<br/>
+        <strong>Net Income (Accounting): ${formatNumber(netIncome)}</strong>
+      `;
+      
+      taxSummaryDiv.innerHTML = `
+        <strong>Tax Summary</strong><br/>
+        Total WHT: ${formatNumber(totalWht)}<br/>
+        <br/>
+        <strong>Capital Allowances (Tax)</strong><br/>
+        Computed CA (Annual): ${formatNumber(totalCAComputed)}<br/>
+        Allowed CA (2/3): ${formatNumber(totalCAAllowed)}<br/>
+        Opening CA Balance: ${formatNumber(openingCA)}<br/>
+        Total CA Applied: ${formatNumber(totalCAApplied)}<br/>
+        CA Carryforward (1/3): ${formatNumber(totalCACarryforward)}<br/>
+        <br/>
+        <strong>Tax Adjustments (Deductions)</strong><br/>
+        Pension: ${formatNumber(pension)}<br/>
+        NHF: ${formatNumber(nhf)}<br/>
+        Mortgage Interest: ${formatNumber(mortgageInterest)}<br/>
+        Life Insurance: ${formatNumber(lifeInsurance)}<br/>
+        Rent Paid: ${formatNumber(rentPaid)} → Relief: ${formatNumber(rentRelief)}<br/>
+        Total Deductions: ${formatNumber(totalDeductions)}<br/>
+        <br/>
+        <strong>Taxable Income Calculation</strong><br/>
+        Net Income: ${formatNumber(netIncome)}<br/>
+        Less: Deductions: ${formatNumber(totalDeductions)}<br/>
+        Less: Capital Allowance: ${formatNumber(totalCAApplied)}<br/>
+        <strong>Taxable Income: ${formatNumber(taxableIncome)}</strong><br/>
+        <br/>
+        <strong>PIT/PAYE</strong> (if enabled): ${formatNumber(pit)}<br/>
+        <br/>
+        <strong>CIT (Company Income Tax)</strong><br/>
+        Turnover (Sales): ${formatNumber(salesTotal)}<br/>
+        CIT Rate: ${citRate}% ${salesTotal < 50000000 ? '(< ₦50M threshold)' : '(≥ ₦50M)'}<br/>
+        <strong>CIT Amount: ${formatNumber(cit)}</strong>
+      `;
     }
 
     // Inventory rendering & modal
@@ -1355,6 +1778,219 @@
       saveData();
       renderInventory();
     }
+
+    // Assets management functions
+    function renderAssets(){
+      assetsTableBody.innerHTML = '';
+      if (!selectedBusinessId) return;
+      ensureAssetsForBusiness(selectedBusinessId);
+      const assets = data.assets[selectedBusinessId] || [];
+      const today = new Date().toISOString().slice(0,10);
+      
+      assets.forEach(asset => {
+        const tr = document.createElement('tr');
+        const accDep = computeAccumulatedDepreciation(asset, today);
+        asset.accumulatedDepreciation = accDep;
+        const bookValue = Math.max(0, asset.cost - accDep);
+        
+        // Compute capital allowance for current year
+        const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10);
+        const ca = computeCapitalAllowanceForPeriod(asset, yearStart, today);
+        
+        const status = asset.disposed ? `<span class="flag" style="background:#fee;">Disposed</span>` : 
+                                       `<span class="flag" style="background:#efe;">Active</span>`;
+        
+        tr.innerHTML = `
+          <td>${escapeHtml(asset.name || '')}</td>
+          <td>${formatNumber(asset.cost || 0)}</td>
+          <td>${escapeHtml(asset.purchaseDate || '')}</td>
+          <td>${asset.usefulLifeYears || 0} years</td>
+          <td>${formatNumber(accDep)}</td>
+          <td>${formatNumber(bookValue)}</td>
+          <td>${formatNumber(ca.allowed)}</td>
+          <td>${formatNumber(asset.caCarryforward || 0)}</td>
+          <td>${status}</td>
+        `;
+        assetsTableBody.appendChild(tr);
+      });
+      
+      saveData(); // Save updated depreciation
+    }
+    
+    btnPurchaseAsset.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('Select a business');
+      const biz = findBiz(selectedBusinessId);
+      assetName.value = '';
+      assetCost.value = '';
+      assetPurchaseDate.value = new Date().toISOString().slice(0,10);
+      assetUsefulLife.value = biz ? biz.defaultUsefulLifeYears : DEFAULT_BUSINESS_TAX.defaultUsefulLifeYears;
+      assetOpeningCA.value = 0;
+      openModal(purchaseAssetModal);
+    });
+    
+    assetCancelBtn.addEventListener('click', () => closeModal(purchaseAssetModal));
+    
+    assetSaveBtn.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('No business selected');
+      const biz = findBiz(selectedBusinessId);
+      if (!biz) return alert('Business not found');
+      
+      const name = (assetName.value || '').trim();
+      const cost = parseFloat(assetCost.value) || 0;
+      const purchaseDate = assetPurchaseDate.value || new Date().toISOString().slice(0,10);
+      const usefulLife = parseInt(assetUsefulLife.value) || biz.defaultUsefulLifeYears;
+      const openingCA = parseFloat(assetOpeningCA.value) || 0;
+      
+      if (!name) return alert('Asset name required');
+      if (cost <= 0) return alert('Asset cost must be greater than 0');
+      
+      ensureAssetsForBusiness(selectedBusinessId);
+      const asset = {
+        id: uid('asset'),
+        bizId: selectedBusinessId,
+        name,
+        cost,
+        purchaseDate,
+        usefulLifeYears: usefulLife,
+        accumulatedDepreciation: 0,
+        disposed: false,
+        disposalDate: null,
+        disposalProceeds: 0,
+        openingCapitalAllowance: openingCA,
+        accumulatedCapitalAllowance: 0,
+        caCarryforward: 0
+      };
+      
+      data.assets[selectedBusinessId].push(asset);
+      saveData();
+      closeModal(purchaseAssetModal);
+      renderAssets();
+      calculateSummary();
+    });
+    
+    btnDisposeAsset.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('Select a business');
+      ensureAssetsForBusiness(selectedBusinessId);
+      const assets = data.assets[selectedBusinessId] || [];
+      const activeAssets = assets.filter(a => !a.disposed);
+      
+      if (activeAssets.length === 0) return alert('No active assets to dispose');
+      
+      disposeAssetSelect.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '-- Select asset --';
+      disposeAssetSelect.appendChild(opt);
+      
+      activeAssets.forEach(a => {
+        const o = document.createElement('option');
+        o.value = a.id;
+        o.textContent = `${a.name} (${formatNumber(a.cost)})`;
+        disposeAssetSelect.appendChild(o);
+      });
+      
+      assetDisposalDate.value = new Date().toISOString().slice(0,10);
+      assetDisposalProceeds.value = 0;
+      openModal(disposeAssetModal);
+    });
+    
+    disposeAssetCancelBtn.addEventListener('click', () => closeModal(disposeAssetModal));
+    
+    disposeAssetSaveBtn.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('No business selected');
+      const assetId = disposeAssetSelect.value;
+      if (!assetId) return alert('Select an asset to dispose');
+      
+      ensureAssetsForBusiness(selectedBusinessId);
+      const assets = data.assets[selectedBusinessId] || [];
+      const asset = assets.find(a => a.id === assetId);
+      if (!asset) return alert('Asset not found');
+      
+      const disposalDate = assetDisposalDate.value || new Date().toISOString().slice(0,10);
+      const disposalProceeds = parseFloat(assetDisposalProceeds.value) || 0;
+      
+      // Compute accumulated depreciation up to disposal date
+      const accDep = computeAccumulatedDepreciation(asset, disposalDate);
+      asset.accumulatedDepreciation = accDep;
+      const bookValue = asset.cost - accDep;
+      const gainLoss = disposalProceeds - bookValue;
+      
+      // Mark asset as disposed
+      asset.disposed = true;
+      asset.disposalDate = disposalDate;
+      asset.disposalProceeds = disposalProceeds;
+      
+      // Create gain/loss transaction
+      const biz = findBiz(selectedBusinessId);
+      if (biz && selectedUserId) {
+        let gainLossAcct = biz.accounts.find(a => a.name === 'Asset Disposal Gain/Loss');
+        if (!gainLossAcct) {
+          gainLossAcct = { id: uid('acct'), name: 'Asset Disposal Gain/Loss' };
+          biz.accounts.push(gainLossAcct);
+        }
+        
+        if (!data.transactions[selectedUserId]) data.transactions[selectedUserId] = {};
+        if (!data.transactions[selectedUserId][selectedBusinessId]) data.transactions[selectedUserId][selectedBusinessId] = [];
+        
+        const txn = {
+          id: uid('txn'),
+          date: disposalDate,
+          accountId: gainLossAcct.id,
+          accountName: gainLossAcct.name,
+          description: `Disposal of ${asset.name} - ${gainLoss >= 0 ? 'Gain' : 'Loss'}: ₦${formatNumber(Math.abs(gainLoss))}`,
+          amount: Math.abs(gainLoss),
+          vat: 0,
+          wht: 0,
+          whtApplied: false,
+          assetDisposal: true,
+          assetId: asset.id
+        };
+        data.transactions[selectedUserId][selectedBusinessId].push(txn);
+      }
+      
+      saveData();
+      closeModal(disposeAssetModal);
+      renderAssets();
+      renderLedger();
+      calculateSummary();
+    });
+    
+    btnTaxAdjustments.addEventListener('click', () => {
+      if (!selectedBusinessId) return alert('Select a business');
+      if (!selectedUserId) return alert('Select a user');
+      
+      ensureTaxAdjustmentsForBusiness(selectedBusinessId);
+      const adjustments = data.taxAdjustments[selectedBusinessId][selectedUserId] || {};
+      
+      taxPension.value = adjustments.pension || 0;
+      taxNHF.value = adjustments.nhf || 0;
+      taxMortgage.value = adjustments.mortgageInterest || 0;
+      taxLifeInsurance.value = adjustments.lifeInsurance || 0;
+      taxRentPaid.value = adjustments.rentPaid || 0;
+      
+      openModal(taxAdjustmentsModal);
+    });
+    
+    taxAdjustmentsCancelBtn.addEventListener('click', () => closeModal(taxAdjustmentsModal));
+    
+    taxAdjustmentsSaveBtn.addEventListener('click', () => {
+      if (!selectedBusinessId || !selectedUserId) return alert('Select business and user');
+      
+      ensureTaxAdjustmentsForBusiness(selectedBusinessId);
+      
+      data.taxAdjustments[selectedBusinessId][selectedUserId] = {
+        pension: parseFloat(taxPension.value) || 0,
+        nhf: parseFloat(taxNHF.value) || 0,
+        mortgageInterest: parseFloat(taxMortgage.value) || 0,
+        lifeInsurance: parseFloat(taxLifeInsurance.value) || 0,
+        rentPaid: parseFloat(taxRentPaid.value) || 0,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      saveData();
+      closeModal(taxAdjustmentsModal);
+      calculateSummary();
+    });
 
     // Accounts modal
     btnManageAccounts.addEventListener('click', () => {
@@ -1478,7 +2114,14 @@
           data.businesses = data.businesses || [];
           data.transactions = data.transactions || {};
           data.inventories = data.inventories || {};
-          data.businesses.forEach(b => { ensureBizDefaults(b); ensureInventoriesForBusiness(b.id); });
+          data.assets = data.assets || {};
+          data.taxAdjustments = data.taxAdjustments || {};
+          data.businesses.forEach(b => { 
+            ensureBizDefaults(b); 
+            ensureInventoriesForBusiness(b.id);
+            ensureAssetsForBusiness(b.id);
+            ensureTaxAdjustmentsForBusiness(b.id);
+          });
           saveData();
           refreshUserBusinessSelectors();
           ensureSelection();
@@ -1487,6 +2130,7 @@
           renderLedger();
           calculateSummary();
           renderInventory();
+          renderAssets();
         } catch (err) {
           alert('Invalid JSON file');
         }
@@ -1498,7 +2142,7 @@
     btnClearAll.addEventListener('click', () => {
       if (!confirm('Clear all data? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
-      data = { users: [], businesses: [], transactions: {}, inventories: {} };
+      data = { users: [], businesses: [], transactions: {}, inventories: {}, assets: {}, taxAdjustments: {} };
       loadData();
       refreshUserBusinessSelectors();
       ensureSelection();
@@ -1507,6 +2151,7 @@
       renderLedger();
       calculateSummary();
       renderInventory();
+      renderAssets();
     });
 
     // Initial population
