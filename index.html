@@ -110,14 +110,6 @@
           <input type="checkbox" id="txnSalary" /> Salary (PAYE)
         </label>
 
-        <label class="inline-label">
-          <input type="checkbox" id="txnDisallowable" /> Disallowable expense (adds back)
-        </label>
-
-        <label class="inline-label">
-          <input type="checkbox" id="txnNonTax" /> Non-taxable income (exclude)
-        </label>
-
         <button class="primary" id="btnAddTxn">Add</button>
       </div>
 
@@ -130,11 +122,13 @@
           <label>New Item: <input type="text" id="invNewName" placeholder="If adding new" /></label>
           <label>Qty: <input type="number" id="invQty" min="0" step="1" /></label>
           <label>Unit Price (₦): <input type="number" id="invUnitPrice" min="0" step="0.01" /></label>
+          <label>Account:
+            <select id="invAccount"></select>
+          </label>
           <label class="inline-label"><input type="checkbox" id="invVat" /> VAT applies</label>
-          <label class="inline-label"><input type="checkbox" id="invDisallowable" /> Disallowable</label>
-          <label class="inline-label"><input type="checkbox" id="invNonTax" /> Non-taxable</label>
           <button id="btnAddInv" class="small">Apply Inventory Action</button>
           <button id="btnInvCancel" class="small">Cancel</button>
+          <button id="btnUndoInv" class="small danger">Undo last inventory action</button>
         </div>
         <small class="note">Inventory uses moving weighted average (average cost) for COGS. Purchases update average; sales consume using current average cost.</small>
       </div>
@@ -149,11 +143,18 @@
           <label>Capital allowance % (annual): <input type="number" id="assetCA" min="0" step="0.01" class="smallInput" /></label>
         </div>
         <div class="form-inline" style="margin-top:8px;">
+          <label>Purchase Account:
+            <select id="assetPurchaseAccount"></select>
+          </label>
           <label>Disposal date: <input type="date" id="assetDisposalDate" /></label>
           <label>Disposal proceeds: <input type="number" id="assetDisposalProceeds" min="0" step="0.01" /></label>
+          <label>Disposal Account:
+            <select id="assetDisposalAccount"></select>
+          </label>
           <button id="btnAddAsset" class="small">Record Asset Purchase</button>
           <button id="btnDisposeAsset" class="small danger">Record Disposal</button>
           <button id="btnAssetCancel" class="small">Cancel</button>
+          <button id="btnUndoAsset" class="small danger">Undo last asset action</button>
         </div>
         <small class="note">Depreciation = straight-line. Monthly depreciation prorated by days for mid-month purchase/disposal. Capital allowance applied monthly from purchase.</small>
       </div>
@@ -173,7 +174,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Inv Item / Asset</th><th>Disallowable</th><th>Non-tax</th><th>Action</th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Inv Item / Asset</th><th>Action</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -248,6 +249,27 @@
       </div>
     </div>
 
+    <div class="form-section">
+      <h4 style="margin:4px 0 8px 0;">Business-level Defaults</h4>
+      <div class="row">
+        <label><input type="checkbox" id="bizDefaultDisallowable" /> Default expenses disallowable (business-level)</label>
+        <label><input type="checkbox" id="bizDefaultNonTaxable" /> Default revenue non-taxable (business-level)</label>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h4 style="margin:4px 0 8px 0;">Annual Statutory Deductions (for PAYE)</h4>
+      <div class="row">
+        <label>Pension (₦): <input type="number" id="bizPension" class="smallInput" min="0" step="0.01" /></label>
+        <label>Rent Relief (₦): <input type="number" id="bizRentRelief" class="smallInput" min="0" step="0.01" /></label>
+        <label>Life Assurance (₦): <input type="number" id="bizLifeAssurance" class="smallInput" min="0" step="0.01" /></label>
+      </div>
+      <div class="row">
+        <label>Mortgage Interest (₦): <input type="number" id="bizMortgageInterest" class="smallInput" min="0" step="0.01" /></label>
+        <label>NHF (₦): <input type="number" id="bizNHF" class="smallInput" min="0" step="0.01" /></label>
+      </div>
+    </div>
+
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
       <button id="bizCancel">Cancel</button>
       <button class="primary" id="bizSave">Save</button>
@@ -290,12 +312,22 @@
       showLines: true
     };
 
-    // 2026 PIT bands (hard-coded as requested)
+    // 2026 PIT bands (hard-coded as requested) - legacy bands for transactions before 2025-06-01
     const PIT_BANDS_2026 = [
       { upTo: 3000000, rate: 0.19 },
       { upTo: 6000000, rate: 0.21 },
       { upTo: 9000000, rate: 0.23 },
       { upTo: 12000000, rate: 0.24 },
+      { upTo: Infinity, rate: 0.25 }
+    ];
+
+    // New PAYE bands effective from 2025-06-01
+    const PAYE_BANDS_2025 = [
+      { upTo: 800000, rate: 0.00 },
+      { upTo: 3000000, rate: 0.15 },
+      { upTo: 12000000, rate: 0.18 },
+      { upTo: 25000000, rate: 0.21 },
+      { upTo: 50000000, rate: 0.23 },
       { upTo: Infinity, rate: 0.25 }
     ];
 
@@ -326,8 +358,6 @@
     const txnWhtRateLabel = document.getElementById('txnWhtRateLabel');
     const txnSalary = document.getElementById('txnSalary');
     const btnAddTxn = document.getElementById('btnAddTxn');
-    const txnDisallowable = document.getElementById('txnDisallowable');
-    const txnNonTax = document.getElementById('txnNonTax');
 
     const inventorySubform = document.getElementById('inventorySubform');
     const invItemSelect = document.getElementById('invItemSelect');
@@ -335,10 +365,10 @@
     const invQty = document.getElementById('invQty');
     const invUnitPrice = document.getElementById('invUnitPrice');
     const invVat = document.getElementById('invVat');
+    const invAccount = document.getElementById('invAccount');
     const btnAddInv = document.getElementById('btnAddInv');
     const btnInvCancel = document.getElementById('btnInvCancel');
-    const invDisallowable = document.getElementById('invDisallowable');
-    const invNonTax = document.getElementById('invNonTax');
+    const btnUndoInv = document.getElementById('btnUndoInv');
 
     const assetSubform = document.getElementById('assetSubform');
     const assetName = document.getElementById('assetName');
@@ -348,9 +378,12 @@
     const assetCA = document.getElementById('assetCA');
     const assetDisposalDate = document.getElementById('assetDisposalDate');
     const assetDisposalProceeds = document.getElementById('assetDisposalProceeds');
+    const assetPurchaseAccount = document.getElementById('assetPurchaseAccount');
+    const assetDisposalAccount = document.getElementById('assetDisposalAccount');
     const btnAddAsset = document.getElementById('btnAddAsset');
     const btnDisposeAsset = document.getElementById('btnDisposeAsset');
     const btnAssetCancel = document.getElementById('btnAssetCancel');
+    const btnUndoAsset = document.getElementById('btnUndoAsset');
 
     const ledgerTable = document.querySelector('#ledgerTable tbody');
     const totalsSummaryDiv = document.getElementById('totalsSummary');
@@ -385,6 +418,13 @@
     const bizCancel = document.getElementById('bizCancel');
     const bizLossBF = document.getElementById('bizLossBF');
     const bizCACF = document.getElementById('bizCACF');
+    const bizDefaultDisallowable = document.getElementById('bizDefaultDisallowable');
+    const bizDefaultNonTaxable = document.getElementById('bizDefaultNonTaxable');
+    const bizPension = document.getElementById('bizPension');
+    const bizRentRelief = document.getElementById('bizRentRelief');
+    const bizLifeAssurance = document.getElementById('bizLifeAssurance');
+    const bizMortgageInterest = document.getElementById('bizMortgageInterest');
+    const bizNHF = document.getElementById('bizNHF');
 
     const accountsModal = document.getElementById('accountsModal');
     const accountsList = document.getElementById('accountsList');
@@ -426,6 +466,15 @@
         if (!b.assets) b.assets = []; // assets store
         b.lossBroughtForward = Number(b.lossBroughtForward || 0);
         b.caCarryForward = Number(b.caCarryForward || 0);
+        // New business-level defaults
+        if (typeof b.defaultDisallowable === 'undefined') b.defaultDisallowable = false;
+        if (typeof b.defaultNonTaxable === 'undefined') b.defaultNonTaxable = false;
+        // New statutory deductions (annual amounts)
+        b.pension = Number(b.pension || 0);
+        b.rentRelief = Number(b.rentRelief || 0);
+        b.lifeAssurance = Number(b.lifeAssurance || 0);
+        b.mortgageInterest = Number(b.mortgageInterest || 0);
+        b.nhf = Number(b.nhf || 0);
       });
       // ensure transaction arrays exist
       for (const u of data.users){
@@ -450,7 +499,14 @@
           inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
           assets: [],
           lossBroughtForward: 0,
-          caCarryForward: 0
+          caCarryForward: 0,
+          defaultDisallowable: false,
+          defaultNonTaxable: false,
+          pension: 0,
+          rentRelief: 0,
+          lifeAssurance: 0,
+          mortgageInterest: 0,
+          nhf: 0
         }],
         transactions: {}
       };
@@ -490,11 +546,11 @@
       userCancel.addEventListener('click', ()=>closeModal(userModal));
 
       // business
-      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate; bizVatEnabled.checked=true; bizPitEnabled.checked=false; bizPayeEnabled.checked=true; bizShowLines.checked=true; bizLossBF.value = 0; bizCACF.value = 0; openModal(businessModal); bizSave.dataset.edit=''; });
-      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name; bizOwnerSelect.value=b.ownerId; bizEntity.value=b.entity; bizVat.value=b.vatRate; bizWht.value=b.whtRate; bizCit.value=b.citRate; bizVatEnabled.checked=!!b.vatEnabled; bizPitEnabled.checked=!!b.pitEnabled; bizPayeEnabled.checked=!!b.payeEnabled; bizShowLines.checked=!!b.showLines; bizLossBF.value = Number(b.lossBroughtForward||0); bizCACF.value = Number(b.caCarryForward||0); openModal(businessModal); bizSave.dataset.edit = b.id; });
+      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate; bizVatEnabled.checked=true; bizPitEnabled.checked=false; bizPayeEnabled.checked=true; bizShowLines.checked=true; bizLossBF.value = 0; bizCACF.value = 0; bizDefaultDisallowable.checked=false; bizDefaultNonTaxable.checked=false; bizPension.value=0; bizRentRelief.value=0; bizLifeAssurance.value=0; bizMortgageInterest.value=0; bizNHF.value=0; openModal(businessModal); bizSave.dataset.edit=''; });
+      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name; bizOwnerSelect.value=b.ownerId; bizEntity.value=b.entity; bizVat.value=b.vatRate; bizWht.value=b.whtRate; bizCit.value=b.citRate; bizVatEnabled.checked=!!b.vatEnabled; bizPitEnabled.checked=!!b.pitEnabled; bizPayeEnabled.checked=!!b.payeEnabled; bizShowLines.checked=!!b.showLines; bizLossBF.value = Number(b.lossBroughtForward||0); bizCACF.value = Number(b.caCarryForward||0); bizDefaultDisallowable.checked = !!b.defaultDisallowable; bizDefaultNonTaxable.checked = !!b.defaultNonTaxable; bizPension.value=Number(b.pension||0); bizRentRelief.value=Number(b.rentRelief||0); bizLifeAssurance.value=Number(b.lifeAssurance||0); bizMortgageInterest.value=Number(b.mortgageInterest||0); bizNHF.value=Number(b.nhf||0); openModal(businessModal); bizSave.dataset.edit = b.id; });
       btnDeleteBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); if(!confirm('Delete business and all transactions?')) return; deleteBusiness(selectedBiz); });
 
-      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const obj = { name, ownerId: owner, entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate), vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, accounts: [], inventory: [], assets: [], lossBroughtForward: Number(bizLossBF.value||0), caCarryForward: Number(bizCACF.value||0) }; const editId = bizSave.dataset.edit; if(editId){ const b = findBiz(editId); b.name = obj.name; b.ownerId = obj.ownerId; b.entity = obj.entity; b.vatRate = obj.vatRate; b.whtRate = obj.whtRate; b.citRate = obj.citRate; b.vatEnabled = obj.vatEnabled; b.pitEnabled = obj.pitEnabled; b.payeEnabled = obj.payeEnabled; b.showLines = obj.showLines; b.lossBroughtForward = obj.lossBroughtForward; b.caCarryForward = obj.caCarryForward; } else { obj.id = uid('biz'); // copy default accounts
+      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const obj = { name, ownerId: owner, entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate), vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, accounts: [], inventory: [], assets: [], lossBroughtForward: Number(bizLossBF.value||0), caCarryForward: Number(bizCACF.value||0), defaultDisallowable: !!bizDefaultDisallowable.checked, defaultNonTaxable: !!bizDefaultNonTaxable.checked, pension: Number(bizPension.value||0), rentRelief: Number(bizRentRelief.value||0), lifeAssurance: Number(bizLifeAssurance.value||0), mortgageInterest: Number(bizMortgageInterest.value||0), nhf: Number(bizNHF.value||0) }; const editId = bizSave.dataset.edit; if(editId){ const b = findBiz(editId); b.name = obj.name; b.ownerId = obj.ownerId; b.entity = obj.entity; b.vatRate = obj.vatRate; b.whtRate = obj.whtRate; b.citRate = obj.citRate; b.vatEnabled = obj.vatEnabled; b.pitEnabled = obj.pitEnabled; b.payeEnabled = obj.payeEnabled; b.showLines = obj.showLines; b.lossBroughtForward = obj.lossBroughtForward; b.caCarryForward = obj.caCarryForward; b.defaultDisallowable = obj.defaultDisallowable; b.defaultNonTaxable = obj.defaultNonTaxable; b.pension = obj.pension; b.rentRelief = obj.rentRelief; b.lifeAssurance = obj.lifeAssurance; b.mortgageInterest = obj.mortgageInterest; b.nhf = obj.nhf; } else { obj.id = uid('biz'); // copy default accounts
         obj.accounts = [{id:uid('acct'),name:'Sales',category:'Revenue', disallowableDefault:false, nonTaxableDefault:false}, {id:uid('acct'),name:'COGS',category:'Expense', disallowableDefault:false, nonTaxableDefault:false}, {id:uid('acct'),name:'Salaries',category:'Expense', disallowableDefault:false, nonTaxableDefault:false}];
         data.businesses.push(obj);
         // initialize transactions mapping for all users
@@ -518,11 +574,13 @@
       // inventory subform
       btnAddInv.addEventListener('click', handleInventoryAction);
       btnInvCancel.addEventListener('click', ()=>{ txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
+      btnUndoInv.addEventListener('click', handleUndoInventory);
 
       // asset subform
       btnAddAsset.addEventListener('click', handleAddAsset);
       btnDisposeAsset.addEventListener('click', handleDisposeAsset);
       btnAssetCancel.addEventListener('click', ()=>{ txnAction.value=''; assetSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
+      btnUndoAsset.addEventListener('click', handleUndoAsset);
 
       // ledger search
       document.getElementById('btnSearch').addEventListener('click', renderLedger);
@@ -559,10 +617,16 @@
     function findBiz(id){ return data.businesses.find(b=>b.id===id); }
 
     function populateAccountSelect(){
-      txnAccount.innerHTML=''; invItemSelect.innerHTML='';
+      txnAccount.innerHTML=''; invAccount.innerHTML=''; assetPurchaseAccount.innerHTML=''; assetDisposalAccount.innerHTML=''; invItemSelect.innerHTML='';
       const biz = findBiz(selectedBiz);
       if(!biz) return;
-      (biz.accounts||[]).forEach(a=>{ const opt=document.createElement('option'); opt.value=a.id; opt.textContent = a.name + ' (' + a.category + ')'; txnAccount.appendChild(opt); });
+      (biz.accounts||[]).forEach(a=>{ 
+        const opt=document.createElement('option'); opt.value=a.id; opt.textContent = a.name + ' (' + a.category + ')'; 
+        txnAccount.appendChild(opt); 
+        const opt2=opt.cloneNode(true); invAccount.appendChild(opt2);
+        const opt3=opt.cloneNode(true); assetPurchaseAccount.appendChild(opt3);
+        const opt4=opt.cloneNode(true); assetDisposalAccount.appendChild(opt4);
+      });
       // ensure there are basic default accounts if empty
       if((biz.accounts||[]).length===0){
         biz.accounts = [ {id:uid('acct'),name:'Sales',category:'Revenue',disallowableDefault:false,nonTaxableDefault:false}, {id:uid('acct'),name:'COGS',category:'Expense',disallowableDefault:false,nonTaxableDefault:false}, {id:uid('acct'),name:'Salaries',category:'Expense',disallowableDefault:false,nonTaxableDefault:false} ];
@@ -580,9 +644,8 @@
       txnDate.value = today();
       txnAction.value = '';
       txnDesc.value=''; txnAmount.value=''; txnWht.checked=false; txnWhtRate.value=''; txnWhtRateLabel.style.display='none'; txnSalary.checked=false;
-      txnDisallowable.checked=false; txnNonTax.checked=false;
       inventorySubform.style.display='none'; assetSubform.style.display='none';
-      invNewName.value=''; invQty.value=''; invUnitPrice.value=''; invVat.checked=false; invDisallowable.checked=false; invNonTax.checked=false;
+      invNewName.value=''; invQty.value=''; invUnitPrice.value=''; invVat.checked=false;
       assetName.value=''; assetCost.value=''; assetPurchaseDate.value=''; assetLife.value=3; assetCA.value=20; assetDisposalDate.value=''; assetDisposalProceeds.value='';
       mainTxnForm.style.display='flex';
     }
@@ -634,14 +697,12 @@
         const tdWht=document.createElement('td'); tdWht.textContent = (tx.whtApplied?fmt(tx.whtAmount||0)+' @'+(tx.whtRate||findBiz(selectedBiz).whtRate)+'%':'-');
         const tdPaye=document.createElement('td'); tdPaye.textContent = (tx.isSalary ? fmt(tx.payeAmount||0) : '-');
         const tdInv=document.createElement('td'); tdInv.textContent = (tx.invItemName? (tx.invItemName + ' x' + (tx.qty||0)) : (tx.assetName ? tx.assetName : ''));
-        const tdDis=document.createElement('td'); tdDis.textContent = tx.disallowable ? 'Yes' : '-';
-        const tdNon=document.createElement('td'); tdNon.textContent = tx.nonTaxable ? 'Yes' : '-';
         const tdAct=document.createElement('td');
         const editBtn=document.createElement('button'); editBtn.className='small'; editBtn.textContent='Edit'; editBtn.addEventListener('click', ()=>editTransaction(tx.id));
         const delBtn=document.createElement('button'); delBtn.className='small danger'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=>{ if(!confirm('Delete transaction?')) return; deleteTransaction(tx.id); });
         tdAct.appendChild(editBtn); tdAct.appendChild(delBtn);
 
-        tr.appendChild(tdDate); tr.appendChild(tdAction); tr.appendChild(tdAcc); tr.appendChild(tdDesc); tr.appendChild(tdAmt); tr.appendChild(tdVat); tr.appendChild(tdWht); tr.appendChild(tdPaye); tr.appendChild(tdInv); tr.appendChild(tdDis); tr.appendChild(tdNon); tr.appendChild(tdAct);
+        tr.appendChild(tdDate); tr.appendChild(tdAction); tr.appendChild(tdAcc); tr.appendChild(tdDesc); tr.appendChild(tdAmt); tr.appendChild(tdVat); tr.appendChild(tdWht); tr.appendChild(tdPaye); tr.appendChild(tdInv); tr.appendChild(tdAct);
         ledgerTable.appendChild(tr);
       });
     }
@@ -667,12 +728,20 @@
     }
 
     // helper: compute monthly PAYE based on annual PIT bands
-    function computeMonthlyPAYE(grossMonthly, biz){
-      const annual = Number(grossMonthly||0) * 12;
+    function computeMonthlyPAYE(grossMonthly, biz, txnDate){
+      // Determine which bands to use based on transaction date
+      const bands = (txnDate && txnDate >= '2025-06-01') ? PAYE_BANDS_2025 : PIT_BANDS_2026;
+      
+      // Apply statutory deductions (annual amounts, prorated monthly)
+      const annualDeductions = Number(biz.pension||0) + Number(biz.rentRelief||0) + Number(biz.lifeAssurance||0) + Number(biz.mortgageInterest||0) + Number(biz.nhf||0);
+      const monthlyDeductions = annualDeductions / 12;
+      const taxableMonthly = Math.max(0, Number(grossMonthly||0) - monthlyDeductions);
+      
+      const annual = taxableMonthly * 12;
       let remaining = annual;
       let lower = 0;
       let totalTax = 0;
-      PIT_BANDS_2026.forEach(band=>{
+      bands.forEach(band=>{
         if(remaining <= 0) return;
         const upper = band.upTo;
         const bandLimit = (upper === Infinity) ? Infinity : (upper - lower);
@@ -699,8 +768,20 @@
       const whtApplied = !!txnWht.checked;
       const whtRateVal = (txnWhtRate.value) ? Number(txnWhtRate.value) : undefined;
       const isSalary = !!txnSalary.checked;
-      const disallowableFlag = !!txnDisallowable.checked || !!account.disallowableDefault;
-      const nonTaxFlag = !!txnNonTax.checked || !!account.nonTaxableDefault;
+      
+      // Determine disallowable/nonTaxable from account-level defaults or business-level defaults
+      let disallowableFlag = false;
+      let nonTaxFlag = false;
+      if (account.disallowableDefault !== undefined) {
+        disallowableFlag = !!account.disallowableDefault;
+      } else if (action === 'Expense' || action === 'InventoryPurchase') {
+        disallowableFlag = !!biz.defaultDisallowable;
+      }
+      if (account.nonTaxableDefault !== undefined) {
+        nonTaxFlag = !!account.nonTaxableDefault;
+      } else if (action === 'Revenue' || action === 'InventorySale') {
+        nonTaxFlag = !!biz.defaultNonTaxable;
+      }
 
       if(!action) return alert('Select an action.');
 
@@ -722,7 +803,7 @@
       // PAYE: compute monthly based on PIT bands if marked salary
       let payeAmount = 0;
       if(isSalary && biz.payeEnabled){
-        payeAmount = computeMonthlyPAYE(amount, biz);
+        payeAmount = computeMonthlyPAYE(amount, biz, dateVal);
       }
 
       const txn = {
@@ -777,8 +858,22 @@
       const unitPrice = Number(invUnitPrice.value||0);
       const vatApplies = !!invVat.checked;
       const dateVal = txnDate.value || today();
-      const disallowableFlag = !!invDisallowable.checked;
-      const nonTaxFlag = !!invNonTax.checked;
+      const accountId = invAccount.value;
+      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Unknown', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
+      
+      // Determine disallowable/nonTaxable from account-level defaults or business-level defaults
+      let disallowableFlag = false;
+      let nonTaxFlag = false;
+      if (account.disallowableDefault !== undefined) {
+        disallowableFlag = !!account.disallowableDefault;
+      } else if (action === 'InventoryPurchase') {
+        disallowableFlag = !!biz.defaultDisallowable;
+      }
+      if (account.nonTaxableDefault !== undefined) {
+        nonTaxFlag = !!account.nonTaxableDefault;
+      } else if (action === 'InventorySale') {
+        nonTaxFlag = !!biz.defaultNonTaxable;
+      }
 
       if(action === 'InventoryPurchase'){
         // update weighted average
@@ -795,8 +890,8 @@
           id: uid('txn'),
           date: dateVal,
           action: 'InventoryPurchase',
-          accountId: txnAccount.value,
-          accountName: (biz.accounts.find(a=>a.id===txnAccount.value)||{}).name||'Inventory Purchases',
+          accountId,
+          accountName: account.name,
           description: `Purchase ${item.name}`,
           amount: qty*unitPrice,
           vatAmount,
@@ -807,6 +902,8 @@
           qty,
           unitPrice,
           unitCost: unitPrice,
+          prevQty,
+          prevAvg,
           userId: selectedUser,
           disallowable: disallowableFlag,
           nonTaxable: nonTaxFlag
@@ -829,8 +926,8 @@
           id: uid('txn'),
           date: dateVal,
           action: 'InventorySale',
-          accountId: txnAccount.value,
-          accountName: (biz.accounts.find(a=>a.id===txnAccount.value)||{}).name||'Sales',
+          accountId,
+          accountName: account.name,
           description: `Sale ${item.name}`,
           amount: qty*unitPrice,
           vatAmount,
@@ -842,6 +939,7 @@
           unitPrice,
           unitCost,
           cogs,
+          prevQty: item.qty + qty,
           userId: selectedUser,
           disallowable: disallowableFlag,
           nonTaxable: nonTaxFlag
@@ -862,12 +960,14 @@
       const pDate = assetPurchaseDate.value || today();
       const life = Number(assetLife.value||0);
       const caPerc = Number(assetCA.value||0);
+      const accountId = assetPurchaseAccount.value;
+      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Fixed Assets', category: 'Asset' };
       if(!name || cost <= 0 || life <= 0) return alert('Asset name, cost, and useful life required');
       const asset = { id:uid('asset'), name, cost, purchaseDate:pDate, lifeYears:life, capitalAllowancePercent:caPerc, disposed:false, disposalDate:null, disposalProceeds:0 };
       biz.assets = biz.assets || [];
       biz.assets.push(asset);
       // record transaction
-      const txn = { id:uid('txn'), date:pDate, action:'FixedAssetPurchase', accountId: txnAccount.value, accountName: (biz.accounts.find(a=>a.id===txnAccount.value)||{}).name||'Fixed Assets', description:`Asset purchase ${name}`, amount: cost, vatAmount:0, whtApplied:false, whtAmount:0, assetId: asset.id, assetName: name, userId:selectedUser, disallowable:false, nonTaxable:false };
+      const txn = { id:uid('txn'), date:pDate, action:'FixedAssetPurchase', accountId, accountName: account.name, description:`Asset purchase ${name}`, amount: cost, vatAmount:0, whtApplied:false, whtAmount:0, assetId: asset.id, assetName: name, userId:selectedUser, disallowable:false, nonTaxable:false };
       data.transactions[selectedUser][selectedBiz].push(txn);
       saveData(); resetForms(); renderAll(); alert('Asset recorded');
       txnAction.value=''; assetSubform.style.display='none'; mainTxnForm.style.display='flex';
@@ -879,17 +979,99 @@
       const name = (assetName.value||'').trim();
       const disposalDate = assetDisposalDate.value;
       const proceeds = Number(assetDisposalProceeds.value||0);
+      const accountId = assetDisposalAccount.value;
+      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Fixed Assets', category: 'Asset' };
       if(!name || !disposalDate) return alert('Asset name and disposal date required');
       const asset = biz.assets.find(a=>a.name===name && !a.disposed);
       if(!asset) return alert('Asset not found (not active)');
       asset.disposed = true;
       asset.disposalDate = disposalDate;
       asset.disposalProceeds = proceeds;
+      asset.prevDisposed = false;
+      asset.prevDisposalDate = null;
+      asset.prevDisposalProceeds = 0;
       // record transaction
-      const txn = { id:uid('txn'), date:disposalDate, action:'FixedAssetDisposal', accountId: txnAccount.value, accountName:(biz.accounts.find(a=>a.id===txnAccount.value)||{}).name||'Fixed Assets', description:`Asset disposal ${name}`, amount: proceeds, vatAmount:0, whtApplied:false, whtAmount:0, assetId: asset.id, assetName: name, userId:selectedUser, disallowable:false, nonTaxable:false };
+      const txn = { id:uid('txn'), date:disposalDate, action:'FixedAssetDisposal', accountId, accountName:account.name, description:`Asset disposal ${name}`, amount: proceeds, vatAmount:0, whtApplied:false, whtAmount:0, assetId: asset.id, assetName: name, userId:selectedUser, disallowable:false, nonTaxable:false };
       data.transactions[selectedUser][selectedBiz].push(txn);
       saveData(); resetForms(); renderAll(); alert('Disposal recorded');
       txnAction.value=''; assetSubform.style.display='none'; mainTxnForm.style.display='flex';
+    }
+
+    // Undo functions
+    function handleUndoInventory(){
+      if(!selectedUser || !selectedBiz) return alert('Select user/business');
+      const biz = findBiz(selectedBiz);
+      const txs = data.transactions[selectedUser][selectedBiz];
+      
+      // Find the most recent inventory transaction
+      let lastInvTxIdx = -1;
+      for(let i = txs.length - 1; i >= 0; i--){
+        if(txs[i].action === 'InventoryPurchase' || txs[i].action === 'InventorySale'){
+          lastInvTxIdx = i;
+          break;
+        }
+      }
+      
+      if(lastInvTxIdx === -1) return alert('No inventory transaction to undo');
+      
+      const tx = txs[lastInvTxIdx];
+      const item = biz.inventory.find(it => it.id === tx.invItemId);
+      if(!item) return alert('Inventory item not found');
+      
+      if(tx.action === 'InventoryPurchase'){
+        // Revert the purchase: restore previous qty and avgCost
+        item.qty = tx.prevQty || 0;
+        item.avgCost = tx.prevAvg || 0;
+      } else if(tx.action === 'InventorySale'){
+        // Revert the sale: increase qty back
+        item.qty = tx.prevQty || (item.qty + tx.qty);
+      }
+      
+      // Remove the transaction
+      txs.splice(lastInvTxIdx, 1);
+      saveData();
+      renderAll();
+      alert('Inventory action undone');
+    }
+
+    function handleUndoAsset(){
+      if(!selectedUser || !selectedBiz) return alert('Select user/business');
+      const biz = findBiz(selectedBiz);
+      const txs = data.transactions[selectedUser][selectedBiz];
+      
+      // Find the most recent asset transaction
+      let lastAssetTxIdx = -1;
+      for(let i = txs.length - 1; i >= 0; i--){
+        if(txs[i].action === 'FixedAssetPurchase' || txs[i].action === 'FixedAssetDisposal'){
+          lastAssetTxIdx = i;
+          break;
+        }
+      }
+      
+      if(lastAssetTxIdx === -1) return alert('No asset transaction to undo');
+      
+      const tx = txs[lastAssetTxIdx];
+      const asset = biz.assets.find(a => a.id === tx.assetId);
+      
+      if(tx.action === 'FixedAssetPurchase'){
+        // Remove the asset record
+        if(asset){
+          biz.assets = biz.assets.filter(a => a.id !== tx.assetId);
+        }
+      } else if(tx.action === 'FixedAssetDisposal'){
+        // Unmark disposal
+        if(asset){
+          asset.disposed = false;
+          asset.disposalDate = null;
+          asset.disposalProceeds = 0;
+        }
+      }
+      
+      // Remove the transaction
+      txs.splice(lastAssetTxIdx, 1);
+      saveData();
+      renderAll();
+      alert('Asset action undone');
     }
 
     // --- Computations: P&L, Taxes, Depreciation, CA, COGS ---
@@ -903,7 +1085,8 @@
       let expenses = 0;
       let vatOutput = 0;
       let vatInput = 0;
-      let whtTotal = 0;
+      let whtReceivableTotal = 0;
+      let whtPayableTotal = 0;
       let payeTotal = 0;
       let disallowableTotal = 0;
       let nonTaxableTotal = 0;
@@ -916,8 +1099,16 @@
           if(tx.action === 'InventorySale' || tx.action === 'Revenue') vatOutput += Number(tx.vatAmount||0);
           else vatInput += Number(tx.vatAmount||0);
         }
-        // WHT
-        whtTotal += Number(tx.whtAmount||0);
+        // WHT: split into receivable and payable
+        if(tx.whtApplied && tx.whtAmount){
+          if(tx.action === 'Revenue' || tx.action === 'InventorySale'){
+            // WHT receivable (withheld by customer)
+            whtReceivableTotal += Number(tx.whtAmount||0);
+          } else if(tx.action === 'Expense' || tx.action === 'InventoryPurchase'){
+            // WHT payable (withheld by us)
+            whtPayableTotal += Number(tx.whtAmount||0);
+          }
+        }
         // PAYE
         payeTotal += Number(tx.payeAmount||0);
         // disallowable/non-taxable
@@ -984,11 +1175,13 @@
       // Add back disallowable expenses (increase taxable)
       // Subtract non-taxable income (decrease taxable)
       // Subtract allowed capital allowances
+      // Subtract WHT receivable (reduces taxable income / tax payable)
       // Subtract loss brought forward
       let taxable = netProfit;
       taxable += disallowableTotal;
       taxable -= nonTaxableTotal;
       taxable -= allowedCA;
+      taxable -= whtReceivableTotal;
       taxable -= Number(biz.lossBroughtForward || 0);
       const taxableProfit = Math.max(0, taxable);
 
@@ -1050,7 +1243,8 @@
         vatOutput,
         vatInput,
         vatNet: vatOutput - vatInput,
-        whtTotal,
+        whtReceivableTotal,
+        whtPayableTotal,
         payeTotal,
         disallowableTotal,
         nonTaxableTotal,
@@ -1132,13 +1326,15 @@
       if(!p) return;
       const lines = [];
       if(biz.showLines) {
-        lines.push(`<div><strong>VAT Output:</strong> ₦${fmt(p.vatOutput)}</div>`);
-        lines.push(`<div><strong>VAT Input:</strong> ₦${fmt(p.vatInput)}</div>`);
-        lines.push(`<div><strong>Net VAT payable / (credit):</strong> ₦${fmt(p.vatNet)}</div>`);
-        lines.push(`<div><strong>WHT total:</strong> ₦${fmt(p.whtTotal)}</div>`);
+        const vatNetSign = p.vatNet >= 0 ? 'payable' : 'credit';
+        const vatNetAbs = Math.abs(p.vatNet);
+        lines.push(`<div><strong>VAT ${vatNetSign}:</strong> ₦${fmt(vatNetAbs)}</div>`);
+        lines.push(`<div><strong>WHT Receivable:</strong> ₦${fmt(p.whtReceivableTotal)}</div>`);
+        lines.push(`<div><strong>WHT Payable:</strong> ₦${fmt(p.whtPayableTotal)}</div>`);
         lines.push(`<div><strong>PAYE withheld (sum):</strong> ₦${fmt(p.payeTotal)}</div>`);
         lines.push(`<div><strong>Disallowable additions:</strong> ₦${fmt(p.disallowableTotal)}</div>`);
         lines.push(`<div><strong>Non-taxable income excluded:</strong> ₦${fmt(p.nonTaxableTotal)}</div>`);
+        lines.push(`<div><strong>WHT receivable deduction:</strong> ₦${fmt(p.whtReceivableTotal)}</div>`);
         lines.push(`<div><strong>Taxable profit (after adjustments & CA & losses B/F):</strong> ₦${fmt(p.taxableProfit)}</div>`);
       }
       lines.push(`<div style="margin-top:8px;"><strong>CIT (Company):</strong> ₦${fmt(p.cit)}</div>`);
