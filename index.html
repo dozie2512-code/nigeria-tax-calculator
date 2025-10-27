@@ -1,5 +1,3 @@
-GitHub Copilot Chat Assistant — fixed index.html below.
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -28,7 +26,7 @@ GitHub Copilot Chat Assistant — fixed index.html below.
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); max-height:80vh; overflow:auto; }
+    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); max-height:85vh; overflow:auto; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
     small.note { color:var(--muted); display:block; margin-top:6px; }
@@ -235,7 +233,7 @@ GitHub Copilot Chat Assistant — fixed index.html below.
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th>Inv Item / Asset</th><th>Disallowable</th><th>Non-tax</th><th>Actions</th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th>Inv Item / Asset</th><th>Disallowable</th><th>Non-taxable</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -669,6 +667,7 @@ GitHub Copilot Chat Assistant — fixed index.html below.
           invItemName: null,
           qty:0,
           assetId:null,
+          assetName:null,
           disallowable:false,
           nonTaxable:false
         }
@@ -716,32 +715,34 @@ GitHub Copilot Chat Assistant — fixed index.html below.
     function initUI(){
       // user buttons
       btnAddUser.addEventListener('click', ()=>{ userModalTitle.textContent='Add User'; userName.value=''; userDisplay.value=''; userRole.value='User'; permView.checked=true; permEdit.checked=true; permDelete.checked=false; userSave.dataset.edit=''; openModal(userModal); });
-      btnEditUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); const u = findUser(selectedUser); if(!canEdit()) return alert('Active user lacks permission to edit users'); userModalTitle.textContent='Edit User'; userName.value = u.username||''; userDisplay.value = u.display||''; userRole.value = u.role||'User'; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; userSave.dataset.edit = selectedUser; openModal(userModal); });
-      btnDeleteUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); if(!canDelete()) return alert('Active user lacks permission to delete users'); if(!confirm('Delete user and all their transaction links?')) return; deleteUser(selectedUser); });
+      btnEditUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); const u = findUser(selectedUser); if(!canEdit()) return alert('Active user lacks permission to edit users'); userModalTitle.textContent='Edit User'; userName.value=u.username||''; userDisplay.value=u.display||''; userRole.value=u.role||'User'; permView.checked=!!u.permissions?.view; permEdit.checked=!!u.permissions?.edit; permDelete.checked=!!u.permissions?.delete; userSave.dataset.edit = u.id; openModal(userModal); });
+      btnDeleteUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); if(!canDelete()) return alert('Active user lacks permission to delete users'); if(!confirm('Delete user?')) return; deleteUser(selectedUser); });
 
-      userSave.addEventListener('click', ()=>{ const uname=(userName.value||'').trim(); if(!uname) return alert('Username required'); const id=userSave.dataset.edit; if(id){ const u=findUser(id); u.username = uname; u.display = userDisplay.value||uname; u.role = userRole.value; u.permissions = { view:permView.checked, edit:permEdit.checked, delete:permDelete.checked }; u.isAdmin = (u.role==='Admin'); addAudit('user.edit','user',id,`Edited user ${id}`); } else { const nu = { id: uid('user'), username: uname, display: userDisplay.value||uname, role: userRole.value, isAdmin: userRole.value==='Admin', permissions: { view:permView.checked, edit:permEdit.checked, delete:permDelete.checked } }; data.users.push(nu); data.transactions[nu.id] = {}; data.businesses.forEach(b=> data.transactions[nu.id][b.id]=[]); addAudit('user.add','user',nu.id,`Added user ${nu.username}`); } saveData(); closeModal(userModal); refreshSelectors(); ensureSelection(); renderAll(); });
+      userSave.addEventListener('click', ()=>{ const uname=(userName.value||'').trim(); if(!uname) return alert('Username required'); const id=userSave.dataset.edit; if(id){ const u=findUser(id); u.username=uname; u.display=userDisplay.value||uname; u.role=userRole.value; u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked }; u.isAdmin = (u.role==='Admin'); addAudit('user.edit','user',u.id,`Edited user ${u.username}`); } else { const idn = uid('user'); const newU={ id:idn, username:uname, display:userDisplay.value||uname, role:userRole.value, isAdmin:(userRole.value==='Admin'), permissions:{ view:!!permView.checked, edit:!!permEdit.checked, delete:!!permDelete.checked } }; data.users.push(newU); data.transactions[newU.id] = {}; data.businesses.forEach(b=> data.transactions[newU.id][b.id]=[]); addAudit('user.add','user',idn,`Added user ${uname}`); } saveData(); closeModal(userModal); refreshSelectors(); ensureSelection(); renderAll(); });
 
       userCancel.addEventListener('click', ()=>closeModal(userModal));
 
       // business
-      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate; bizVatEnabled.checked=true; bizPayeEnabled.checked=true; bizPitEnabled.checked=true; bizShowLines.checked=true; bizCitEnabled.checked=true; bizSave.dataset.edit=''; openModal(businessModal); });
-      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name||''; bizOwnerSelect.value=b.ownerId||''; bizEntity.value=b.entity||'Company'; bizVat.value = b.vatRate; bizWht.value = b.whtRate; bizCit.value = b.citRate; bizVatEnabled.checked = !!b.vatEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizPitEnabled.checked=!!b.pitEnabled; bizShowLines.checked=!!b.showLines; bizCitEnabled.checked = !!b.citEnabled; bizSave.dataset.edit = selectedBiz; renderBizContacts(b); openModal(businessModal); });
-      btnDeleteBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); if(!canDelete()) return alert('Active user lacks permission to delete businesses'); if(!confirm('Delete business and all associated data?')) return; deleteBusiness(selectedBiz); });
+      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value=DEFAULTS.vatRate; bizWht.value=DEFAULTS.whtRate; bizCit.value=DEFAULTS.citRate; bizVatEnabled.checked=true; bizPayeEnabled.checked=true; bizPitEnabled.checked=true; bizShowLines.checked=true; bizCitEnabled.checked=true; bizLossBF.value=0; bizCACF.value=0; bizCapitalBF.value=0; bizDedPension.value=0; bizDedRent.value=0; bizDedLife.value=0; bizDedMortgage.value=0; bizDedNHF.value=0; bizFirsLabel.value=DEFAULTS.firsLabel; bizFirsUrl.value=DEFAULTS.firsUrl; bizContactsList.innerHTML=''; bizSave.dataset.edit=''; openModal(businessModal); });
+      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name||''; bizOwnerSelect.value=b.ownerId||data.users[0]?.id||''; bizEntity.value=b.entity||'Company'; bizVat.value=b.vatRate; bizWht.value=b.whtRate; bizCit.value=b.citRate; bizVatEnabled.checked=!!b.vatEnabled; bizPayeEnabled.checked=!!b.payeEnabled; bizPitEnabled.checked=!!b.pitEnabled; bizShowLines.checked=!!b.showLines; bizCitEnabled.checked=!!b.citEnabled; bizLossBF.value=b.lossBroughtForward||0; bizCACF.value=b.caCarryForward||0; bizCapitalBF.value=b.capitalBroughtForward||0; bizDedPension.value=b.statutoryDeductions?.pension||0; bizDedRent.value=b.statutoryDeductions?.rent||0; bizDedLife.value=b.statutoryDeductions?.life||0; bizDedMortgage.value=b.statutoryDeductions?.mortgage||0; bizDedNHF.value=b.statutoryDeductions?.nhf||0; bizFirsLabel.value=b.firsLabel||DEFAULTS.firsLabel; bizFirsUrl.value=b.firsUrl||DEFAULTS.firsUrl; bizDefaultExpenseDisallowable.checked=!!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked=!!b.defaultRevenueNonTax; bizSave.dataset.edit = b.id; renderBizContacts(b); openModal(businessModal); });
+      btnDeleteBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); if(!canDelete()) return alert('Active user lacks permission to delete businesses'); if(!confirm('Delete business?')) return; deleteBusiness(selectedBiz); });
 
-      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const edit = bizSave.dataset.edit; if(edit){ const b = findBiz(edit); b.name = name; b.ownerId = owner; b.entity = bizEntity.value; b.vatRate = Number(bizVat.value||DEFAULTS.vatRate); b.whtRate = Number(bizWht.value||DEFAULTS.whtRate); b.citRate = Number(bizCit.value||DEFAULTS.citRate); b.vatEnabled = bizVatEnabled.checked; b.payeEnabled = bizPayeEnabled.checked; b.pitEnabled = bizPitEnabled.checked; b.showLines = bizShowLines.checked; b.citEnabled = bizCitEnabled.checked; b.lossBroughtForward = Number(bizLossBF.value||0); b.caCarryForward = Number(bizCACF.value||0); b.capitalBroughtForward = Number(bizCapitalBF.value||0); b.defaultExpenseDisallowable = bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = bizDefaultRevenueNonTax.checked; b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }; b.firsLabel = bizFirsLabel.value||DEFAULTS.firsLabel; b.firsUrl = bizFirsUrl.value||DEFAULTS.firsUrl; addAudit('business.edit','business',b.id,`Edited business ${b.name}`); } else { const obj = { id: uid('biz'), name, ownerId: owner, entity: bizEntity.value, vatRate:Number(bizVat.value||DEFAULTS.vatRate), whtRate:Number(bizWht.value||DEFAULTS.whtRate), citRate:Number(bizCit.value||DEFAULTS.citRate), vatEnabled: bizVatEnabled.checked, payeEnabled: bizPayeEnabled.checked, pitEnabled: bizPitEnabled.checked, showLines: bizShowLines.checked, citEnabled: bizCitEnabled.checked, accounts: [], inventory: [], assets: [], lossBroughtForward:0, caCarryForward:0, capitalBroughtForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, statutoryDeductions:{pension:0,rent:0,life:0,mortgage:0,nhf:0}, contacts:[], firsLabel:DEFAULTS.firsLabel, firsUrl:DEFAULTS.firsUrl }; data.businesses.push(obj); data.users.forEach(u=>{ if(!data.transactions[u.id]) data.transactions[u.id] = {}; data.transactions[u.id][obj.id] = []; }); addAudit('business.add','business',obj.id,`Created business ${obj.name}`); } saveData(); closeModal(businessModal); refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll(); });
+      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const edit = bizSave.dataset.edit; if(edit){ const b = findBiz(edit); b.name=name; b.ownerId=owner; b.entity=bizEntity.value; b.vatRate=Number(bizVat.value||0); b.whtRate=Number(bizWht.value||0); b.citRate=Number(bizCit.value||0); b.vatEnabled=!!bizVatEnabled.checked; b.payeEnabled=!!bizPayeEnabled.checked; b.pitEnabled=!!bizPitEnabled.checked; b.showLines=!!bizShowLines.checked; b.citEnabled=!!bizCitEnabled.checked; b.lossBroughtForward=Number(bizLossBF.value||0); b.caCarryForward=Number(bizCACF.value||0); b.capitalBroughtForward=Number(bizCapitalBF.value||0); b.defaultExpenseDisallowable=!!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax=!!bizDefaultRevenueNonTax.checked; b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }; b.firsLabel = bizFirsLabel.value||DEFAULTS.firsLabel; b.firsUrl = bizFirsUrl.value||DEFAULTS.firsUrl; addAudit('business.edit','business',b.id,`Edited business ${b.name}`); } else { const idn = uid('biz'); const nb = { id: idn, name, ownerId: owner, entity: bizEntity.value, vatRate:Number(bizVat.value||0), whtRate:Number(bizWht.value||0), citRate:Number(bizCit.value||0), vatEnabled:!!bizVatEnabled.checked, payeEnabled:!!bizPayeEnabled.checked, pitEnabled:!!bizPitEnabled.checked, showLines:!!bizShowLines.checked, citEnabled:!!bizCitEnabled.checked, accounts:[], inventory:[], assets:[], lossBroughtForward:Number(bizLossBF.value||0), caCarryForward:Number(bizCACF.value||0), capitalBroughtForward:Number(bizCapitalBF.value||0), defaultExpenseDisallowable:!!bizDefaultExpenseDisallowable.checked, defaultRevenueNonTax:!!bizDefaultRevenueNonTax.checked, statutoryDeductions:{ pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }, contacts:[], firsLabel: bizFirsLabel.value||DEFAULTS.firsLabel, firsUrl: bizFirsUrl.value||DEFAULTS.firsUrl }; data.businesses.push(nb); for(const uid of Object.keys(data.transactions||{})) data.transactions[uid][nb.id]=[]; addAudit('business.add','business',nb.id,`Added business ${nb.name}`); } saveData(); closeModal(businessModal); refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll(); });
 
       bizCancel.addEventListener('click', ()=>closeModal(businessModal));
-      btnAddContact.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b = findBiz(selectedBiz); const nm = (newContactName.value||'').trim(); if(!nm) return alert('Contact name required'); b.contacts.push({ id: uid('c'), name: nm, type: newContactType.value }); saveData(); renderBizContacts(b); addAudit('contact.add','contact',b.id,`Added contact ${nm}`); });
+      btnAddContact.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b = findBiz(selectedBiz); const nm = (newContactName.value||'').trim(); if(!nm) return alert('Contact name required'); b.contacts = b.contacts || []; b.contacts.push({ id: uid('c'), name:nm, type:newContactType.value }); saveData(); renderBizContacts(b); addAudit('contact.add','contact',b.id,`Added contact ${nm}`); newContactName.value=''; });
 
-      function renderBizContacts(b){ bizContactsList.innerHTML=''; (b.contacts||[]).forEach(c=>{ const div=document.createElement('div'); div.className='account-row'; div.innerHTML=`<div>${c.name} <small class="small-muted">(${c.type})</small></div>`; const del=document.createElement('button'); del.className='small danger'; del.textContent='Delete'; del.addEventListener('click', ()=>{ if(!confirm('Delete contact?')) return; b.contacts = b.contacts.filter(x=>x.id!==c.id); saveData(); renderBizContacts(b); }); div.appendChild(del); bizContactsList.appendChild(div); }); }
+      function renderBizContacts(b){ bizContactsList.innerHTML=''; (b.contacts||[]).forEach(c=>{ const div=document.createElement('div'); div.className='account-row'; const left=document.createElement('div'); left.textContent = `${c.name} — ${c.type}`; const btn = document.createElement('button'); btn.className='small danger'; btn.textContent='Remove'; btn.addEventListener('click', ()=>{ if(!confirm('Remove contact?')) return; b.contacts = b.contacts.filter(x=>x.id!==c.id); saveData(); renderBizContacts(b); addAudit('contact.delete','contact',c.id,`Removed contact ${c.name}`); }); div.appendChild(left); div.appendChild(btn); bizContactsList.appendChild(div); }); }
 
       // accounts modal
       btnManageAccounts.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); renderAccounts(); openModal(accountsModal); });
-      addAccountBtn.addEventListener('click', ()=>{ const name=(newAccountName.value||'').trim(); if(!name) return alert('Account name required'); const cat=newAccountCategory.value; const b=findBiz(selectedBiz); const acct = { id: uid('acct'), name, category:cat, disallowableDefault:false, nonTaxableDefault:false }; b.accounts.push(acct); saveData(); renderAccounts(); populateAccountSelect(); addAudit('account.add','account',acct.id,`Added account ${name} to biz ${b.id}`); newAccountName.value=''; });
+      addAccountBtn.addEventListener('click', ()=>{ const name=(newAccountName.value||'').trim(); if(!name) return alert('Account name required'); const cat=newAccountCategory.value; const b=findBiz(selectedBiz); const acct={ id: uid('acct'), name, category: cat, disallowableDefault:false, nonTaxableDefault:false }; b.accounts = b.accounts || []; b.accounts.push(acct); saveData(); renderAccounts(); populateAccountSelect(); addAccountBtn.disabled=false; newAccountName.value=''; addAudit('account.add','account',acct.id,`Added account ${name}`); });
       closeAccountsBtn.addEventListener('click', ()=>closeModal(accountsModal));
 
+      function renderAccounts(){ accountsList.innerHTML=''; const b=findBiz(selectedBiz); if(!b) return; (b.accounts||[]).forEach(a=>{ const row=document.createElement('div'); row.className='account-row'; const left=document.createElement('div'); left.textContent = `${a.name} (${a.category})`; const right=document.createElement('div'); const del=document.createElement('button'); del.className='small danger'; del.textContent='Delete'; del.addEventListener('click', ()=>{ if(!confirm('Delete account?')) return; b.accounts = b.accounts.filter(x=>x.id!==a.id); saveData(); renderAccounts(); populateAccountSelect(); addAudit('account.delete','account',a.id,`Deleted account ${a.name}`); }); right.appendChild(del); row.appendChild(left); row.appendChild(right); accountsList.appendChild(row); }); }
+
       // transaction form behaviors
-      txnAction.addEventListener('change', ()=>{ const val = txnAction.value; const mainTxnFormDiv = document.getElementById('mainTxnForm'); if(val==='InventoryPurchase' || val==='InventorySale'){ mainTxnFormDiv.style.display='none'; inventorySubform.style.display='block'; assetSubform.style.display='none'; populateAccountSelect(); } else if(val==='FixedAssetPurchase' || val==='FixedAssetDisposal'){ mainTxnFormDiv.style.display='none'; assetSubform.style.display='block'; inventorySubform.style.display='none'; populateAccountSelect(); } else { mainTxnFormDiv.style.display='flex'; inventorySubform.style.display='none'; assetSubform.style.display='none'; } });
+      txnAction.addEventListener('change', ()=>{ const val = txnAction.value; const mainTxnFormDiv = document.getElementById('mainTxnForm'); if(val==='InventoryPurchase' || val==='InventorySale'){ inventorySubform.style.display='block'; mainTxnFormDiv.style.display='none'; } else if(val==='FixedAssetPurchase' || val==='FixedAssetDisposal'){ assetSubform.style.display='block'; mainTxnFormDiv.style.display='none'; } else { inventorySubform.style.display='none'; assetSubform.style.display='none'; mainTxnFormDiv.style.display='flex'; } });
       txnWht.addEventListener('change', ()=>{ txnWhtRateLabel.style.display = txnWht.checked ? 'inline-flex' : 'none'; });
 
       btnAddTxn.addEventListener('click', handleAddTransaction);
@@ -762,9 +763,9 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
 
       // export/import
-      document.getElementById('btnExport').addEventListener('click', ()=>{ const dataStr = JSON.stringify(data, null, 2); const blob = new Blob([dataStr], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc_data.json'; a.click(); URL.revokeObjectURL(url); });
+      document.getElementById('btnExport').addEventListener('click', ()=>{ const dataStr = JSON.stringify(data, null, 2); const blob = new Blob([dataStr], {type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='ntc_data.json'; a.click(); URL.revokeObjectURL(url); });
       document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileInput').click());
-      document.getElementById('fileInput').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload = () => { try{ const parsed = JSON.parse(r.result); if(!confirm('Replace stored data with imported file?')) return; data = parsed; migrateData(); saveData(); refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll(); } catch(err){ alert('Invalid JSON file'); } }; r.readAsText(f); });
+      document.getElementById('fileInput').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload = () => { try{ const parsed = JSON.parse(r.result); if(!confirm('Import will replace current data. Continue?')) return; data = parsed; migrateData(); renderAll(); alert('Import complete'); } catch(err){ alert('Invalid JSON: ' + err.message); } }; r.readAsText(f); });
       document.getElementById('btnClearAll').addEventListener('click', ()=>{ if(!confirm('Clear all stored data?')) return; localStorage.removeItem(STORAGE_KEY); data={users:[],businesses:[],transactions:{},attachments:[],audit:[]}; seedDemo(); refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll(); });
 
       // header tabs
@@ -866,7 +867,7 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       const q = (document.getElementById('ledgerSearch').value||'').toLowerCase();
       arr.filter(tx => {
         if(!q) return true;
-        return (tx.date||'').includes(q) || (tx.accountName||'').toLowerCase().includes(q) || (tx.description||'').toLowerCase().includes(q) || String(tx.amount||'').includes(q) || ((tx.contactName||'')||'').toLowerCase().includes(q);
+        return (tx.date||'').includes(q) || (tx.accountName||'').toLowerCase().includes(q) || (tx.description||'').toLowerCase().includes(q) || String(tx.amount||'').includes(q) || ((tx.contactName||'').toLowerCase().includes(q)) || ((tx.invItemName||'') .toLowerCase().includes(q));
       }).forEach(tx=>{
         const tr = document.createElement('tr');
         const tdDate=document.createElement('td'); tdDate.textContent=tx.date||'';
@@ -932,7 +933,7 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       if(!a) return alert('Attachment not found');
       const w = window.open();
       const html = `
-        <!doctype html><html><head><meta charset="utf-8"><title>${a.filename}</title><style>body{margin:0;padding:8px;font-family:system-ui,Arial;}img{max-width:100%;height:auto;}iframe{width:100%;height:90vh;border:none;}</style></head><body>
+        <!doctype html><html><head><meta charset="utf-8"><title>${a.filename}</title><style>body{margin:0;padding:8px;font-family:system-ui,Arial;}img{max-width:100%;height:auto;}iframe{width:100%;height:80vh;border:0;}</style></head><body>
         <h3>${a.filename}</h3>
         ${a.mime && a.mime.startsWith('image/') ? `<img src="${a.dataUrl}" alt="${a.filename}"/>` : (a.mime === 'application/pdf' ? `<iframe src="${a.dataUrl}"></iframe>` : `<a href="${a.dataUrl}" download="${a.filename}">Download ${a.filename}</a>`)}
         </body></html>`;
@@ -989,29 +990,30 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
       const acctId = txnAccount.value;
-      const acct = (biz.accounts||[]).find(a=>a.id===acctId) || { id:'', name:'(unknown)' };
+      const acct = (biz.accounts||[]).find(a=>a.id===acctId) || { id:'', name:'(unknown)', category:'' };
       const date = txnDate.value || today();
       const action = txnAction.value || (acct.category==='Revenue' ? 'Revenue' : 'Expense');
       let amount = Number(txnAmount.value || 0);
       if(amount <= 0) return alert('Amount must be > 0');
       let vatAmount = 0;
       if(txnVatApply.checked && biz.vatEnabled){
-        const rate = biz.vatRate || DEFAULTS.vatRate;
+        const rate = Number(biz.vatRate || DEFAULTS.vatRate);
         if(txnVatInclusive.checked){
-          vatAmount = amount - (amount / (1 + rate/100));
-          amount = amount - vatAmount; // net
+          const net = amount / (1 + rate/100);
+          vatAmount = amount - net;
+          amount = net;
         } else {
           vatAmount = amount * (rate/100);
         }
       }
       let whtAmount = 0;
-      let whtRateVal = 0;
+      let whtRateVal = txnWhtRate.value ? Number(txnWhtRate.value) : (biz.whtRate || DEFAULTS.whtRate);
       if(txnWht.checked){
-        whtRateVal = Number(txnWhtRate.value||biz.whtRate||DEFAULTS.whtRate);
-        whtAmount = amount * (whtRateVal/100);
+        whtAmount = (amount) * (whtRateVal/100);
       }
       let payeAmount = 0;
       if(txnSalary.checked && biz.payeEnabled){
+        // assume amount is gross monthly
         payeAmount = computeMonthlyPAYE(amount, biz, date);
       }
       const tx = {
@@ -1020,17 +1022,17 @@ GitHub Copilot Chat Assistant — fixed index.html below.
         action,
         accountId: acct.id,
         accountName: acct.name,
-        description: txnDesc.value || '',
-        amount: Number(txnAmount.value || 0),
-        netAmount: Number((txnVatInclusive.checked || !txnVatApply.checked) ? (amount) : (amount)),
-        vatAmount: Number(vatAmount||0),
+        description: txnDesc.value||'',
+        amount: Number(txnAmount.value||0),
+        netAmount: +(amount.toFixed(2)),
+        vatAmount: +(vatAmount||0),
         whtApplied: !!txnWht.checked,
-        whtAmount: Number(whtAmount||0),
+        whtAmount: +(whtAmount||0),
         whtRate: whtRateVal,
         isSalary: !!txnSalary.checked,
-        payeAmount: Number(payeAmount||0),
-        contactType: txnContactType.value || '',
-        contactName: txnContactName.value || '',
+        payeAmount: +(payeAmount||0),
+        contactType: txnContactType.value||'',
+        contactName: txnContactName.value||'',
         invItemId: null,
         invItemName: null,
         qty: 0,
@@ -1039,178 +1041,215 @@ GitHub Copilot Chat Assistant — fixed index.html below.
         disallowable: false,
         nonTaxable: false
       };
-      data.transactions[selectedUser][selectedBiz].push(tx);
-      // attachment handling (optional)
-      if(txnReceipt.files && txnReceipt.files[0]){
-        const f = txnReceipt.files[0];
+      // attach receipt file if provided
+      const file = txnReceipt.files && txnReceipt.files[0];
+      if(file){
         const r = new FileReader();
-        r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime: f.type, dataUrl: r.result } }); renderLedger(); };
-        r.readAsDataURL(f);
+        r.onload = () => {
+          addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: file.name, mime:file.type, dataUrl: r.result }, uploadedBy: selectedUser });
+        };
+        r.readAsDataURL(file);
       }
-      saveData(); addAudit('transaction.add','transaction',tx.id,`Added transaction ${tx.id}`); resetForms(); renderAll();
+      data.transactions[selectedUser] = data.transactions[selectedUser] || {};
+      data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz] || [];
+      data.transactions[selectedUser][selectedBiz].push(tx);
+      saveData();
+      addAudit('transaction.add','transaction',tx.id,`Added transaction ${tx.id} ${tx.description}`);
+      resetForms();
+      renderAll();
     }
 
-    // Inventory operations: purchases and sales
+    // Inventory actions (purchase/sale)
     function handleInventoryAction(){
       if(!selectedUser || !selectedBiz) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
-      const selectedItemId = invItemSelect.value;
-      const isNew = selectedItemId === '__new__';
-      const newName = (invNewName.value||'').trim();
-      const qty = Number(invQty.value||0);
-      const price = Number(invUnitPrice.value||0);
-      if(qty <= 0) return alert('Quantity must be > 0');
-      if(isNew && !newName) return alert('Provide new item name');
-      let item;
-      if(isNew){
-        item = { id: uid('item'), name: newName, qty: 0, avgCost: 0 };
+      const action = txnAction.value || '';
+      if(action !== 'InventoryPurchase' && action !== 'InventorySale') return alert('Invalid inventory action');
+      let itemId = invItemSelect.value;
+      let itemName = '';
+      let item = null;
+      if(itemId === '__new__'){
+        const name = (invNewName.value||'').trim();
+        if(!name) return alert('New item name required');
+        item = { id: uid('item'), name, qty:0, avgCost:0 };
+        biz.inventory = biz.inventory || [];
         biz.inventory.push(item);
+        itemId = item.id;
       } else {
-        item = (biz.inventory||[]).find(i=>i.id===selectedItemId);
+        item = (biz.inventory||[]).find(i=>i.id===itemId);
         if(!item) return alert('Item not found');
       }
-      const date = txnDate.value || today();
-      // determine purchase or sale by txnAction dropdown
-      const act = txnAction.value || 'InventoryPurchase';
-      if(act === 'InventoryPurchase'){
-        // weighted average update
-        const totalCostBefore = item.avgCost * item.qty;
-        const addCost = price * qty;
-        const newQty = item.qty + qty;
-        item.avgCost = newQty === 0 ? 0 : ((totalCostBefore + addCost) / newQty);
-        item.qty = newQty;
-        // create transaction for purchase
-        const acct = findBiz(selectedBiz).accounts.find(a=>a.id===invAccountSelect.value) || { id:'', name:'Inventory Purchase' };
-        const rate = biz.vatRate || DEFAULTS.vatRate;
-        let vatAmount = 0;
-        let netAmount = price * qty;
-        if(invVat.checked && biz.vatEnabled){
-          if(invVatInclusive.checked){
-            vatAmount = netAmount - (netAmount / (1 + rate/100));
-            netAmount = netAmount - vatAmount;
-          } else {
-            vatAmount = netAmount * (rate/100);
-          }
+      const qty = Number(invQty.value||0);
+      const unitPrice = Number(invUnitPrice.value||0);
+      if(qty <= 0) return alert('Quantity must be > 0');
+      if(unitPrice < 0) return alert('Unit price invalid');
+      const accountId = invAccountSelect.value;
+      const acc = (biz.accounts||[]).find(a=>a.id===accountId) || { id:accountId, name:'(unknown)' };
+      let vatAmount = 0;
+      if(invVat.checked && biz.vatEnabled){
+        const rate = Number(biz.vatRate || DEFAULTS.vatRate);
+        if(invVatInclusive.checked){
+          // price inclusive => extract vat
+          const netUnit = unitPrice / (1 + rate/100);
+          vatAmount = (unitPrice - netUnit) * qty;
+        } else {
+          vatAmount = unitPrice * qty * (rate/100);
         }
-        const tx = { id: uid('txn'), date, action: 'InventoryPurchase', accountId: acct.id, accountName: acct.name, description: `Purchase ${item.name}`, amount: price*qty, netAmount, vatAmount, whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType: invContactType.value, contactName: invContactName.value, invItemId: item.id, invItemName: item.name, qty: qty, assetId:null, disallowable:false, nonTaxable:false };
-        data.transactions[selectedUser][selectedBiz].push(tx);
-        // optional receipt
-        if(invReceipt.files && invReceipt.files[0]){
-          const f = invReceipt.files[0];
-          const r = new FileReader();
-          r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime: f.type, dataUrl: r.result } }); renderLedger(); };
-          r.readAsDataURL(f);
-        }
-        addAudit('inventory.purchase','inventory',item.id,`Purchased ${qty} x ${item.name} at ${price}`);
-      } else if(act === 'InventorySale'){
-        if(qty > item.qty) return alert('Insufficient quantity in stock');
-        // consume qty and record COGS
-        const saleAcct = findBiz(selectedBiz).accounts.find(a=>a.id===invAccountSelect.value) || { id:'', name:'Sales' };
-        const cogsAcct = (findBiz(selectedBiz).accounts||[]).find(a=>a.category==='Expense') || { id:'', name':'COGS' };
-        const cogsAmount = item.avgCost * qty;
-        item.qty = item.qty - qty;
-        const rate = biz.vatRate || DEFAULTS.vatRate;
-        let vatAmount = 0;
-        let netAmount = price * qty;
-        if(invVat.checked && biz.vatEnabled){
-          if(invVatInclusive.checked){
-            vatAmount = netAmount - (netAmount / (1 + rate/100));
-            netAmount = netAmount - vatAmount;
-          } else {
-            vatAmount = netAmount * (rate/100);
-          }
-        }
-        // sale transaction
-        const saleTx = { id: uid('txn'), date, action: 'InventorySale', accountId: saleAcct.id, accountName: saleAcct.name, description: `Sale ${item.name}`, amount: price*qty, netAmount, vatAmount, whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType: invContactType.value, contactName: invContactName.value, invItemId: item.id, invItemName: item.name, qty: qty, assetId:null, disallowable:false, nonTaxable:false };
-        data.transactions[selectedUser][selectedBiz].push(saleTx);
-        // COGS transaction (expense)
-        const cogsTx = { id: uid('txn'), date, action: 'COGS', accountId: cogsAcct.id, accountName: cogsAcct.name, description: `COGS for ${item.name}`, amount: cogsAmount, netAmount: cogsAmount, vatAmount:0, whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType:'', contactName:'', invItemId: item.id, invItemName: item.name, qty: -qty, assetId:null, disallowable:false, nonTaxable:false };
-        data.transactions[selectedUser][selectedBiz].push(cogsTx);
-        if(invReceipt.files && invReceipt.files[0]){
-          const f = invReceipt.files[0];
-          const r = new FileReader();
-          r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: saleTx.id, fileObj:{ filename: f.name, mime: f.type, dataUrl: r.result } }); renderLedger(); };
-          r.readAsDataURL(f);
-        }
-        addAudit('inventory.sale','inventory',item.id,`Sold ${qty} x ${item.name} at ${price}`);
-      } else {
-        return alert('Unsupported inventory action');
       }
-      saveData(); populateAccountSelect(); resetForms(); renderAll();
+      // Purchase updates avg cost
+      if(action === 'InventoryPurchase'){
+        const totalCost = unitPrice * qty;
+        const prevQty = Number(item.qty||0);
+        const prevVal = prevQty * Number(item.avgCost||0);
+        const newQty = prevQty + qty;
+        const newVal = prevVal + totalCost;
+        item.qty = newQty;
+        item.avgCost = newQty>0 ? +(newVal/newQty) : 0;
+        // record transaction
+        const tx = {
+          id: uid('txn'),
+          date: txnDate.value || today(),
+          action: 'InventoryPurchase',
+          accountId: acc.id,
+          accountName: acc.name,
+          description: `Inventory purchase: ${item.name}`,
+          amount: totalCost,
+          netAmount: +(totalCost),
+          vatAmount: +(vatAmount||0),
+          whtApplied:false,
+          whtAmount:0,
+          whtRate:0,
+          isSalary:false,
+          payeAmount:0,
+          contactType: invContactType.value||'',
+          contactName: invContactName.value||'',
+          invItemId: item.id,
+          invItemName: item.name,
+          qty: qty,
+          assetId: null,
+          assetName: null,
+          disallowable: false,
+          nonTaxable: false
+        };
+        // attach receipt
+        const f = invReceipt.files && invReceipt.files[0];
+        if(f){
+          const r = new FileReader();
+          r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime:f.type, dataUrl:r.result } }); };
+          r.readAsDataURL(f);
+        }
+        data.transactions[selectedUser][selectedBiz].push(tx);
+        addAudit('inventory.purchase','inventory',item.id,`Purchased ${qty} of ${item.name}`);
+      } else {
+        // Sale consumes using avg cost => COGS = qty * avgCost
+        if(qty > item.qty) return alert('Insufficient inventory qty');
+        const cogs = qty * Number(item.avgCost||0);
+        item.qty = item.qty - qty;
+        const saleAmount = unitPrice * qty;
+        // record sale transaction
+        const txSale = {
+          id: uid('txn'),
+          date: txnDate.value || today(),
+          action: 'InventorySale',
+          accountId: acc.id,
+          accountName: acc.name,
+          description: `Inventory sale: ${item.name}`,
+          amount: saleAmount,
+          netAmount: +(saleAmount),
+          vatAmount: +(vatAmount||0),
+          whtApplied:false,
+          whtAmount:0,
+          whtRate:0,
+          isSalary:false,
+          payeAmount:0,
+          contactType: invContactType.value||'',
+          contactName: invContactName.value||'',
+          invItemId: item.id,
+          invItemName: item.name,
+          qty: qty,
+          assetId: null,
+          assetName: null,
+          disallowable: false,
+          nonTaxable: false
+        };
+        const txCogs = {
+          id: uid('txn'),
+          date: txnDate.value || today(),
+          action: 'COGS',
+          accountId: findBiz(selectedBiz).accounts.find(a=>a.category==='Expense')?.id || '',
+          accountName: 'COGS',
+          description: `COGS for sale ${item.name}`,
+          amount: cogs,
+          netAmount: +(cogs),
+          vatAmount: 0,
+          whtApplied:false,
+          whtAmount:0,
+          whtRate:0,
+          isSalary:false,
+          payeAmount:0,
+          contactType: invContactType.value||'',
+          contactName: invContactName.value||'',
+          invItemId: item.id,
+          invItemName: item.name,
+          qty: -qty,
+          assetId: null,
+          assetName: null,
+          disallowable: false,
+          nonTaxable: false
+        };
+        // attach receipt
+        const f = invReceipt.files && invReceipt.files[0];
+        if(f){
+          const r = new FileReader();
+          r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: txSale.id, fileObj:{ filename: f.name, mime:f.type, dataUrl:r.result } }); };
+          r.readAsDataURL(f);
+        }
+        data.transactions[selectedUser][selectedBiz].push(txSale);
+        data.transactions[selectedUser][selectedBiz].push(txCogs);
+        addAudit('inventory.sale','inventory',item.id,`Sold ${qty} of ${item.name}`);
+      }
+      saveData();
+      resetForms();
+      populateAccountSelect();
+      renderAll();
     }
 
-    // very simple undo: remove last transaction affecting inventory items
     function handleUndoInventory(){
-      if(!confirm('Undo last inventory-related transaction?')) return;
-      const arr = data.transactions[selectedUser][selectedBiz];
+      if(!confirm('Undo last inventory transaction?')) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      // find last inventory-related txn
       for(let i=arr.length-1;i>=0;i--){
         const tx = arr[i];
-        if(tx.action === 'InventoryPurchase' || tx.action === 'InventorySale' || tx.action === 'COGS'){
-          // reverse effect
+        if(tx.action === 'InventoryPurchase' || tx.action === 'InventorySale'){
+          // reverse effects
           const biz = findBiz(selectedBiz);
-          const item = biz.inventory.find(it=>it.id === tx.invItemId);
-          if(tx.action === 'InventoryPurchase' && item){
-            // subtract qty and attempt recompute avg by brute force: recompute from history excluding this tx
-            arr.splice(i,1);
-            recomputeInventoryAvg(item.id, biz);
-            saveData();
-            addAudit('inventory.undo','inventory',item.id,`Undid inventory purchase tx ${tx.id}`);
-            renderAll();
-            return;
-          } else if(tx.action === 'InventorySale' && item){
-            // add qty back
-            arr.splice(i,1);
-            recomputeInventoryAvg(item.id, biz);
-            saveData();
-            addAudit('inventory.undo','inventory',item.id,`Undid inventory sale tx ${tx.id}`);
-            renderAll();
-            return;
-          } else if(tx.action === 'COGS'){
-            arr.splice(i,1);
-            recomputeInventoryAvg(tx.invItemId, findBiz(selectedBiz));
-            saveData();
-            addAudit('inventory.undo','inventory',tx.invItemId,`Undid COGS tx ${tx.id}`);
-            renderAll();
-            return;
+          const item = biz.inventory.find(it=>it.id===tx.invItemId);
+          if(item){
+            if(tx.action === 'InventoryPurchase'){
+              // subtract qty and recalc avg cost simply by removing value (approx)
+              const removeQty = tx.qty;
+              const prevQty = item.qty;
+              const prevAvg = item.avgCost;
+              // We cannot accurately revert avg unless we stored prior snapshot; approximate by reducing quantity and keep avgCost
+              item.qty = Math.max(0, item.qty - removeQty);
+            } else if(tx.action === 'InventorySale'){
+              // sale reduced qty and created COGS entry; restore qty
+              item.qty = (item.qty||0) + Math.abs(tx.qty||0);
+            }
           }
+          // delete transaction and any corresponding COGS (if sale)
+          const removedId = tx.id;
+          data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz].filter(t=>t.id!==removedId);
+          // if sale, remove the COGS transaction created immediately after/before
+          data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz].filter(t=> !(t.description && t.description.startsWith('COGS') && t.invItemId === tx.invItemId && Math.abs(t.qty)===Math.abs(tx.qty)) );
+          saveData();
+          addAudit('inventory.undo','inventory',tx.invItemId,`Undid inventory txn ${tx.id}`);
+          renderAll();
+          return;
         }
       }
-      alert('No inventory action to undo');
-    }
-
-    // recompute avg cost and qty for an item by replaying purchase/sale txs
-    function recomputeInventoryAvg(itemId, biz){
-      const item = biz.inventory.find(it=>it.id===itemId);
-      if(!item) return;
-      let qty = 0;
-      let totalCost = 0;
-      const allTx = [];
-      // gather all txs across all users and find those related to item and purchases/sales
-      for(const uid of Object.keys(data.transactions||{})){
-        const txsByBiz = data.transactions[uid][biz.id] || [];
-        txsByBiz.forEach(t => { if(t.invItemId === itemId) allTx.push(t); });
-      }
-      // sort by date asc
-      allTx.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-      allTx.forEach(t => {
-        if(t.action === 'InventoryPurchase'){
-          qty += t.qty;
-          totalCost += (t.netAmount || (t.amount || 0));
-        } else if(t.action === 'InventorySale'){
-          // sales don't affect totalCost average; but we remove qty
-          // reduce totalCost proportional to avg cost at that time; approximate by using current avg
-          const avg = qty===0 ? 0 : totalCost/qty;
-          qty -= t.qty;
-          totalCost -= avg * t.qty;
-        } else if(t.action === 'COGS'){
-          // some flows set COGS as separate tx
-          qty += t.qty; // note: COGS uses negative qty for consumption so this will reduce
-          totalCost += t.netAmount || t.amount || 0;
-        }
-      });
-      item.qty = Math.max(0, Math.round(qty*100)/100);
-      item.avgCost = item.qty === 0 ? 0 : (totalCost / item.qty);
+      alert('No inventory action found to undo');
     }
 
     // Assets
@@ -1220,110 +1259,218 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       const biz = findBiz(selectedBiz);
       const name = (assetName.value||'').trim();
       const cost = Number(assetCost.value||0);
-      const pdate = assetPurchaseDate.value || today();
-      const life = Number(assetLife.value||3);
+      const pd = assetPurchaseDate.value || today();
+      const life = Number(assetLife.value||0);
       const ca = Number(assetCA.value||0);
       if(!name) return alert('Asset name required');
       if(cost <= 0) return alert('Asset cost must be > 0');
-      const asset = { id: uid('asset'), name, cost, purchaseDate: pdate, usefulLifeYears: life, capitalAllowanceAnnual: ca, disposed: false, disposalDate:null, disposalProceeds:0, accumulatedDepreciation:0, purchaseAccountId: assetPurchaseAccount.value || null, disposalAccountId: assetDisposalAccount.value || null };
-      // compute simple accumulated depreciation to date (straight-line)
-      const monthsHeld = monthsBetween(pdate, today());
-      const monthlyDep = (cost / life) / 12;
-      asset.accumulatedDepreciation = Math.min(cost, monthlyDep * monthsHeld);
+      const acctId = assetPurchaseAccount.value || (biz.accounts[0] && biz.accounts[0].id) || '';
+      const acct = biz.accounts.find(a=>a.id===acctId) || { id:acctId, name:'(unknown)' };
+      const asset = { id: uid('asset'), name, cost: cost, purchaseDate: pd, usefulLifeYears: life, caRate: ca, disposed: false, disposal: null, accumulatedDepreciation: 0 };
       biz.assets = biz.assets || [];
       biz.assets.push(asset);
-      // record transaction
-      const acct = biz.accounts.find(a=>a.id===assetPurchaseAccount.value) || { id:'', name:'Fixed Assets' };
-      const tx = { id: uid('txn'), date: pdate, action: 'FixedAssetPurchase', accountId: acct.id, accountName: acct.name, description: `Purchase asset ${name}`, amount: cost, netAmount: cost, vatAmount:0, whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType: assetContactType.value, contactName: assetContactName.value, invItemId:null, invItemName:null, qty:0, assetId: asset.id, assetName: asset.name, disallowable:false, nonTaxable:false };
+      // record transaction for purchase
+      const tx = {
+        id: uid('txn'),
+        date: pd,
+        action: 'FixedAssetPurchase',
+        accountId: acct.id,
+        accountName: acct.name,
+        description: `Asset purchase: ${name}`,
+        amount: cost,
+        netAmount: cost,
+        vatAmount: 0,
+        whtApplied:false,
+        whtAmount:0,
+        whtRate:0,
+        isSalary:false,
+        payeAmount:0,
+        contactType: assetContactType.value||'',
+        contactName: assetContactName.value||'',
+        invItemId: null,
+        invItemName: null,
+        qty: 0,
+        assetId: asset.id,
+        assetName: asset.name,
+        disallowable: false,
+        nonTaxable: false
+      };
       data.transactions[selectedUser][selectedBiz].push(tx);
-      if(assetReceipt.files && assetReceipt.files[0]){
-        const f = assetReceipt.files[0];
+      const f = assetReceipt.files && assetReceipt.files[0];
+      if(f){
         const r = new FileReader();
-        r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime: f.type, dataUrl: r.result } }); renderLedger(); };
+        r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime:f.type, dataUrl:r.result } }); };
         r.readAsDataURL(f);
       }
-      saveData(); addAudit('asset.add','asset',asset.id,`Added asset ${asset.name}`); resetForms(); populateAccountSelect(); renderAll();
+      saveData();
+      addAudit('asset.add','asset',asset.id,`Added asset ${asset.name}`);
+      resetForms();
+      renderAll();
     }
 
     function handleDisposeAsset(){
       if(!selectedUser || !selectedBiz) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
-      const name = (assetName.value||'').trim();
-      const disposeDate = assetDisposalDate.value;
+      const aname = (assetName.value||'').trim();
+      // find asset by name
+      const asset = biz.assets.find(a=>a.name===aname) || biz.assets.find(a=>a.id===assetName.value);
+      if(!asset) return alert('Asset not found. Enter exact asset name to dispose.');
+      if(asset.disposed) return alert('Asset already disposed');
+      const dispDate = assetDisposalDate.value || today();
       const proceeds = Number(assetDisposalProceeds.value||0);
-      // find asset by name or by selection - simple: match name
-      const asset = biz.assets.find(a=>a.name === name && !a.disposed);
-      if(!asset) return alert('Asset not found or already disposed - ensure exact name is provided');
-      if(!disposeDate) return alert('Disposal date required');
       asset.disposed = true;
-      asset.disposalDate = disposeDate;
-      asset.disposalProceeds = proceeds;
-      // compute book value and record gain/loss
-      const monthlyDep = (asset.cost / (asset.usefulLifeYears||1)) / 12;
-      const monthsHeld = monthsBetween(asset.purchaseDate, disposeDate);
-      const accum = Math.min(asset.cost, monthlyDep * monthsHeld);
-      asset.accumulatedDepreciation = accum;
-      const bookValue = asset.cost - accum;
-      const gainLoss = proceeds - bookValue;
-      const acct = biz.accounts.find(a=>a.id===assetDisposalAccount.value) || { id:'', name:'Asset Disposal' };
-      const tx = { id: uid('txn'), date: disposeDate, action: 'FixedAssetDisposal', accountId: acct.id, accountName: acct.name, description: `Disposal asset ${asset.name}`, amount: proceeds, netAmount: proceeds, vatAmount:0, whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType: assetContactType.value, contactName: assetContactName.value, invItemId:null, invItemName:null, qty:0, assetId: asset.id, assetName: asset.name, disposalBookValue: bookValue, gainLoss: gainLoss, disallowable:false, nonTaxable:false };
+      asset.disposal = { date: dispDate, proceeds: proceeds };
+      // record disposal tx
+      const acctId = assetDisposalAccount.value || '';
+      const acct = biz.accounts.find(a=>a.id===acctId) || { id:acctId, name:'(unknown)' };
+      const tx = {
+        id: uid('txn'),
+        date: dispDate,
+        action: 'FixedAssetDisposal',
+        accountId: acct.id,
+        accountName: acct.name,
+        description: `Asset disposal: ${asset.name}`,
+        amount: proceeds,
+        netAmount: proceeds,
+        vatAmount: 0,
+        whtApplied:false,
+        whtAmount:0,
+        whtRate:0,
+        isSalary:false,
+        payeAmount:0,
+        contactType: assetContactType.value||'',
+        contactName: assetContactName.value||'',
+        invItemId: null,
+        invItemName: null,
+        qty: 0,
+        assetId: asset.id,
+        assetName: asset.name,
+        disallowable: false,
+        nonTaxable: false
+      };
       data.transactions[selectedUser][selectedBiz].push(tx);
-      saveData(); addAudit('asset.dispose','asset',asset.id,`Disposed asset ${asset.name} proceeds ${proceeds}`); resetForms(); renderAll();
+      const f = assetReceipt.files && assetReceipt.files[0];
+      if(f){
+        const r = new FileReader();
+        r.onload = () => { addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj:{ filename: f.name, mime:f.type, dataUrl:r.result } }); };
+        r.readAsDataURL(f);
+      }
+      saveData();
+      addAudit('asset.dispose','asset',asset.id,`Disposed asset ${asset.name}`);
+      resetForms();
+      renderAll();
     }
 
     function handleUndoAsset(){
       if(!confirm('Undo last asset action?')) return;
-      const arr = data.transactions[selectedUser][selectedBiz];
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
       for(let i=arr.length-1;i>=0;i--){
         const tx = arr[i];
         if(tx.action === 'FixedAssetPurchase' || tx.action === 'FixedAssetDisposal'){
-          arr.splice(i,1);
+          // reverse changes
           const biz = findBiz(selectedBiz);
-          if(tx.action === 'FixedAssetPurchase'){
-            biz.assets = (biz.assets||[]).filter(a=>a.id!==tx.assetId);
-            saveData(); addAudit('asset.undo','asset',tx.assetId,`Undid asset purchase ${tx.id}`); renderAll(); return;
-          } else if(tx.action === 'FixedAssetDisposal'){
-            const a = biz.assets.find(x=>x.id===tx.assetId);
-            if(a){ a.disposed = false; a.disposalDate = null; a.disposalProceeds = 0; }
-            saveData(); addAudit('asset.undo','asset',tx.assetId,`Undid asset disposal ${tx.id}`); renderAll(); return;
+          const asset = biz.assets.find(a=>a.id===tx.assetId);
+          if(asset){
+            if(tx.action === 'FixedAssetPurchase'){
+              // remove asset
+              biz.assets = biz.assets.filter(a=>a.id!==asset.id);
+            } else if(tx.action === 'FixedAssetDisposal'){
+              // undo disposal
+              asset.disposed = false;
+              asset.disposal = null;
+            }
           }
+          data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz].filter(t=>t.id!==tx.id);
+          saveData();
+          addAudit('asset.undo','asset',asset?asset.id:tx.assetId,`Undid asset txn ${tx.id}`);
+          renderAll();
+          return;
         }
       }
-      alert('No asset action to undo');
+      alert('No asset action found to undo');
     }
 
-    function monthsBetween(start, end){
-      try {
-        const s = new Date(start);
-        const e = new Date(end);
-        const months = (e.getFullYear() - s.getFullYear())*12 + (e.getMonth() - s.getMonth());
-        return Math.max(0, months);
-      } catch(e){ return 0; }
-    }
-
-    // compute totals & tax summary
     function renderTotalsAndTaxSummary(){
+      totalsSummaryDiv.innerHTML = '';
+      taxSummaryDiv.innerHTML = '';
+      if(!selectedUser || !selectedBiz) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      let totalRevenue = 0, totalExpense = 0, totalVat = 0, totalWht = 0, totalPaye = 0;
       const biz = findBiz(selectedBiz);
-      const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
-      let revenue = 0, expenses = 0, vatCollected = 0, vatPaid = 0, whtReceivable = 0, whtPayable = 0, payeTotal=0;
       arr.forEach(tx=>{
-        if(tx.accountName && tx.accountName.toLowerCase().includes('sales') || tx.action==='Revenue' || tx.action==='InventorySale') revenue += (tx.netAmount||0);
-        if(tx.accountName && tx.accountName.toLowerCase().includes('cogs') || tx.action==='COGS' || tx.action==='Expense' || tx.action==='InventoryPurchase') expenses += (tx.netAmount||0);
-        if(tx.vatAmount) {
-          // treat VAT on sales as collected, on purchases as paid (naive: use action)
-          if(tx.action && tx.action.toLowerCase().includes('sale') || tx.action==='Revenue') vatCollected += tx.vatAmount;
-          else vatPaid += tx.vatAmount;
+        const acct = biz.accounts.find(a=>a.id===tx.accountId);
+        if((acct && acct.category==='Revenue') || tx.action==='Revenue' || tx.action==='InventorySale'){
+          totalRevenue += Number(tx.netAmount||0);
+        } else {
+          totalExpense += Number(tx.netAmount||0);
         }
-        if(tx.whtApplied) whtReceivable += tx.whtAmount || 0;
-        if(tx.isSalary) payeTotal += tx.payeAmount || 0;
+        totalVat += Number(tx.vatAmount||0);
+        if(tx.whtApplied) totalWht += Number(tx.whtAmount||0);
+        if(tx.isSalary) totalPaye += Number(tx.payeAmount||0);
       });
-      const profit = revenue - expenses;
-      totalsSummaryDiv.innerHTML = `<div><strong>Revenue:</strong> ₦${fmt(revenue)} &nbsp; <strong>Expenses:</strong> ₦${fmt(expenses)} &nbsp; <strong>Profit:</strong> ₦${fmt(profit)}</div><div style="margin-top:6px;"><strong>VAT collected:</strong> ₦${fmt(vatCollected)} &nbsp; <strong>VAT paid:</strong> ₦${fmt(vatPaid)}</div>`;
-      taxSummaryDiv.innerHTML = `<div><strong>WHT receivable:</strong> ₦${fmt(whtReceivable)} &nbsp; <strong>PAYE (monthly):</strong> ₦${fmt(payeTotal)}</div>`;
-      if(biz && biz.showLines){
-        taxSummaryDiv.innerHTML += `<div style="margin-top:6px;" class="muted">VAT rate: ${biz.vatRate}% &nbsp; WHT rate(default): ${biz.whtRate}% &nbsp; CIT rate: ${biz.citRate}%</div>`;
+      const profit = totalRevenue - totalExpense;
+      totalsSummaryDiv.innerHTML = `<strong>Totals</strong><div class="mutedBlock">Revenue: ₦${fmt(totalRevenue)} | Expenses: ₦${fmt(totalExpense)} | Profit: ₦${fmt(profit)} | VAT collected: ₦${fmt(totalVat)} | WHT: ₦${fmt(totalWht)} | PAYE (monthly): ₦${fmt(totalPaye)}</div>`;
+      // tax summary (basic)
+      if(biz){
+        let cit = 0;
+        if(biz.citEnabled){
+          const taxableProfit = Math.max(0, profit - biz.lossBroughtForward);
+          cit = taxableProfit * (Number(biz.citRate||DEFAULTS.citRate)/100);
+        }
+        taxSummaryDiv.innerHTML = `<strong>Tax Summary</strong><div class="mutedBlock">Estimated CIT: ₦${fmt(cit)} ${biz.citEnabled ? '' : '(CIT disabled)'}</div>`;
       }
+    }
+
+    function renderInventoryQuick(){
+      inventoryListDiv.innerHTML = '';
+      const biz = findBiz(selectedBiz);
+      if(!biz) return;
+      const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Item</th><th>Qty</th><th>Avg Cost</th></tr>';
+      table.appendChild(thead);
+      const tb = document.createElement('tbody');
+      (biz.inventory||[]).forEach(it=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${it.name}</td><td>${it.qty}</td><td>₦${fmt(it.avgCost)}</td>`;
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);
+      inventoryListDiv.appendChild(table);
+    }
+
+    function renderAssetsQuick(){
+      assetListDiv.innerHTML = '';
+      const biz = findBiz(selectedBiz);
+      if(!biz) return;
+      const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Asset</th><th>Cost</th><th>Purchased</th><th>Disposed</th></tr>';
+      table.appendChild(thead);
+      const tb = document.createElement('tbody');
+      (biz.assets||[]).forEach(a=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${a.name}</td><td>₦${fmt(a.cost)}</td><td>${a.purchaseDate||''}</td><td>${a.disposed ? (a.disposal ? a.disposal.date : 'Yes') : '-'}</td>`;
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);
+      assetListDiv.appendChild(table);
+    }
+
+    function renderPLSnapshot(){
+      plSnapshotDiv.innerHTML = '';
+      const biz = findBiz(selectedBiz);
+      if(!biz) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      let revenue=0, expense=0;
+      arr.forEach(tx=>{
+        const acct = biz.accounts.find(a=>a.id===tx.accountId);
+        if((acct && acct.category==='Revenue') || tx.action==='Revenue' || tx.action==='InventorySale') revenue += Number(tx.netAmount||0);
+        else expense += Number(tx.netAmount||0);
+      });
+      const profit = revenue - expense;
+      plSnapshotDiv.innerHTML = `<div>Revenue: ₦${fmt(revenue)}</div><div>Expense: ₦${fmt(expense)}</div><div><strong>Profit: ₦${fmt(profit)}</strong></div>`;
     }
 
     function renderAll(){
@@ -1331,138 +1478,92 @@ GitHub Copilot Chat Assistant — fixed index.html below.
       ensureSelection();
       populateAccountSelect();
       renderLedger();
-      renderInventoryList();
-      renderAssetList();
+      renderInventoryQuick();
+      renderAssetsQuick();
       renderPLSnapshot();
-      renderTab();
+      renderReportsDefault();
     }
 
-    function renderAccounts(){
-      accountsList.innerHTML='';
-      const b = findBiz(selectedBiz);
-      if(!b) return;
-      (b.accounts||[]).forEach(a=>{
-        const div = document.createElement('div');
-        div.className='account-row';
-        div.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">(${a.category})</span></div>`;
-        const del = document.createElement('button');
-        del.className='small danger';
-        del.textContent='Delete';
-        del.addEventListener('click', ()=>{ if(!confirm('Delete account?')) return; b.accounts = b.accounts.filter(x=>x.id!==a.id); saveData(); renderAccounts(); populateAccountSelect(); addAudit('account.delete','account',a.id,`Deleted account ${a.name}`); });
-        div.appendChild(del);
-        accountsList.appendChild(div);
-      });
-    }
-
-    function renderInventoryList(){
-      inventoryListDiv.innerHTML = '';
-      const b = findBiz(selectedBiz);
-      if(!b) return;
-      if(!(b.inventory||[]).length) { inventoryListDiv.textContent = 'No items'; return; }
-      const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
-      const head = document.createElement('tr');
-      ['Item','Qty','Avg cost','Total value'].forEach(h=>{ const th=document.createElement('th'); th.style.textAlign='left'; th.style.borderBottom='1px solid #ddd'; th.style.padding='6px'; th.textContent=h; head.appendChild(th); });
-      table.appendChild(head);
-      b.inventory.forEach(it=>{
-        const tr = document.createElement('tr');
-        [it.name, fmt(it.qty), '₦'+fmt(it.avgCost), '₦'+fmt((it.qty||0)*(it.avgCost||0))].forEach(v=>{ const td=document.createElement('td'); td.style.padding='6px'; td.textContent=v; tr.appendChild(td); });
-        table.appendChild(tr);
-      });
-      inventoryListDiv.appendChild(table);
-    }
-
-    function renderAssetList(){
-      assetListDiv.innerHTML = '';
-      const b = findBiz(selectedBiz);
-      if(!b) return;
-      if(!(b.assets||[]).length) { assetListDiv.textContent = 'No assets'; return; }
-      const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
-      const head = document.createElement('tr');
-      ['Name','Cost','Accum. depr.','Book value','Status'].forEach(h=>{ const th=document.createElement('th'); th.style.textAlign='left'; th.style.borderBottom='1px solid #ddd'; th.style.padding='6px'; th.textContent=h; head.appendChild(th); });
-      table.appendChild(head);
-      b.assets.forEach(a=>{
-        const book = (a.cost||0) - (a.accumulatedDepreciation||0);
-        const status = a.disposed ? `Disposed (${a.disposalDate})` : 'Active';
-        const tr = document.createElement('tr');
-        [a.name, '₦'+fmt(a.cost), '₦'+fmt(a.accumulatedDepreciation||0), '₦'+fmt(book), status].forEach(v=>{ const td=document.createElement('td'); td.style.padding='6px'; td.textContent=v; tr.appendChild(td); });
-        table.appendChild(tr);
-      });
-      assetListDiv.appendChild(table);
-    }
-
-    function renderPLSnapshot(){
-      plSnapshotDiv.innerHTML = '';
-      const b = findBiz(selectedBiz);
-      if(!b) return;
-      const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
-      let revenue = 0, expenses = 0;
-      arr.forEach(tx=>{
-        if(tx.action==='Revenue' || (tx.accountName && tx.accountName.toLowerCase().includes('sales')) || tx.action==='InventorySale') revenue += (tx.netAmount||0);
-        if(tx.action==='COGS' || tx.action==='Expense' || (tx.accountName && tx.accountName.toLowerCase().includes('expense')) || tx.action==='InventoryPurchase') expenses += (tx.netAmount||0);
-      });
-      const profit = revenue - expenses;
-      plSnapshotDiv.innerHTML = `<div><strong>Revenue:</strong> ₦${fmt(revenue)}</div><div><strong>Expenses:</strong> ₦${fmt(expenses)}</div><div style="margin-top:6px;"><strong>Net Profit:</strong> ₦${fmt(profit)}</div>`;
-    }
-
-    // Reports - simple implementations
     function renderTab(){
-      if(activeTab === 'ledger'){ ledgerSection.style.display='block'; ledgerListSection.style.display='block'; reportsSection.style.display='none'; btnLedgerTab.classList.add('active'); btnReportsTab.classList.remove('active'); }
-      else { ledgerSection.style.display='none'; ledgerListSection.style.display='none'; reportsSection.style.display='block'; btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active'); renderReport('taxReconciliation'); }
-    }
-
-    function renderReport(name){
-      const b = findBiz(selectedBiz);
-      if(!b) return reportContent.innerHTML = 'Select a business';
-      const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
-      if(name === 'taxReconciliation'){
-        let taxableRevenue=0, taxableExpenses=0;
-        arr.forEach(tx=>{
-          if(tx.nonTaxable) return;
-          if(tx.action==='Revenue' || tx.action==='InventorySale' || (tx.accountName && tx.accountName.toLowerCase().includes('sales'))) taxableRevenue += (tx.netAmount||0);
-          if(tx.disallowable) return;
-          if(tx.action==='COGS' || tx.action==='Expense' || (tx.accountName && tx.accountName.toLowerCase().includes('expense'))) taxableExpenses += (tx.netAmount||0);
-        });
-        const profit = taxableRevenue - taxableExpenses;
-        reportContent.innerHTML = `<h3>Taxable Income Reconciliation</h3><div>Taxable Revenue: ₦${fmt(taxableRevenue)}</div><div>Allowable Expenses: ₦${fmt(taxableExpenses)}</div><div style="margin-top:6px;"><strong>Taxable profit: ₦${fmt(profit)}</strong></div>`;
-      } else if(name === 'vatReport'){
-        let salesVat = 0, purchaseVat = 0;
-        arr.forEach(tx=>{ if(tx.vatAmount){ if(tx.action && tx.action.toLowerCase().includes('sale')) salesVat += tx.vatAmount; else purchaseVat += tx.vatAmount; } });
-        reportContent.innerHTML = `<h3>VAT Report</h3><div>VAT on Sales: ₦${fmt(salesVat)}</div><div>VAT on Purchases: ₦${fmt(purchaseVat)}</div><div style="margin-top:6px;"><strong>Net VAT payable: ₦${fmt(salesVat - purchaseVat)}</strong></div>`;
-      } else if(name === 'whtPayable' || name === 'whtReceivable'){
-        let wht=0;
-        arr.forEach(tx=>{ if(tx.whtApplied) wht += tx.whtAmount||0; });
-        reportContent.innerHTML = `<h3>WHT</h3><div>Total WHT applied (receivable): ₦${fmt(wht)}</div>`;
-      } else if(name === 'profitSnapshot'){
-        renderPLSnapshot();
-        reportContent.innerHTML = `<h3>Profit Snapshot</h3>` + plSnapshotDiv.innerHTML;
-      } else if(name === 'inventoryReport'){
-        let html = '<h3>Inventory Report</h3>';
-        html += inventoryListDiv.innerHTML;
-        reportContent.innerHTML = html;
-      } else if(name === 'assetsReport'){
-        reportContent.innerHTML = '<h3>Fixed Assets Report</h3>' + assetListDiv.innerHTML;
-      } else if(name === 'auditTrail'){
-        const rows = (data.audit||[]).slice().reverse().map(a=>`<div><small>${a.timestamp}</small> — ${a.actionType} (${a.entityType}) ${a.details||''}</div>`).join('');
-        reportContent.innerHTML = `<h3>Audit Trail</h3>${rows}`;
-      } else if(name === 'receiptsFolder'){
-        const atts = getAttachmentsForBiz(selectedBiz);
-        if(!atts.length) reportContent.innerHTML = '<h3>Receipts</h3><div>No attachments</div>';
-        else reportContent.innerHTML = '<h3>Receipts</h3>' + atts.map(a=>`<div><a href="#" data-id="${a.id}" class="receipt-link">${a.filename}</a> — ${a.timestamp}</div>`).join('');
-        reportContent.querySelectorAll('.receipt-link').forEach(el=>el.addEventListener('click', (e)=>{ e.preventDefault(); const id = el.dataset.id; openAttachment(id); }));
+      if(activeTab === 'ledger'){
+        ledgerSection.style.display='block';
+        ledgerListSection.style.display='block';
+        reportsSection.style.display='none';
+        btnLedgerTab.classList.add('active');
+        btnReportsTab.classList.remove('active');
       } else {
-        reportContent.innerHTML = '<div>Select report</div>';
+        ledgerSection.style.display='none';
+        ledgerListSection.style.display='none';
+        reportsSection.style.display='block';
+        btnLedgerTab.classList.remove('active');
+        btnReportsTab.classList.add('active');
+        renderReport(document.querySelector('#reportsSection .tab.active')?.dataset.report || 'taxReconciliation');
       }
     }
 
-    // utilities
-    function editTransactionFillForm(tx){ /* not used further; kept for extensibility */ }
+    function renderReport(name){
+      reportContent.innerHTML = '';
+      if(!selectedBiz) return reportContent.textContent='Select business';
+      const biz = findBiz(selectedBiz);
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      if(name === 'taxReconciliation'){
+        // simple reconciliation
+        let revenue=0, expenses=0;
+        arr.forEach(tx=>{
+          const acct = biz.accounts.find(a=>a.id===tx.accountId);
+          if((acct && acct.category==='Revenue') || tx.action==='Revenue' || tx.action==='InventorySale') revenue += Number(tx.netAmount||0);
+          else expenses += Number(tx.netAmount||0);
+        });
+        const profit = revenue - expenses;
+        reportContent.innerHTML = `<h4>Taxable Income Reconciliation</h4><div class="mutedBlock">Revenue: ₦${fmt(revenue)}<br/>Expenses: ₦${fmt(expenses)}<br/>Profit: ₦${fmt(profit)}</div>`;
+      } else if(name === 'vatReport'){
+        let totalVat=0;
+        arr.forEach(tx=> totalVat += Number(tx.vatAmount||0));
+        reportContent.innerHTML = `<h4>VAT Report</h4><div class="mutedBlock">Total VAT: ₦${fmt(totalVat)}</div>`;
+      } else if(name === 'whtPayable'){
+        let totalWht=0;
+        arr.forEach(tx=>{ if(tx.whtApplied) totalWht += Number(tx.whtAmount||0); });
+        reportContent.innerHTML = `<h4>WHT Payable</h4><div class="mutedBlock">Total WHT: ₦${fmt(totalWht)}</div>`;
+      } else if(name === 'whtReceivable'){
+        reportContent.innerHTML = `<h4>WHT Receivable</h4><div class="mutedBlock">WHT receivable tracking not implemented in detail.</div>`;
+      } else if(name === 'profitSnapshot'){
+        let revenue=0, expenses=0;
+        arr.forEach(tx=>{
+          const acct = biz.accounts.find(a=>a.id===tx.accountId);
+          if((acct && acct.category==='Revenue') || tx.action==='Revenue' || tx.action==='InventorySale') revenue += Number(tx.netAmount||0);
+          else expenses += Number(tx.netAmount||0);
+        });
+        reportContent.innerHTML = `<h4>Profit Snapshot</h4><div class="mutedBlock">Revenue: ₦${fmt(revenue)} | Expenses: ₦${fmt(expenses)} | Profit: ₦${fmt(revenue-expenses)}</div>`;
+      } else if(name === 'inventoryReport'){
+        let html = '<h4>Inventory Report</h4>';
+        html += `<div class="mutedBlock">${(biz.inventory||[]).map(it=>`${it.name} — qty:${it.qty} @ ${fmt(it.avgCost)}`).join('<br/>') || 'No items'}</div>`;
+        reportContent.innerHTML = html;
+      } else if(name === 'assetsReport'){
+        let html = '<h4>Fixed Assets</h4>';
+        html += `<div class="mutedBlock">${(biz.assets||[]).map(a=>`${a.name} — cost:${fmt(a.cost)} purchased:${a.purchaseDate || ''} disposed:${a.disposed ? (a.disposal ? a.disposal.date : 'Yes') : '-'}`).join('<br/>') || 'No assets'}</div>`;
+        reportContent.innerHTML = html;
+      } else if(name === 'auditTrail'){
+        const rows = data.audit || [];
+        reportContent.innerHTML = `<h4>Audit Trail</h4><div class="mutedBlock">${rows.slice().reverse().map(r=>`${r.timestamp} — ${r.actionType} — ${r.details}`).join('<br/>') || 'No audit entries'}</div>`;
+      } else if(name === 'receiptsFolder'){
+        const atts = getAttachmentsForBiz(selectedBiz) || [];
+        reportContent.innerHTML = `<h4>Receipts</h4><div class="mutedBlock">${atts.map(a=>`<div><a href="#" class="link-like" data-id="${a.id}">${a.filename}</a> (${a.timestamp})</div>`).join('') || 'No attachments'}</div>`;
+        reportContent.querySelectorAll('.link-like').forEach(el => { el.addEventListener('click', (e)=>{ e.preventDefault(); const id = e.target.dataset.id; openAttachment(id); }); });
+      } else {
+        reportContent.innerHTML = '<div>Select a report</div>';
+      }
+    }
 
-    // initial render wiring
-    function renderInitialUIState(){ renderAll(); }
+    function renderReportsDefault(){
+      // ensure first tab active
+      if(document.querySelector('#reportsSection .tab.active')){
+        renderReport(document.querySelector('#reportsSection .tab.active').dataset.report);
+      }
+    }
+
+    // Initial helpers for UI state
+    if(!data.users || data.users.length===0) seedDemo();
+
   </script>
 </body>
-</html>
-
-Notes:
-- This file is a completed, self-contained index.html implementing the previously truncated logic: transactions, inventory weighted-average, simple assets with depreciation, attachments (stored as data URLs), users/businesses/accounts management, basic reports, and localStorage persistence.
-- If you want a pull request to replace the repository file with this version, tell me and I can create the PR for you (I will need confirmation and the target branch).
+  </html>
