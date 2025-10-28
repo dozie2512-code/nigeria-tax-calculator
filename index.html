@@ -1,3 +1,5 @@
+GitHub Copilot Chat Assistant
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,7 +28,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); }
+    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); max-height:84vh; overflow:auto; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
     small.note { color:var(--muted); display:block; margin-top:6px; }
@@ -72,7 +74,7 @@
       <div class="spacer"></div>
 
       <div class="tabbar">
-        <button class="tab" id="btnLedgerTab">Ledger</button>
+        <button class="tab active" id="btnLedgerTab">Ledger</button>
         <button class="tab" id="btnReportsTab">Reports</button>
       </div>
 
@@ -233,7 +235,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th>Inv Item / Asset</th><th>Disallowable</th><th>Non-tax</th><th>Actions</th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount (Net)</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th>Inv Item / Asset</th><th>Disallowable</th><th>Non-taxable</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -410,10 +412,9 @@
   <footer class="muted" style="margin-top:16px;">GitHub Copilot Chat Assistant — implemented per request (attachments and audit stored in localStorage)</footer>
 
   <script>
-    // GitHub Copilot Chat Assistant implementation
+    // Single-file app implementing the intended behavior (completed & fixed).
     const STORAGE_KEY = 'ntc_2026_v2';
 
-    // Defaults
     const DEFAULTS = {
       vatRate: 7.5,
       whtRate: 5.0,
@@ -427,7 +428,6 @@
       citEnabled: true
     };
 
-    // PAYE bands per user-provided table (annual progressive)
     const PAYE_BANDS = [
       { upTo: 800000, rate: 0.00 },
       { upTo: 3000000, rate: 0.15 },
@@ -437,10 +437,8 @@
       { upTo: Infinity, rate: 0.25 }
     ];
 
-    // Data model
-    // data = { users:[], businesses:[], transactions: { [userId]: { [bizId]: [] } }, attachments:[], audit:[] }
     let data = { users: [], businesses: [], transactions: {}, attachments: [], audit: [] };
-    let selectedUser = null;       // active user (performing actions)
+    let selectedUser = null;
     let selectedBiz = null;
     let activeTab = 'ledger';
 
@@ -470,6 +468,7 @@
     const txnContactName = document.getElementById('txnContactName');
     const txnReceipt = document.getElementById('txnReceipt');
     const btnAddTxn = document.getElementById('btnAddTxn');
+    const mainTxnForm = document.getElementById('mainTxnForm');
 
     const inventorySubform = document.getElementById('inventorySubform');
     const invItemSelect = document.getElementById('invItemSelect');
@@ -554,7 +553,6 @@
     const bizDedLife = document.getElementById('bizDedLife');
     const bizDedMortgage = document.getElementById('bizDedMortgage');
     const bizDedNHF = document.getElementById('bizDedNHF');
-    const bizCACFInput = bizCACF;
     const bizCapitalBF = document.getElementById('bizCapitalBF');
     const bizFirsLabel = document.getElementById('bizFirsLabel');
     const bizFirsUrl = document.getElementById('bizFirsUrl');
@@ -570,7 +568,6 @@
     const addAccountBtn = document.getElementById('addAccountBtn');
     const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
-    // Header tabs
     const btnLedgerTab = document.getElementById('btnLedgerTab');
     const btnReportsTab = document.getElementById('btnReportsTab');
 
@@ -593,7 +590,6 @@
       if (!data.transactions) data.transactions = {};
       if (!data.attachments) data.attachments = [];
       if (!data.audit) data.audit = [];
-      // normalize
       data.businesses.forEach(b => {
         b.vatRate = Number(b.vatRate || DEFAULTS.vatRate);
         b.whtRate = Number(b.whtRate || DEFAULTS.whtRate);
@@ -621,7 +617,6 @@
         if (!u.permissions) u.permissions = { view: true, edit: true, delete: true };
         if (typeof u.isAdmin === 'undefined') u.isAdmin = (u.role === 'Admin');
       });
-      // ensure transaction arrays exist
       for (const u of data.users){
         if (!data.transactions[u.id]) data.transactions[u.id] = {};
         data.businesses.forEach(b => { if (!data.transactions[u.id][b.id]) data.transactions[u.id][b.id] = []; });
@@ -634,6 +629,7 @@
       const sales = { id: uid('acct'), name: 'Sales', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
       const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
       const expenseSalary = { id: uid('acct'), name: 'Salaries', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
+
       data = {
         users: [{ id: u, username: 'admin', display: 'Admin User', role: 'Admin', isAdmin: true, permissions: { view:true, edit:true, delete:true } }],
         businesses: [{
@@ -655,9 +651,11 @@
         attachments: [],
         audit: []
       };
+
       data.transactions[u] = {};
       data.transactions[u][b] = [
-        { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, description:'Demo sale', amount: 150000, vatAmount: 11250, whtApplied:false, whtAmount:0, isSalary:false, payeAmount:0, invItemName:'', disallowable:false, nonTaxable:false, contactType:'Customer', contactName:'Demo Customer', createdBy:u }
+        { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, description:'Demo sale', amount: 150000, netAmount:150000, vatApplied:true, vatAmount: (150000 * 0.075), whtApplied:false, whtAmount:0, whtRate:0, isSalary:false, payeAmount:0, contactType:'Customer', contactName:'Demo Customer', receiptId:null, invItemId:null, invItemName:null, qty:0, disallowable:false, nonTaxable:false, createdBy:u },
+        { id: uid('txn'), date: today(), action: 'Expense', accountId: expenseSalary.id, accountName: expenseSalary.name, description:'Demo salary', amount: 50000, netAmount:50000, vatApplied:false, vatAmount:0, whtApplied:false, whtAmount:0, whtRate:0, isSalary:true, payeAmount: computeMonthlyPAYE(50000, null, today()), contactType:'Employee', contactName:'Jane Doe', receiptId:null, invItemId:null, invItemName:null, qty:0, disallowable:false, nonTaxable:false, createdBy:u }
       ];
       addAudit('seed','system','',`Seeded demo user ${u} and business ${b}`);
       saveData();
@@ -689,7 +687,6 @@
     }
 
     function addAttachment({ bizId, txnId, fileObj, uploadedBy }){
-      // fileObj: { filename, mime, dataUrl }
       const att = { id: uid('att'), bizId, txnId: txnId || null, filename: fileObj.filename, mime: fileObj.mime, dataUrl: fileObj.dataUrl, uploadedBy: uploadedBy || selectedUser, timestamp: new Date().toISOString() };
       data.attachments.push(att);
       saveData();
@@ -702,35 +699,34 @@
 
     // --- Initialization & UI wiring ---
     function initUI(){
-      // user buttons
       btnAddUser.addEventListener('click', ()=>{ userModalTitle.textContent='Add User'; userName.value=''; userDisplay.value=''; userRole.value='User'; permView.checked=true; permEdit.checked=true; permDelete.checked=false; userSave.dataset.edit=''; openModal(userModal); });
-      btnEditUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); const u = findUser(selectedUser); if(!canEdit()) return alert('Active user lacks permission to edit users'); userModalTitle.textContent='Edit User'; userName.value=u.username; userDisplay.value=u.display||''; userRole.value=u.role||'User'; permView.checked=!!u.permissions.view; permEdit.checked=!!u.permissions.edit; permDelete.checked=!!u.permissions.delete; userSave.dataset.edit=u.id; openModal(userModal); });
-      btnDeleteUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); if(!canDelete()) return alert('Active user lacks permission to delete users'); if(!confirm('Delete user and their transactions & attachments?')) return; deleteUser(selectedUser); });
+      btnEditUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); const u = findUser(selectedUser); if(!u) return; if(!canEdit()) return alert('Active user lacks permission to edit users'); userModalTitle.textContent='Edit User'; userName.value=u.username||''; userDisplay.value=u.display||''; userRole.value=u.role||'User'; permView.checked=!!u.permissions?.view; permEdit.checked=!!u.permissions?.edit; permDelete.checked=!!u.permissions?.delete; userSave.dataset.edit = u.id; openModal(userModal); });
+      btnDeleteUser.addEventListener('click', ()=>{ if(!selectedUser) return alert('Select user'); if(!canDelete()) return alert('Active user lacks permission to delete users'); if(!confirm('Delete user?')) return; deleteUser(selectedUser); });
 
-      userSave.addEventListener('click', ()=>{ const uname=(userName.value||'').trim(); if(!uname) return alert('Username required'); const id=userSave.dataset.edit; if(id){ const u=findUser(id); u.username = uname; u.display = userDisplay.value||uname; u.role = userRole.value; u.isAdmin = (u.role === 'Admin'); u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked }; addAudit('user.edit','user',u.id,`Edited user ${u.username}`); } else { const idd = uid('user'); const newu = { id: idd, username: uname, display: userDisplay.value||uname, role: userRole.value, isAdmin: userRole.value==='Admin', permissions:{ view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked } }; data.users.push(newu); data.transactions[idd] = {}; data.businesses.forEach(b=>{ data.transactions[idd][b.id] = []; }); addAudit('user.add','user',idd,`Created user ${uname}`); selectedUser = idd; } saveData(); closeModal(userModal); refreshSelectors(); ensureSelection(); renderAll(); });
+      userSave.addEventListener('click', ()=>{ const uname=(userName.value||'').trim(); if(!uname) return alert('Username required'); const id=userSave.dataset.edit; if(id){ const u=findUser(id); if(u){ u.username=uname; u.display = (userDisplay.value||'').trim(); u.role = userRole.value; u.isAdmin = u.role==='Admin'; u.permissions = { view: permView.checked, edit: permEdit.checked, delete: permDelete.checked }; saveData(); addAudit('user.edit','user',u.id,`Edited user ${u.id}`); closeModal(userModal); refreshSelectors(); ensureSelection(); renderAll(); } } else { const newUser = { id: uid('user'), username: uname, display: (userDisplay.value||uname), role: userRole.value, isAdmin: userRole.value==='Admin', permissions: { view: permView.checked, edit: permEdit.checked, delete: permDelete.checked } }; data.users.push(newUser); // init transactions mappings
+        for(const u of data.users){ if(!data.transactions[u.id]) data.transactions[u.id] = {}; data.businesses.forEach(b => { if(!data.transactions[u.id][b.id]) data.transactions[u.id][b.id]=[]; }); }
+        saveData(); addAudit('user.add','user',newUser.id,`Added user ${newUser.username}`); closeModal(userModal); refreshSelectors(); ensureSelection(); renderAll(); } });
 
       userCancel.addEventListener('click', ()=>closeModal(userModal));
 
       // business
-      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate; bizVatEnabled.checked = DEFAULTS.vatEnabled; bizPitEnabled.checked = DEFAULTS.pitEnabled; bizPayeEnabled.checked = DEFAULTS.payeEnabled; bizShowLines.checked = true; bizCitEnabled.checked = DEFAULTS.citEnabled; bizLossBF.value=''; bizCACF.value=''; bizCapitalBF.value=''; bizDefaultExpenseDisallowable.checked=false; bizDefaultRevenueNonTax.checked=false; bizDedPension.value=''; bizDedRent.value=''; bizDedLife.value=''; bizDedMortgage.value=''; bizDedNHF.value=''; bizFirsLabel.value = DEFAULTS.firsLabel; bizFirsUrl.value = DEFAULTS.firsUrl; bizContactsList.innerHTML=''; bizSave.dataset.edit=''; openModal(businessModal); });
-      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name||''; bizOwnerSelect.value=b.ownerId||''; bizEntity.value=b.entity||'Company'; bizVat.value=b.vatRate||DEFAULTS.vatRate; bizWht.value=b.whtRate||DEFAULTS.whtRate; bizCit.value=b.citRate||DEFAULTS.citRate; bizVatEnabled.checked = !!b.vatEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled; bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0; bizCapitalBF.value = b.capitalBroughtForward || 0; bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax; bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0; bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0; bizFirsLabel.value = b.firsLabel || DEFAULTS.firsLabel; bizFirsUrl.value = b.firsUrl || DEFAULTS.firsUrl; renderBizContacts(b); bizSave.dataset.edit=b.id; openModal(businessModal); });
-      btnDeleteBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); if(!canDelete()) return alert('Active user lacks permission to delete businesses'); if(!confirm('Delete business and all transactions & attachments?')) return; deleteBusiness(selectedBiz); });
+      btnAddBusiness.addEventListener('click', ()=>{ businessModalTitle.textContent='Add Business'; bizName.value=''; bizOwnerSelect.value = data.users[0] ? data.users[0].id : ''; bizEntity.value='Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate; bizVatEnabled.checked = DEFAULTS.vatEnabled; bizPayeEnabled.checked = DEFAULTS.payeEnabled; bizPitEnabled.checked = DEFAULTS.pitEnabled; bizShowLines.checked = DEFAULTS.showLines; bizCitEnabled.checked = DEFAULTS.citEnabled; bizSave.dataset.edit=''; openModal(businessModal); });
+      btnEditBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b=findBiz(selectedBiz); businessModalTitle.textContent='Edit Business'; bizName.value=b.name; bizOwnerSelect.value=b.ownerId; bizEntity.value=b.entity||'Company'; bizVat.value=b.vatRate; bizWht.value=b.whtRate; bizCit.value=b.citRate; bizVatEnabled.checked = !!b.vatEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled; bizLossBF.value = b.lossBroughtForward||0; bizCACF.value = b.caCarryForward||0; bizCapitalBF.value = b.capitalBroughtForward||0; bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax; bizDedPension.value = b.statutoryDeductions?.pension||0; bizDedRent.value = b.statutoryDeductions?.rent||0; bizDedLife.value = b.statutoryDeductions?.life||0; bizDedMortgage.value = b.statutoryDeductions?.mortgage||0; bizDedNHF.value = b.statutoryDeductions?.nhf||0; bizFirsLabel.value = b.firsLabel||DEFAULTS.firsLabel; bizFirsUrl.value = b.firsUrl||DEFAULTS.firsUrl; renderBizContacts(b); bizSave.dataset.edit = b.id; openModal(businessModal); });
+      btnDeleteBusiness.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); if(!canDelete()) return alert('Active user lacks permission to delete businesses'); if(!confirm('Delete business and its data?')) return; deleteBusiness(selectedBiz); });
 
-      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const edit = bizSave.dataset.edit; if(edit){ const b=findBiz(edit); b.name = name; b.ownerId = owner; b.entity = bizEntity.value; b.vatRate = Number(bizVat.value||0); b.whtRate = Number(bizWht.value||0); b.citRate = Number(bizCit.value||0); b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked; b.lossBroughtForward = Number(bizLossBF.value||0); b.caCarryForward = Number(bizCACF.value||0); b.capitalBroughtForward = Number(bizCapitalBF.value||0); b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked; b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }; b.firsLabel = (bizFirsLabel.value||DEFAULTS.firsLabel); b.firsUrl = (bizFirsUrl.value||DEFAULTS.firsUrl); addAudit('business.edit','business',b.id,`Edited business ${b.name}`); } else { const id = uid('biz'); const obj = { id, name, ownerId: owner, entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate), vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked, accounts: [], inventory: [], assets: [], lossBroughtForward: Number(bizLossBF.value||0), caCarryForward: Number(bizCACF.value||0), capitalBroughtForward: Number(bizCapitalBF.value||0), defaultExpenseDisallowable: !!bizDefaultExpenseDisallowable.checked, defaultRevenueNonTax: !!bizDefaultRevenueNonTax.checked, statutoryDeductions: { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }, contacts: [], firsLabel: (bizFirsLabel.value||DEFAULTS.firsLabel), firsUrl: (bizFirsUrl.value||DEFAULTS.firsUrl) }; data.businesses.push(obj); // create transaction arrays for all users
-          data.users.forEach(u=>{ if(!data.transactions[u.id]) data.transactions[u.id] = {}; data.transactions[u.id][obj.id] = []; }); addAudit('business.add','business',obj.id,`Created business ${obj.name}`); selectedBiz = id; }
-        saveData(); refreshSelectors(); closeModal(businessModal); renderAll(); });
+      bizSave.addEventListener('click', ()=>{ const name=(bizName.value||'').trim(); if(!name) return alert('Business name required'); const owner = bizOwnerSelect.value; const edit = bizSave.dataset.edit; if(edit){ const b=findBiz(edit); b.name = name; b.ownerId = owner; b.entity = bizEntity.value; b.vatRate = Number(bizVat.value||DEFAULTS.vatRate); b.whtRate = Number(bizWht.value||DEFAULTS.whtRate); b.citRate = Number(bizCit.value||DEFAULTS.citRate); b.vatEnabled = !!bizVatEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked; b.lossBroughtForward = Number(bizLossBF.value||0); b.caCarryForward = Number(bizCACF.value||0); b.capitalBroughtForward = Number(bizCapitalBF.value||0); b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked; b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }; b.firsLabel = bizFirsLabel.value||DEFAULTS.firsLabel; b.firsUrl = bizFirsUrl.value||DEFAULTS.firsUrl; saveData(); addAudit('business.edit','business',b.id,`Edited business ${b.id}`); closeModal(businessModal); refreshSelectors(); renderAll(); } else { const obj = { id: uid('biz'), name, ownerId: owner, entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate), vatEnabled: !!bizVatEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, pitEnabled: !!bizPitEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked, accounts: [], inventory: [], assets: [], lossBroughtForward: Number(bizLossBF.value||0), caCarryForward: Number(bizCACF.value||0), capitalBroughtForward: Number(bizCapitalBF.value||0), defaultExpenseDisallowable: !!bizDefaultExpenseDisallowable.checked, defaultRevenueNonTax: !!bizDefaultRevenueNonTax.checked, statutoryDeductions: { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) }, contacts: [], firsLabel: bizFirsLabel.value||DEFAULTS.firsLabel, firsUrl: bizFirsUrl.value||DEFAULTS.firsUrl }; data.businesses.push(obj); data.users.forEach(u=>{ if(!data.transactions[u.id]) data.transactions[u.id] = {}; data.transactions[u.id][obj.id] = []; }); addAudit('business.add','business',obj.id,`Created business ${obj.id}`); saveData(); refreshSelectors(); closeModal(businessModal); renderAll(); } });
 
       bizCancel.addEventListener('click', ()=>closeModal(businessModal));
-      btnAddContact.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b = findBiz(selectedBiz); const nm = (newContactName.value||'').trim(); if(!nm) return alert('Contact name required'); const ct = newContactType.value; const c = { id: uid('ct'), name: nm, type: ct }; b.contacts = b.contacts || []; b.contacts.push(c); saveData(); renderBizContacts(b); addAudit('contact.add','contact',c.id,`Added contact ${nm} (${ct}) to biz ${b.name}`); newContactName.value=''; });
+      btnAddContact.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); const b = findBiz(selectedBiz); const nm = (newContactName.value||'').trim(); if(!nm) return alert('Contact name required'); const c = { id: uid('contact'), name: nm, type: newContactType.value }; b.contacts.push(c); saveData(); addAudit('contact.add','contact',c.id,`Added contact ${c.name} to biz ${b.id}`); renderBizContacts(b); newContactName.value=''; });
 
       // accounts modal
       btnManageAccounts.addEventListener('click', ()=>{ if(!selectedBiz) return alert('Select business'); renderAccounts(); openModal(accountsModal); });
-      addAccountBtn.addEventListener('click', ()=>{ const name=(newAccountName.value||'').trim(); if(!name) return alert('Account name required'); const cat=newAccountCategory.value; const b=findBiz(selectedBiz); const acct = { id: uid('acct'), name, category: cat, disallowableDefault:false, nonTaxableDefault:false }; b.accounts.push(acct); saveData(); populateAccountSelect(); renderAccounts(); addAudit('account.add','account',acct.id,`Added account ${name} to biz ${b.name}`); newAccountName.value=''; });
+      addAccountBtn.addEventListener('click', ()=>{ const name=(newAccountName.value||'').trim(); if(!name) return alert('Account name required'); const cat=newAccountCategory.value; const b=findBiz(selectedBiz); const acc = { id: uid('acct'), name, category:cat, disallowableDefault:false, nonTaxableDefault:false }; b.accounts.push(acc); saveData(); addAudit('account.add','account',acc.id,`Added account ${acc.name} to biz ${b.id}`); newAccountName.value=''; renderAccounts(); populateAccountSelect(); });
       closeAccountsBtn.addEventListener('click', ()=>closeModal(accountsModal));
 
       // transaction form behaviors
-      txnAction.addEventListener('change', ()=>{ const val = txnAction.value; // show subforms alone
-        if(val==='InventoryPurchase' || val==='InventorySale'){ mainTxnForm.style.display='none'; inventorySubform.style.display='block'; assetSubform.style.display='none'; populateAccountSelect(); } else if(val==='FixedAssetPurchase' || val==='FixedAssetDisposal'){ mainTxnForm.style.display='none'; inventorySubform.style.display='none'; assetSubform.style.display='block'; populateAccountSelect(); } else { mainTxnForm.style.display='flex'; inventorySubform.style.display='none'; assetSubform.style.display='none'; } });
+      txnAction.addEventListener('change', ()=>{ const val = txnAction.value;
+        if(val==='InventoryPurchase' || val==='InventorySale'){ mainTxnForm.style.display='none'; inventorySubform.style.display='block'; assetSubform.style.display='none'; populateAccountSelect(); } else if(val==='FixedAssetPurchase' || val==='FixedAssetDisposal'){ mainTxnForm.style.display='none'; inventorySubform.style.display='none'; assetSubform.style.display='block'; populateAccountSelect(); } else { mainTxnForm.style.display='flex'; inventorySubform.style.display='none'; assetSubform.style.display='none'; populateAccountSelect(); } });
       txnWht.addEventListener('change', ()=>{ txnWhtRateLabel.style.display = txnWht.checked ? 'inline-flex' : 'none'; });
 
       btnAddTxn.addEventListener('click', handleAddTransaction);
@@ -751,10 +747,10 @@
       document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
 
       // export/import
-      document.getElementById('btnExport').addEventListener('click', ()=>{ const dataStr = JSON.stringify(data, null, 2); const blob = new Blob([dataStr], {type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='ntc_data.json'; a.click(); URL.revokeObjectURL(url); });
+      document.getElementById('btnExport').addEventListener('click', ()=>{ const dataStr = JSON.stringify(data, null, 2); const blob = new Blob([dataStr], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'ntc-data.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
       document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileInput').click());
-      document.getElementById('fileInput').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload = () => { try{ data = JSON.parse(r.result); migrateData(); saveData(); refreshSelectors(); ensureSelection(); populateAccountSelect(); resetForms(); renderAll(); alert('Import successful'); } catch(err){ alert('Invalid JSON import'); } }; r.readAsText(f); });
-      document.getElementById('btnClearAll').addEventListener('click', ()=>{ if(!confirm('Clear all stored data?')) return; localStorage.removeItem(STORAGE_KEY); data={users:[],businesses:[],transactions:{},attachments:[],audit:[]}; seedDemo(); refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll(); });
+      document.getElementById('fileInput').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload = () => { try{ const incoming = JSON.parse(r.result); if(!incoming) throw new Error('Invalid JSON'); data = incoming; migrateData(); renderAll(); alert('Import successful'); } catch(err){ alert('Import failed: '+err.message); } }; r.readAsText(f); });
+      document.getElementById('btnClearAll').addEventListener('click', ()=>{ if(!confirm('Clear all stored data?')) return; localStorage.removeItem(STORAGE_KEY); data={users:[],businesses:[],transactions:{},attachments:[],audit:[]}; seedDemo(); renderAll(); });
 
       // header tabs
       btnLedgerTab.addEventListener('click', ()=>{ activeTab='ledger'; renderTab(); });
@@ -770,10 +766,7 @@
       });
     }
 
-    function canEdit(){ // active user permission check
-      const u = findUser(selectedUser);
-      return !!(u && (u.permissions?.edit || u.isAdmin));
-    }
+    function canEdit(){ const u = findUser(selectedUser); return !!(u && (u.permissions?.edit || u.isAdmin)); }
     function canView(){ const u = findUser(selectedUser); return !!(u && (u.permissions?.view || u.isAdmin)); }
     function canDelete(){ const u = findUser(selectedUser); return !!(u && (u.permissions?.delete || u.isAdmin)); }
 
@@ -817,10 +810,8 @@
       }
       // inventory items
       (biz.inventory||[]).forEach(it=>{ const opt=document.createElement('option'); opt.value=it.id; opt.textContent=it.name + ' — qty:' + it.qty + ' @ ' + fmt(it.avgCost); invItemSelect.appendChild(opt); });
-      // add a placeholder for creating new
       const newOpt = document.createElement('option'); newOpt.value='__new__'; newOpt.textContent='-- Add new item --'; invItemSelect.appendChild(newOpt);
-      invItemSelect.value = biz.inventory.length ? biz.inventory[0].id : '__new__';
-      // default selects to txnAccount if present
+      invItemSelect.value = biz.inventory.length ? (biz.inventory[0].id) : '__new__';
       if (txnAccount.value) { invAccountSelect.value = txnAccount.value; assetPurchaseAccount.value = txnAccount.value; assetDisposalAccount.value = txnAccount.value; }
     }
 
@@ -837,12 +828,9 @@
 
     // --- Data operations ---
     function deleteUser(uid){
-      // remove user & related mappings
       data.users = data.users.filter(u=>u.id!==uid);
       delete data.transactions[uid];
-      // remove attachments uploaded by user
       data.attachments = (data.attachments||[]).filter(a => a.uploadedBy !== uid);
-      // remove audit entries by user (or keep them but mark removed) - we'll keep entries
       saveData();
       addAudit('user.delete','user',uid,`Deleted user ${uid}`);
       selectedUser = data.users[0] ? data.users[0].id : null;
@@ -852,9 +840,7 @@
 
     function deleteBusiness(bid){
       data.businesses = data.businesses.filter(b=>b.id!==bid);
-      // remove transactions for all users
       for(const uid of Object.keys(data.transactions||{})){ if(data.transactions[uid]) delete data.transactions[uid][bid]; }
-      // remove attachments for biz
       data.attachments = (data.attachments||[]).filter(a => a.bizId !== bid);
       saveData();
       addAudit('business.delete','business',bid,`Deleted business ${bid}`);
@@ -862,17 +848,20 @@
       refreshSelectors(); ensureSelection(); populateAccountSelect(); renderAll();
     }
 
-    // ledger rendering
     function renderLedger(){
       ledgerTable.innerHTML='';
       if(!selectedUser || !selectedBiz) return;
-      if(!canView()) return ledgerTable.innerHTML = '<tr><td colspan="14">Active user lacks view permission.</td></tr>';
+      if(!canView()) { const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=14; td.textContent='Active user lacks view permission.'; tr.appendChild(td); ledgerTable.appendChild(tr); return; }
       const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
       const q = (document.getElementById('ledgerSearch').value||'').toLowerCase();
-      arr.filter(tx => {
+      const filtered = arr.filter(tx => {
         if(!q) return true;
         return (tx.date||'').includes(q) || (tx.accountName||'').toLowerCase().includes(q) || (tx.description||'').toLowerCase().includes(q) || String(tx.amount||'').includes(q) || ((tx.contactName||'').toLowerCase().includes(q));
-      }).forEach(tx=>{
+      });
+      if(filtered.length===0){
+        const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=14; td.textContent='No transactions'; tr.appendChild(td); ledgerTable.appendChild(tr); renderTotalsAndTaxSummary(); return;
+      }
+      filtered.forEach(tx=>{
         const tr = document.createElement('tr');
         const tdDate=document.createElement('td'); tdDate.textContent=tx.date||'';
         const tdAction=document.createElement('td'); tdAction.textContent=tx.action||tx.type||'';
@@ -901,12 +890,12 @@
           attachBtn.addEventListener('click', ()=>{ promptAttachToTxn(tx.id); });
           tdReceipt.appendChild(attachBtn);
         }
-        const tdInv=document.createElement('td'); tdInv.textContent = (tx.invItemName? (tx.invItemName + ' x' + (tx.qty||0)) : (tx.assetName ? tx.assetName : ''));
+        const tdInv=document.createElement('td'); tdInv.textContent = (tx.invItemName? (tx.invItemName + (tx.qty? ' x' + tx.qty : '')) : (tx.assetName ? tx.assetName : '-'));
         const tdDis=document.createElement('td'); tdDis.textContent = tx.disallowable ? 'Yes' : '-';
         const tdNon=document.createElement('td'); tdNon.textContent = tx.nonTaxable ? 'Yes' : '-';
         const tdAct=document.createElement('td');
         const editBtn=document.createElement('button'); editBtn.className='small'; editBtn.textContent='Edit'; editBtn.addEventListener('click', ()=>editTransaction(tx.id));
-        const delBtn=document.createElement('button'); delBtn.className='small danger'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=>{ if(!confirm('Delete transaction?')) return; if(!canDelete()) return alert('Active user lacks permission to delete transactions'); deleteTransaction(tx.id); });
+        const delBtn=document.createElement('button'); delBtn.className='small danger'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=>{ if(!confirm('Delete transaction?')) return; deleteTransaction(tx.id); });
         tdAct.appendChild(editBtn); tdAct.appendChild(delBtn);
 
         tr.appendChild(tdDate); tr.appendChild(tdAction); tr.appendChild(tdAcc); tr.appendChild(tdDesc); tr.appendChild(tdAmt); tr.appendChild(tdVat); tr.appendChild(tdWht); tr.appendChild(tdPaye); tr.appendChild(tdContact); tr.appendChild(tdReceipt); tr.appendChild(tdInv); tr.appendChild(tdDis); tr.appendChild(tdNon); tr.appendChild(tdAct);
@@ -935,7 +924,6 @@
     function openAttachment(attId){
       const a = data.attachments.find(x=>x.id===attId);
       if(!a) return alert('Attachment not found');
-      // open in new tab as data URL
       const w = window.open();
       w.document.write(`<title>${a.filename}</title>`);
       if(a.mime && a.mime.startsWith('image/')){
@@ -943,14 +931,12 @@
       } else if(a.mime === 'application/pdf'){
         w.document.write(`<iframe src="${a.dataUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
       } else {
-        // show link
         w.document.write(`<a href="${a.dataUrl}" download="${a.filename}">Download ${a.filename}</a>`);
       }
       addAudit('attachment.view','attachment',a.id,`Viewed attachment ${a.filename}`);
     }
 
     function editTransaction(txId){
-      // Minimal edit UI: allow toggling disallowable / non-tax / description via prompt for brevity
       if(!canEdit()) return alert('Active user lacks edit permission');
       const arr = data.transactions[selectedUser][selectedBiz];
       const tx = arr.find(t=>t.id===txId);
@@ -967,19 +953,16 @@
 
     function deleteTransaction(txId){
       data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz].filter(t=>t.id!==txId);
-      // remove attachments linked to txn
       data.attachments = (data.attachments||[]).map(a => { if(a.txnId === txId) a.txnId = null; return a; });
       saveData(); addAudit('transaction.delete','transaction',txId,`Deleted transaction ${txId}`); renderAll();
     }
 
-    // helper: compute monthly PAYE based on annual bands and statutory deductions; dateStr used to pick band set
+    // helper: compute monthly PAYE based on annual bands and statutory deductions
     function computeMonthlyPAYE(grossMonthly, biz, dateStr){
       const deductionsAnnual = (biz && biz.statutoryDeductions) ? (Number(biz.statutoryDeductions.pension||0) + Number(biz.statutoryDeductions.rent||0) + Number(biz.statutoryDeductions.life||0) + Number(biz.statutoryDeductions.mortgage||0) + Number(biz.statutoryDeductions.nhf||0)) : 0;
-      // monthly taxable salary = grossMonthly - deductionsAnnual/12
       let monthlyTaxable = Number(grossMonthly||0) - (deductionsAnnual/12);
       if(monthlyTaxable < 0) monthlyTaxable = 0;
       const annualTaxable = monthlyTaxable * 12;
-      // compute progressive tax on annualTaxable using PAYE_BANDS
       let remaining = annualTaxable;
       let lower = 0;
       let totalTax = 0;
@@ -998,441 +981,473 @@
 
     // Add general non-inventory transactions
     async function handleAddTransaction(){
-      if(!selectedUser || !selectedBiz) return alert('Select user and business');
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
-      if(!biz) return;
-      const action = txnAction.value;
-      const amountRaw = Number(txnAmount.value||0);
+      const date = txnDate.value || today();
+      const action = txnAction.value || (txnAmount.value && Number(txnAmount.value)>0 ? 'Expense' : 'Revenue');
       const accountId = txnAccount.value;
-      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Unknown', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-      const dateVal = txnDate.value || today();
-      const desc = txnDesc.value || '';
-      const whtApplied = !!txnWht.checked;
-      const whtRateVal = (txnWhtRate.value) ? Number(txnWhtRate.value) : undefined;
-      const isSalary = !!txnSalary.checked;
-      const vatApplies = !!txnVatApply.checked;
-      const vatInclusive = !!txnVatInclusive.checked;
-      const contactType = txnContactType.value || '';
-      const contactNameVal = txnContactName.value || '';
-
-      if(!action) return alert('Select an action.');
-
-      // VAT: compute net and vat based on inclusive/exclusive
+      const account = (biz.accounts||[]).find(a=>a.id===accountId) || { id:null, name:'(unknown)', category:'Expense' };
+      const desc = (txnDesc.value||'').trim();
+      const amountRaw = Number(txnAmount.value||0);
       let vatAmount = 0;
       let netAmount = amountRaw;
-      if(vatApplies && biz.vatEnabled && (action === 'Revenue' || action === 'InventorySale' || action === 'InventoryPurchase')){
-        const rate = Number(biz.vatRate||0)/100;
-        if(vatInclusive){
+      if(txnVatApply.checked && biz.vatEnabled){
+        const rate = Number(biz.vatRate||DEFAULTS.vatRate)/100;
+        if(txnVatInclusive.checked){
+          // net = amount / (1+rate)
           netAmount = amountRaw / (1 + rate);
           vatAmount = amountRaw - netAmount;
         } else {
           vatAmount = amountRaw * rate;
-          netAmount = amountRaw;
+          // netAmount remains amountRaw
         }
       }
+      let whtApplied = !!txnWht.checked;
+      let whtRateVal = txnWhtRate.value ? Number(txnWhtRate.value) : (biz.whtRate || DEFAULTS.whtRate);
+      let whtAmount = whtApplied ? ((netAmount) * (whtRateVal/100)) : 0;
+      let isSalary = !!txnSalary.checked;
+      let payeAmount = isSalary ? computeMonthlyPAYE(netAmount, biz, date) : 0;
 
-      // WHT: record whtAmount as receivable (credit for tax), but do NOT reduce taxable income
-      let usedWht = (typeof whtRateVal !== 'undefined') ? whtRateVal : Number(biz.whtRate||0);
-      let whtAmount = 0;
-      // If user checked WHT and provided amount, compute whtAmount as: if amount given is net after WHT? We'll treat entered amount as net (i.e. amount received), and WHT is computed as percentage of gross => We will compute WHT on gross base assumption consistent with earlier logic: gross = net / (1 - wht%)
-      if(whtApplied && usedWht > 0 && usedWht < 100){
-        const grossBase = netAmount / (1 - (usedWht/100));
-        whtAmount = grossBase * (usedWht/100);
-      }
-
-      // PAYE: compute monthly based on PIT bands if marked salary
-      let payeAmount = 0;
-      if(isSalary && biz.payeEnabled){
-        payeAmount = computeMonthlyPAYE(netAmount, biz, dateVal);
-      }
-
-      // determine disallowable / nonTaxable flags using account-level defaults else business-level defaults
-      const disallowableFlag = !!(account.disallowableDefault) || (!!biz.defaultExpenseDisallowable && account.category === 'Expense') || false;
-      const nonTaxFlag = !!(account.nonTaxableDefault) || (!!biz.defaultRevenueNonTax && account.category === 'Revenue') || false;
-
-      const txn = {
+      // create transaction record
+      const tx = {
         id: uid('txn'),
-        date: dateVal,
+        date,
         action,
-        accountId,
+        accountId: account.id,
         accountName: account.name,
+        accountCategory: account.category,
         description: desc,
         amount: amountRaw,
-        netAmount,
-        vatAmount,
-        vatInclusive,
-        whtApplied,
-        whtRate: usedWht,
-        whtAmount,
-        isSalary,
-        payeAmount,
-        userId: selectedUser,
-        contactType,
-        contactName: contactNameVal,
-        disallowable: disallowableFlag,
-        nonTaxable: nonTaxFlag,
-        createdAt: new Date().toISOString(),
-        createdBy: selectedUser
+        netAmount: Number((netAmount).toFixed(2)),
+        vatApplied: !!txnVatApply.checked,
+        vatAmount: Number((vatAmount).toFixed(2)),
+        whtApplied: whtApplied,
+        whtRate: Number(whtRateVal),
+        whtAmount: Number((whtAmount).toFixed(2)),
+        isSalary: isSalary,
+        payeAmount: Number((payeAmount).toFixed(2)),
+        contactType: txnContactType.value || '',
+        contactName: txnContactName.value || '',
+        receiptId: null,
+        invItemId: null,
+        invItemName: null,
+        qty: 0,
+        disallowable: biz.defaultExpenseDisallowable && account.category==='Expense',
+        nonTaxable: biz.defaultRevenueNonTax && account.category==='Revenue',
+        createdBy: selectedUser,
+        createdAt: new Date().toISOString()
       };
 
-      // handle receipt file if present
-      const file = txnReceipt.files[0];
-      if(file){
-        const reader = new FileReader();
-        reader.onload = () => {
-          addAttachment({ bizId: selectedBiz, txnId: txn.id, fileObj: { filename: file.name, mime: file.type, dataUrl: reader.result }, uploadedBy: selectedUser });
-          pushTransaction(txn);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        pushTransaction(txn);
+      // handle receipt file if provided
+      const f = txnReceipt.files && txnReceipt.files[0];
+      if(f){
+        const r = await fileToDataUrl(f);
+        const att = addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj: { filename: f.name, mime: f.type, dataUrl: r }, uploadedBy: selectedUser });
+        tx.receiptId = att.id;
       }
+
+      data.transactions[selectedUser][selectedBiz].push(tx);
+      saveData(); addAudit('transaction.add','transaction',tx.id,`Added transaction ${tx.id}`); resetForms(); renderAll();
     }
 
-    function pushTransaction(txn){
-      data.transactions[selectedUser] = data.transactions[selectedUser] || {};
-      data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz] || [];
-      data.transactions[selectedUser][selectedBiz].push(txn);
-      saveData();
-      addAudit('transaction.add','transaction',txn.id,`Added transaction ${txn.action} ${txn.id}`);
-      resetForms(); renderAll();
-      alert('Transaction recorded');
-    }
-
-    // Inventory handling (average cost)
-    function handleInventoryAction(){
-      if(!selectedUser || !selectedBiz) return alert('Select user/business');
+    // Inventory actions: Purchase or Sale
+    async function handleInventoryAction(){
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
-      if(!biz) return;
-      const action = txnAction.value;
-      if(!(action==='InventoryPurchase' || action==='InventorySale')) return alert('Choose an inventory action in Action selector');
-      // determine item
-      let itemId = invItemSelect.value;
-      const newName = (invNewName.value||'').trim();
+      const action = txnAction.value; // InventoryPurchase or InventorySale
+      const isPurchase = action === 'InventoryPurchase';
+      const isSale = action === 'InventorySale';
+      if(!isPurchase && !isSale) return alert('Select inventory action');
+      const chosenItemId = invItemSelect.value;
       let item = null;
-      if(itemId === '__new__' && newName){
-        item = { id: uid('item'), name: newName, qty:0, avgCost:0 };
+      if(chosenItemId === '__new__'){
+        const nm = (invNewName.value||'').trim();
+        if(!nm) return alert('Provide new item name');
+        item = { id: uid('item'), name: nm, qty: 0, avgCost: 0 };
         biz.inventory.push(item);
-        addAudit('inventory.item.add','inventoryItem',item.id,`Added inventory item ${newName}`);
       } else {
-        item = biz.inventory.find(it=>it.id===itemId);
-        if(!item) return alert('Select or add an inventory item');
+        item = (biz.inventory||[]).find(i=>i.id===chosenItemId);
+        if(!item) return alert('Item not found');
       }
-
       const qty = Number(invQty.value||0);
-      if(qty <= 0) return alert('Quantity must be > 0');
       const unitPrice = Number(invUnitPrice.value||0);
-      const vatApplies = !!invVat.checked;
-      const vatInclusive = !!invVatInclusive.checked;
-      const dateVal = txnDate.value || today();
-      const accountId = invAccountSelect.value || txnAccount.value;
-      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Inventory Purchases', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-      // flags via account/business defaults
-      const disallowableFlag = !!account.disallowableDefault || (!!biz.defaultExpenseDisallowable && account.category === 'Expense');
-      const nonTaxFlag = !!account.nonTaxableDefault || (!!biz.defaultRevenueNonTax && account.category === 'Revenue');
+      if(qty <= 0) return alert('Quantity must be > 0');
+      if(unitPrice < 0) return alert('Unit price invalid');
 
-      const contactType = invContactType.value || '';
-      const contactNameVal = invContactName.value || '';
+      const date = txnDate.value || today();
+      const accountId = invAccountSelect.value;
+      const account = (biz.accounts||[]).find(a=>a.id===accountId) || { id:null, name:'Inventory', category:'Asset' };
 
-      // handle receipt file
-      const file = invReceipt.files[0];
-
-      if(action === 'InventoryPurchase'){
-        // update weighted average
-        const prevQty = Number(item.qty || 0);
-        const prevAvg = Number(item.avgCost || 0);
-        const purchaseTotal = qty * unitPrice;
-        const newTotalCost = prevQty*prevAvg + purchaseTotal;
-        const newQty = prevQty + qty;
-        const newAvg = newQty ? (newTotalCost / newQty) : 0;
+      // compute inventory cost and update avgCost on purchase
+      if(isPurchase){
+        const totalCost = qty * unitPrice;
+        const prevVal = item.qty * item.avgCost;
+        const newQty = item.qty + qty;
+        const newAvg = newQty === 0 ? 0 : ((prevVal + totalCost) / newQty);
+        item.avgCost = Number(newAvg.toFixed(2));
         item.qty = newQty;
-        item.avgCost = newAvg;
-
-        // VAT amount computed per unit price behavior
-        let vatAmount = 0;
-        if(vatApplies && biz.vatEnabled){
-          const rate = Number(biz.vatRate||0)/100;
-          if(vatInclusive){
-            const net = purchaseTotal / (1 + rate);
-            vatAmount = purchaseTotal - net;
-          } else {
-            vatAmount = purchaseTotal * rate;
-          }
-        }
-
-        const txn = {
-          id: uid('txn'),
-          date: dateVal,
-          action: 'InventoryPurchase',
-          accountId: accountId,
-          accountName: account.name || 'Inventory Purchases',
-          description: `Purchase ${item.name}`,
-          amount: qty*unitPrice,
-          netAmount: qty*unitPrice,
-          vatAmount,
-          vatInclusive,
-          whtApplied:false,
-          whtAmount:0,
-          invItemId: item.id,
-          invItemName: item.name,
-          qty,
-          unitPrice,
-          unitCost: unitPrice,
-          userId: selectedUser,
-          contactType,
-          contactName: contactNameVal,
-          disallowable: disallowableFlag,
-          nonTaxable: nonTaxFlag,
-          createdAt: new Date().toISOString(),
-          createdBy: selectedUser
-        };
-
-        // if file attached, handle it then push
-        if(file){
-          const reader = new FileReader();
-          reader.onload = () => {
-            addAttachment({ bizId: selectedBiz, txnId: txn.id, fileObj: { filename: file.name, mime: file.type, dataUrl: reader.result }, uploadedBy: selectedUser });
-            pushInventoryTxn(txn);
-          };
-          reader.readAsDataURL(file);
-        } else {
-          pushInventoryTxn(txn);
-        }
-        txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
-        return;
+      } else { // sale: consume using avgCost
+        if(qty > item.qty) return alert('Not enough inventory on hand');
+        item.qty = item.qty - qty;
       }
 
-      if(action === 'InventorySale'){
-        if(item.qty < qty) return alert('Insufficient stock to sell');
-        const unitCost = Number(item.avgCost || 0);
-        const saleTotal = qty * unitPrice;
-        const cogs = qty * unitCost;
-        item.qty -= qty;
-        // VAT on sale if enabled
-        let vatAmount = 0;
-        if(biz.vatEnabled && vatApplies){
-          const rate = Number(biz.vatRate||0)/100;
-          if(vatInclusive){
-            const net = saleTotal / (1 + rate);
-            vatAmount = saleTotal - net;
-          } else {
-            vatAmount = saleTotal * rate;
-          }
-        }
+      // create transaction record representing inventory purchase/sale
+      const tx = {
+        id: uid('txn'),
+        date,
+        action: isPurchase ? 'InventoryPurchase' : 'InventorySale',
+        accountId: account.id,
+        accountName: account.name,
+        accountCategory: account.category,
+        description: (isPurchase ? 'Inventory purchase' : 'Inventory sale') + (invNewName.value ? ' ' + invNewName.value : ''),
+        amount: Number((unitPrice * qty).toFixed(2)),
+        netAmount: Number((unitPrice * qty).toFixed(2)),
+        vatApplied: !!invVat.checked,
+        vatAmount: 0,
+        whtApplied: false,
+        whtAmount: 0,
+        whtRate: 0,
+        isSalary: false,
+        payeAmount: 0,
+        contactType: invContactType.value || '',
+        contactName: invContactName.value || '',
+        receiptId: null,
+        invItemId: item.id,
+        invItemName: item.name,
+        qty: qty,
+        disallowable: false,
+        nonTaxable: false,
+        createdBy: selectedUser,
+        createdAt: new Date().toISOString()
+      };
 
-        const txn = {
-          id: uid('txn'),
-          date: dateVal,
-          action: 'InventorySale',
-          accountId: accountId,
-          accountName: account.name || 'Sales',
-          description: `Sale ${item.name}`,
-          amount: saleTotal,
-          netAmount: vatInclusive ? (saleTotal / (1 + Number(biz.vatRate||0)/100)) : saleTotal,
-          vatAmount,
-          vatInclusive,
-          whtApplied:false,
-          whtAmount:0,
-          invItemId: item.id,
-          invItemName: item.name,
-          qty,
-          unitPrice,
-          unitCost,
-          cogs,
-          userId: selectedUser,
-          contactType,
-          contactName: contactNameVal,
-          disallowable: nonTaxFlag ? false : false,
-          nonTaxable: nonTaxFlag,
-          createdAt: new Date().toISOString(),
-          createdBy: selectedUser
-        };
-
-        if(file){
-          const reader = new FileReader();
-          reader.onload = () => {
-            addAttachment({ bizId: selectedBiz, txnId: txn.id, fileObj: { filename: file.name, mime: file.type, dataUrl: reader.result }, uploadedBy: selectedUser });
-            pushInventoryTxn(txn);
-          };
-          reader.readAsDataURL(file);
+      // VAT handling for inventory purchase/sale (simple)
+      if(tx.vatApplied && biz.vatEnabled){
+        const rate = Number(biz.vatRate||DEFAULTS.vatRate)/100;
+        if(invVatInclusive.checked){
+          const net = tx.amount / (1 + rate);
+          tx.vatAmount = Number((tx.amount - net).toFixed(2));
+          tx.netAmount = Number(net.toFixed(2));
         } else {
-          pushInventoryTxn(txn);
+          tx.vatAmount = Number((tx.amount * rate).toFixed(2));
         }
-
-        saveData(); resetForms(); populateAccountSelect(); renderAll(); alert(`Sale recorded (COGS: ₦${fmt(cogs)})`);
-        txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
-        return;
       }
+
+      // attachment
+      const f = invReceipt.files && invReceipt.files[0];
+      if(f){
+        const r = await fileToDataUrl(f);
+        const att = addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj: { filename: f.name, mime: f.type, dataUrl: r }, uploadedBy: selectedUser });
+        tx.receiptId = att.id;
+      }
+
+      // store tx
+      data.transactions[selectedUser][selectedBiz].push(tx);
+      saveData(); addAudit('inventory.' + (isPurchase ? 'purchase' : 'sale'), 'inventory', item.id, `Inventory ${isPurchase ? 'purchase' : 'sale'} ${qty} x ${item.name}`); resetForms(); populateAccountSelect(); renderAll();
     }
 
-    function pushInventoryTxn(txn){
-      data.transactions[selectedUser] = data.transactions[selectedUser] || {};
-      data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz] || [];
-      data.transactions[selectedUser][selectedBiz].push(txn);
-      saveData();
-      addAudit('transaction.add','transaction',txn.id,`Added inventory transaction ${txn.id}`);
-      renderAll();
-      alert('Inventory transaction recorded');
-    }
-
-    // Undo inventory action (single-level)
     function handleUndoInventory(){
-      if(!selectedUser || !selectedBiz) return alert('Select user/business');
-      if(!canEdit()) return alert('Active user lacks edit permission');
-      const arr = data.transactions[selectedUser][selectedBiz] || [];
-      // find last inventory txn (search from end)
-      for(let i = arr.length-1; i>=0; i--){
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
+      if(!canEdit()) return alert('Active user lacks permission to undo');
+      const arr = data.transactions[selectedUser][selectedBiz];
+      // find last inventory transaction
+      for(let i=arr.length-1;i>=0;i--){
         const tx = arr[i];
         if(tx.action === 'InventoryPurchase' || tx.action === 'InventorySale'){
-          // revert inventory state
           const biz = findBiz(selectedBiz);
           const item = biz.inventory.find(it=>it.id === tx.invItemId);
-          if(!item) {
-            // if not found, just remove transaction
-            arr.splice(i,1);
-            saveData(); renderAll(); alert('Last inventory transaction removed');
-            addAudit('transaction.delete','transaction',tx.id,`Removed inventory txn ${tx.id} (item missing)`);
-            return;
-          }
-          if(tx.action === 'InventoryPurchase'){
-            // Undo purchase: newQty = prevQty + qty. We have current item.qty = newQty.
-            const purchasedQty = Number(tx.qty||0);
-            const newQty = Number(item.qty || 0);
-            const newAvg = Number(item.avgCost || 0);
-            const prevQty = newQty - purchasedQty;
-            let prevAvg = 0;
-            if(prevQty > 0){
-              // prevAvg = (newAvg*newQty - purchasedQty*unitPrice) / prevQty
-              const numerator = (newAvg * newQty) - (purchasedQty * Number(tx.unitPrice||0));
-              prevAvg = prevQty ? (numerator / prevQty) : 0;
+          if(item){
+            if(tx.action === 'InventoryPurchase'){
+              // reverse purchase: reduce qty and re-calc avg cost roughly (we will recalc by removing last purchase value)
+              const removeQty = tx.qty;
+              const removeValue = tx.netAmount;
+              const totalQty = item.qty - removeQty;
+              // approximate avg recalculation: if resulting qty <=0 set avgCost to 0, else compute previous value by subtracting
+              if(totalQty <= 0){ item.qty = 0; item.avgCost = 0; }
+              else {
+                const currentVal = (item.avgCost * (item.qty));
+                const newVal = currentVal - removeValue;
+                item.qty = totalQty;
+                item.avgCost = Number((newVal / totalQty).toFixed(2));
+              }
             } else {
-              prevAvg = 0;
+              // reverse sale: add qty back
+              item.qty = item.qty + tx.qty;
             }
-            item.qty = prevQty;
-            item.avgCost = prevAvg;
-            // remove txn
-            arr.splice(i,1);
-            saveData(); renderAll(); alert('Undo inventory purchase applied');
-            addAudit('inventory.undo','inventory',tx.invItemId,`Undo purchase txn ${tx.id}`);
-            return;
-          } else if(tx.action === 'InventorySale'){
-            // Undo sale: increase qty back
-            const soldQty = Number(tx.qty||0);
-            item.qty = Number(item.qty||0) + soldQty;
-            // avgCost unchanged
-            arr.splice(i,1);
-            saveData(); renderAll(); alert('Undo inventory sale applied');
-            addAudit('inventory.undo','inventory',tx.invItemId,`Undo sale txn ${tx.id}`);
-            return;
           }
+          // remove transaction
+          arr.splice(i,1);
+          saveData();
+          addAudit('inventory.undo','inventory',tx.invItemId,`Undid inventory action ${tx.id}`);
+          renderAll();
+          return;
         }
       }
-      alert('No recent inventory purchase/sale to undo');
+      alert('No inventory actions to undo');
     }
 
-    // Assets handling
-    function handleAddAsset(){
-      if(!selectedUser || !selectedBiz) return alert('Select user/business');
+    // File helper
+    function fileToDataUrl(file){ return new Promise((res, rej)=>{ const r = new FileReader(); r.onload = ()=>res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+
+    // Asset functions
+    async function handleAddAsset(){
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
       const name = (assetName.value||'').trim();
       const cost = Number(assetCost.value||0);
-      const pDate = assetPurchaseDate.value || today();
-      const life = Number(assetLife.value||0);
-      const caPerc = Number(assetCA.value||0);
-      const accountId = assetPurchaseAccount.value || txnAccount.value;
-      const account = biz.accounts.find(a=>a.id===accountId) || { name:'Fixed Assets', category: 'Asset' };
-      if(!name || cost <= 0 || life <= 0) return alert('Asset name, cost, and useful life required');
-      const asset = { id:uid('asset'), name, cost, purchaseDate:pDate, lifeYears:life, capitalAllowancePercent:caPerc, disposed:false, disposalDate:null, disposalProceeds:0, createdBy:selectedUser };
-      biz.assets = biz.assets || [];
+      const purchaseDate = assetPurchaseDate.value || today();
+      const lifeYears = Number(assetLife.value||3);
+      const caPercent = Number(assetCA.value||0);
+      if(!name) return alert('Asset name required');
+      if(cost <= 0) return alert('Asset cost must be > 0');
+      const asset = {
+        id: uid('asset'),
+        name,
+        cost: Number(cost.toFixed(2)),
+        purchaseDate,
+        lifeYears,
+        caPercent,
+        disposed: false,
+        disposalDate: null,
+        disposalProceeds: 0,
+        createdBy: selectedUser
+      };
       biz.assets.push(asset);
-      // record transaction (include assetId reference)
-      const txn = { id:uid('txn'), date:pDate, action:'FixedAssetPurchase', accountId: accountId, accountName: account.name || 'Fixed Assets', description:`Asset purchase ${name}`, amount: cost, netAmount: cost, vatAmount:0, whtApplied:false, whtAmount:0, assetId: asset.id, assetName: name, userId: selectedUser, createdAt:new Date().toISOString(), createdBy:selectedUser };
-      const file = assetReceipt.files[0];
-      if(file){
-        const reader = new FileReader();
-        reader.onload = () => {
-          addAttachment({ bizId: selectedBiz, txnId: txn.id, fileObj: { filename: file.name, mime: file.type, dataUrl: reader.result }, uploadedBy: selectedUser });
-          pushAssetTxn(asset, txn);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        pushAssetTxn(asset, txn);
-      }
-    }
 
-    function pushAssetTxn(asset, txn){
-      data.transactions[selectedUser][selectedBiz].push(txn);
+      const tx = {
+        id: uid('txn'),
+        date: purchaseDate,
+        action: 'FixedAssetPurchase',
+        accountId: assetPurchaseAccount.value,
+        accountName: (biz.accounts||[]).find(a=>a.id===assetPurchaseAccount.value)?.name || 'Fixed Assets',
+        accountCategory: 'Asset',
+        description: `Asset purchase: ${name}`,
+        amount: cost,
+        netAmount: cost,
+        vatApplied: false,
+        vatAmount: 0,
+        whtApplied: false,
+        whtAmount: 0,
+        isSalary: false,
+        payeAmount: 0,
+        contactType: assetContactType.value || '',
+        contactName: assetContactName.value || '',
+        receiptId: null,
+        assetId: asset.id,
+        assetName: asset.name,
+        qty: 1,
+        disallowable: false,
+        nonTaxable: false,
+        createdBy: selectedUser
+      };
+
+      const f = assetReceipt.files && assetReceipt.files[0];
+      if(f){
+        const r = await fileToDataUrl(f);
+        const att = addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj: { filename: f.name, mime: f.type, dataUrl: r }, uploadedBy: selectedUser });
+        tx.receiptId = att.id;
+      }
+
+      data.transactions[selectedUser][selectedBiz].push(tx);
       saveData();
       addAudit('asset.add','asset',asset.id,`Added asset ${asset.name}`);
-      resetForms(); renderAll(); alert('Asset recorded');
-      txnAction.value=''; assetSubform.style.display='none'; mainTxnForm.style.display='flex';
+      resetForms(); populateAccountSelect(); renderAll();
     }
 
-    function handleDisposeAsset(){
-      if(!selectedUser || !selectedBiz) return alert('Select user/business');
+    async function handleDisposeAsset(){
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
       if(!canEdit()) return alert('Active user lacks edit permission');
       const biz = findBiz(selectedBiz);
       const name = (assetName.value||'').trim();
+      const disposalDate = assetDisposalDate.value;
       const proceeds = Number(assetDisposalProceeds.value||0);
-      const dDate = assetDisposalDate.value;
-      const accountId = assetDisposalAccount.value || txnAccount.value;
-      const asset = biz.assets.find(a => a.name === name || a.id === assetName.value) || biz.assets[0];
-      if(!asset) return alert('Asset not found (enter existing asset name)');
-      asset.disposed = true;
-      asset.disposalDate = dDate || today();
-      asset.disposalProceeds = proceeds;
-      // record disposal txn
-      const txn = { id:uid('txn'), date: asset.disposalDate, action:'FixedAssetDisposal', accountId: accountId, accountName: findBiz(selectedBiz).accounts.find(x=>x.id===accountId)?.name||'Asset Disposal', description:`Disposal ${asset.name}`, amount: proceeds, netAmount: proceeds, vatAmount:0, whtApplied:false, whtAmount:0, assetId:asset.id, assetName:asset.name, createdBy:selectedUser, createdAt:new Date().toISOString() };
-      const file = assetReceipt.files[0];
-      if(file){
-        const reader = new FileReader();
-        reader.onload = () => {
-          addAttachment({ bizId: selectedBiz, txnId: txn.id, fileObj: { filename: file.name, mime: file.type, dataUrl: reader.result }, uploadedBy: selectedUser });
-          pushDisposeTxn(txn);
-        };
-        reader.readAsDataURL(file);
+      // find asset by name (basic) or require ID — for simplicity find first matching not disposed
+      let asset = null;
+      if(name){
+        asset = biz.assets.find(a=>a.name === name && !a.disposed);
       } else {
-        pushDisposeTxn(txn);
+        asset = biz.assets.find(a=>!a.disposed);
       }
-    }
+      if(!asset) return alert('Asset not found to dispose');
+      asset.disposed = true;
+      asset.disposalDate = disposalDate || today();
+      asset.disposalProceeds = Number(proceeds);
 
-    function pushDisposeTxn(txn){
-      data.transactions[selectedUser][selectedBiz].push(txn);
-      saveData();
-      addAudit('asset.dispose','asset',txn.assetId,`Disposed asset ${txn.assetName}`);
-      resetForms(); renderAll(); alert('Disposal recorded');
+      const tx = {
+        id: uid('txn'),
+        date: asset.disposalDate,
+        action: 'FixedAssetDisposal',
+        accountId: assetDisposalAccount.value,
+        accountName: (biz.accounts||[]).find(a=>a.id===assetDisposalAccount.value)?.name || 'Disposals',
+        accountCategory: 'Revenue',
+        description: `Disposal: ${asset.name}`,
+        amount: proceeds,
+        netAmount: proceeds,
+        vatApplied: false,
+        vatAmount: 0,
+        whtApplied: false,
+        whtAmount: 0,
+        isSalary: false,
+        payeAmount: 0,
+        contactType: assetContactType.value || '',
+        contactName: assetContactName.value || '',
+        receiptId: null,
+        assetId: asset.id,
+        assetName: asset.name,
+        qty: 1,
+        disallowable: false,
+        nonTaxable: false,
+        createdBy: selectedUser
+      };
+
+      const f = assetReceipt.files && assetReceipt.files[0];
+      if(f){
+        const r = await fileToDataUrl(f);
+        const att = addAttachment({ bizId: selectedBiz, txnId: tx.id, fileObj: { filename: f.name, mime: f.type, dataUrl: r }, uploadedBy: selectedUser });
+        tx.receiptId = att.id;
+      }
+
+      data.transactions[selectedUser][selectedBiz].push(tx);
+      saveData(); addAudit('asset.dispose','asset',asset.id,`Disposed asset ${asset.name}`);
+      resetForms(); renderAll();
     }
 
     function handleUndoAsset(){
-      if(!selectedUser || !selectedBiz) return alert('Select user/business');
-      if(!canEdit()) return alert('Active user lacks edit permission');
-      const arr = data.transactions[selectedUser][selectedBiz] || [];
-      for(let i = arr.length-1; i>=0; i--){
+      if(!selectedBiz || !selectedUser) return alert('Select user and business');
+      if(!canEdit()) return alert('Active user lacks permission to undo');
+      const arr = data.transactions[selectedUser][selectedBiz];
+      for(let i=arr.length-1;i>=0;i--){
         const tx = arr[i];
-        if(tx.action === 'FixedAssetPurchase'){
-          // remove asset entry
+        if(tx.action === 'FixedAssetPurchase' || tx.action === 'FixedAssetDisposal'){
+          // reverse asset action
           const biz = findBiz(selectedBiz);
-          biz.assets = (biz.assets||[]).filter(a=>a.id !== tx.assetId);
+          if(tx.assetId){
+            const asset = biz.assets.find(a=>a.id===tx.assetId);
+            if(asset){
+              if(tx.action === 'FixedAssetPurchase'){
+                // remove asset
+                biz.assets = biz.assets.filter(a=>a.id!==asset.id);
+              } else {
+                // reverse disposal
+                asset.disposed = false;
+                asset.disposalDate = null;
+                asset.disposalProceeds = 0;
+              }
+            }
+          }
           arr.splice(i,1);
-          saveData(); addAudit('asset.undo','asset',tx.assetId,`Undo asset purchase ${tx.assetId}`); renderAll(); alert('Undid last asset purchase'); return;
-        }
-        if(tx.action === 'FixedAssetDisposal'){
-          const biz = findBiz(selectedBiz);
-          const as = biz.assets.find(a=>a.id === tx.assetId);
-          if(as){ as.disposed = false; as.disposalDate = null; as.disposalProceeds = 0; }
-          arr.splice(i,1);
-          saveData(); addAudit('asset.undo','asset',tx.assetId,`Undo asset disposal ${tx.assetId}`); renderAll(); alert('Undid last asset disposal'); return;
+          saveData();
+          addAudit('asset.undo','asset',tx.assetId||'',`Undid asset action ${tx.id}`);
+          renderAll();
+          return;
         }
       }
-      alert('No recent asset actions to undo');
+      alert('No asset actions to undo');
     }
 
-    // --- Reports & tax reconciliation ---
+    // --- Reporting & totals ---
+    function renderTotalsAndTaxSummary(){
+      totalsSummaryDiv.innerHTML = '';
+      taxSummaryDiv.innerHTML = '';
+      if(!selectedUser || !selectedBiz) return;
+      const biz = findBiz(selectedBiz);
+      const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
+      let revenue = 0, expenses = 0, vatCollected = 0, vatPaid = 0, whtPayable = 0, whtReceivable = 0, payeTotal = 0;
+      arr.forEach(tx=>{
+        if(tx.accountCategory === 'Revenue' || tx.action === 'Revenue' || tx.action === 'InventorySale' || tx.action==='FixedAssetDisposal') {
+          revenue += Number(tx.netAmount || tx.amount || 0);
+          if(tx.vatApplied) vatCollected += Number(tx.vatAmount || 0);
+          if(tx.whtApplied) whtReceivable += Number(tx.whtAmount || 0);
+        } else {
+          expenses += Number(tx.netAmount || tx.amount || 0);
+          if(tx.vatApplied) vatPaid += Number(tx.vatAmount || 0);
+          if(tx.whtApplied) whtPayable += Number(tx.whtAmount || 0);
+        }
+        if(tx.isSalary) payeTotal += Number(tx.payeAmount || 0);
+      });
+      const grossProfit = revenue - expenses;
+      const vatNet = vatCollected - vatPaid;
+      totalsSummaryDiv.innerHTML = `<div><strong>Revenue:</strong> ₦ ${fmt(revenue)} &nbsp; <strong>Expenses:</strong> ₦ ${fmt(expenses)} &nbsp; <strong>Gross:</strong> ₦ ${fmt(grossProfit)}</div><div style="margin-top:6px;"><strong>VAT collected:</strong> ₦ ${fmt(vatCollected)} &nbsp; <strong>VAT paid:</strong> ₦ ${fmt(vatPaid)} &nbsp; <strong>VAT net:</strong> ₦ ${fmt(vatNet)}</div><div style="margin-top:6px;"><strong>WHT receivable:</strong> ₦ ${fmt(whtReceivable)} &nbsp; <strong>WHT payable:</strong> ₦ ${fmt(whtPayable)}</div><div style="margin-top:6px;"><strong>PAYE (monthly total):</strong> ₦ ${fmt(payeTotal)}</div>`;
+      // simplified tax summary
+      const taxableProfit = Math.max(0, grossProfit - (biz.lossBroughtForward||0));
+      const cit = biz.citEnabled ? taxableProfit * (biz.citRate/100) : 0;
+      taxSummaryDiv.innerHTML = `<div><strong>Taxable profit (simple):</strong> ₦ ${fmt(taxableProfit)} &nbsp; <strong>CIT (if enabled @ ${biz.citRate}%):</strong> ₦ ${fmt(cit)}</div>`;
+    }
+
+    function renderAll(){
+      refreshSelectors();
+      ensureSelection();
+      populateAccountSelect();
+      renderLedger();
+      renderQuickPanels();
+    }
+
+    function renderAccounts(){
+      accountsList.innerHTML = '';
+      const b = findBiz(selectedBiz);
+      if(!b) return;
+      b.accounts.forEach(a=>{
+        const row = document.createElement('div'); row.className='account-row';
+        const left = document.createElement('div'); left.textContent = a.name + ' (' + a.category + ')';
+        const right = document.createElement('div');
+        const del = document.createElement('button'); del.className='small danger'; del.textContent='Delete'; del.addEventListener('click', ()=>{ if(!confirm('Delete account?')) return; b.accounts = b.accounts.filter(x=>x.id!==a.id); saveData(); addAudit('account.delete','account',a.id,`Deleted account ${a.name}`); renderAccounts(); populateAccountSelect(); });
+        right.appendChild(del);
+        row.appendChild(left); row.appendChild(right); accountsList.appendChild(row);
+      });
+    }
+
+    function renderBizContacts(b){
+      bizContactsList.innerHTML = '';
+      (b.contacts||[]).forEach(c=>{
+        const d = document.createElement('div'); d.className='row'; d.style.justifyContent='space-between';
+        const left = document.createElement('div'); left.textContent = `${c.name} — ${c.type}`;
+        const right = document.createElement('div');
+        const del = document.createElement('button'); del.className='small danger'; del.textContent='Remove'; del.addEventListener('click', ()=>{ if(!confirm('Remove contact?')) return; b.contacts = b.contacts.filter(x=>x.id!==c.id); saveData(); renderBizContacts(b); });
+        right.appendChild(del);
+        d.appendChild(left); d.appendChild(right); bizContactsList.appendChild(d);
+      });
+    }
+
+    function renderQuickPanels(){
+      inventoryListDiv.innerHTML=''; assetListDiv.innerHTML=''; plSnapshotDiv.innerHTML='';
+      const b = findBiz(selectedBiz);
+      if(!b) return;
+      // inventory
+      if((b.inventory||[]).length===0) inventoryListDiv.textContent='No inventory';
+      else {
+        const ul = document.createElement('div');
+        b.inventory.forEach(it => {
+          const r = document.createElement('div'); r.className='account-row'; r.innerHTML = `<div>${it.name} — qty: ${it.qty}</div><div>Avg cost: ₦ ${fmt(it.avgCost)}</div>`;
+          ul.appendChild(r);
+        });
+        inventoryListDiv.appendChild(ul);
+      }
+      // assets
+      if((b.assets||[]).length===0) assetListDiv.textContent='No assets';
+      else {
+        const ul = document.createElement('div');
+        b.assets.forEach(a => {
+          const r = document.createElement('div'); r.className='account-row'; r.innerHTML = `<div>${a.name} ${a.disposed ? '(disposed)' : ''}</div><div>Cost: ₦ ${fmt(a.cost)}</div>`;
+          ul.appendChild(r);
+        });
+        assetListDiv.appendChild(ul);
+      }
+      // pl snapshot (simple)
+      const arrAll = [];
+      for(const uid of Object.keys(data.transactions||{})){
+        const tmap = data.transactions[uid][selectedBiz] || [];
+        arrAll.push(...tmap);
+      }
+      let revenue=0, expenses=0;
+      arrAll.forEach(tx=>{ if(tx.accountCategory==='Revenue' || tx.action==='Revenue' || tx.action==='InventorySale') revenue += Number(tx.netAmount||tx.amount||0); else expenses += Number(tx.netAmount||tx.amount||0); });
+      plSnapshotDiv.innerHTML = `<div><strong>Revenue:</strong> ₦ ${fmt(revenue)}</div><div style="margin-top:6px;"><strong>Expenses:</strong> ₦ ${fmt(expenses)}</div><div style="margin-top:6px;"><strong>Net:</strong> ₦ ${fmt(revenue-expenses)}</div>`;
+    }
+
     function renderTab(){
-      if(activeTab === 'ledger'){
+      if(activeTab==='ledger'){
         ledgerSection.style.display='block';
         ledgerListSection.style.display='block';
         reportsSection.style.display='none';
@@ -1444,337 +1459,49 @@
         reportsSection.style.display='block';
         btnLedgerTab.classList.remove('active');
         btnReportsTab.classList.add('active');
-        // default report
-        document.querySelectorAll('#reportsSection .tab').forEach(t => { t.classList.remove('active'); if(t.dataset.report==='taxReconciliation'){ t.classList.add('active'); }});
-        renderReport('taxReconciliation');
       }
     }
 
     function renderReport(name){
       reportContent.innerHTML = '';
-      if(!selectedBiz) return reportContent.textContent = 'Select a business to view reports.';
-      if(!canView()) return reportContent.textContent = 'Active user lacks view permission for reports.';
       const biz = findBiz(selectedBiz);
-      if(!biz) return reportContent.textContent = 'Business not found.';
+      if(!biz) return;
       if(name === 'taxReconciliation'){
-        const div = document.createElement('div');
-        const recon = computeTaxReconciliation(biz);
-        // If taxableProfit negative, move to loss carryforward automatically
-        if(recon.taxableProfit < 0){
-          const loss = Math.abs(recon.taxableProfit);
-          biz.lossBroughtForward = Number(biz.lossBroughtForward || 0) + loss;
-          recon.lossCarried = loss;
-          recon.taxableProfit = 0;
-          saveData();
-          addAudit('loss.carry','business',biz.id,`Carried loss ₦${fmt(loss)} to lossBroughtForward`);
-        }
-        div.innerHTML = `<h3>Taxable Income Reconciliation — ${biz.name}</h3>
-          <div class="form-section">
-            <div>Taxable profit: ₦${fmt(recon.taxableProfit)}</div>
-            <div>Tax before credits (CIT/PIT): ₦${fmt(recon.taxBeforeCredits)}</div>
-            <div>WHT receivable credit: ₦${fmt(recon.whtReceivable)}</div>
-            <div>CA carryforward: ₦${fmt(biz.caCarryForward||0)}</div>
-            <div>Loss brought forward: ₦${fmt(biz.lossBroughtForward||0)}</div>
-            <div style="margin-top:8px;"><strong>Tax payable after credits: ₦${fmt(recon.taxPayable)}</strong></div>
-          </div>
-          <small class="muted">Note: WHT receivable is treated as a tax credit against CIT/PIT and does not reduce taxable income.</small>
-        `;
-        reportContent.appendChild(div);
+        reportContent.innerHTML = `<h4>Taxable Income Reconciliation</h4><div>Simple taxable summary shown in Tax Summary area below ledger.</div>`;
       } else if(name === 'vatReport'){
-        const div = document.createElement('div');
-        const vatTxns = gatherVAT(selectedBiz);
-        div.innerHTML = `<h3>VAT Report — ${biz.name}</h3><div>Total VAT collected: ₦${fmt(vatTxns.totalCollected)}</div><div>Total VAT paid (input): ₦${fmt(vatTxns.totalPaid)}</div><div>Net VAT: ₦${fmt(vatTxns.net)}</div>`;
-        reportContent.appendChild(div);
-      } else if(name === 'whtPayable'){
-        const div = document.createElement('div');
-        const wht = gatherWHT(selectedBiz);
-        div.innerHTML = `<h3>WHT Payable Report — ${biz.name}</h3><div>Total WHT withheld (payable): ₦${fmt(wht.payable)}</div>`;
-        reportContent.appendChild(div);
-      } else if(name === 'whtReceivable'){
-        const div = document.createElement('div');
-        const wht = gatherWHT(selectedBiz);
-        div.innerHTML = `<h3>WHT Receivable Report — ${biz.name}</h3><div>Total WHT receivable (credit): ₦${fmt(wht.receivable)}</div><div>Detailed:</div>`;
-        const lst = document.createElement('div');
-        (wht.details || []).forEach(d => { const el = document.createElement('div'); el.textContent = `${d.date} — ${d.accountName || ''} — ₦${fmt(d.whtAmount)} — txn ${d.txnId}`; lst.appendChild(el); });
-        div.appendChild(lst);
-        reportContent.appendChild(div);
-      } else if(name === 'profitSnapshot'){
-        const div = document.createElement('div');
-        const snap = computePLSnapshot(biz);
-        div.innerHTML = `<h3>Profit & Loss Snapshot — ${biz.name}</h3>
-          <div>Revenue: ₦${fmt(snap.revenue)}</div>
-          <div>COGS: ₦${fmt(snap.cogs)}</div>
-          <div>Gross profit: ₦${fmt(snap.gross)}</div>
-          <div>Expenses: ₦${fmt(snap.expenses)}</div>
-          <div>Operating profit: ₦${fmt(snap.operating)}</div>
-        `;
-        reportContent.appendChild(div);
-      } else if(name === 'inventoryReport'){
-        const div = document.createElement('div');
-        div.innerHTML = `<h3>Inventory Report — ${biz.name}</h3>`;
-        const tbl = document.createElement('table'); tbl.className='ledger-table';
-        tbl.innerHTML = `<thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th><th>Total value</th></tr></thead>`;
-        const tb = document.createElement('tbody');
-        (biz.inventory||[]).forEach(it => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${it.name}</td><td>${fmt(it.qty)}</td><td>${fmt(it.avgCost)}</td><td>${fmt((it.qty||0) * (it.avgCost||0))}</td>`;
-          tb.appendChild(tr);
-        });
-        tbl.appendChild(tb);
-        div.appendChild(tbl);
-        reportContent.appendChild(div);
-      } else if(name === 'assetsReport'){
-        const div = document.createElement('div');
-        div.innerHTML = `<h3>Fixed Assets Report — ${biz.name}</h3>`;
-        const tbl = document.createElement('table'); tbl.className='ledger-table';
-        tbl.innerHTML = `<thead><tr><th>Asset</th><th>Cost</th><th>Purchase date</th><th>Life (yrs)</th><th>CA%</th><th>Disposed</th></tr></thead>`;
-        const tb = document.createElement('tbody');
-        (biz.assets||[]).forEach(a => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${a.name}</td><td>${fmt(a.cost)}</td><td>${a.purchaseDate||''}</td><td>${a.lifeYears||''}</td><td>${a.capitalAllowancePercent||''}%</td><td>${a.disposed?('Yes - '+(a.disposalDate||'')):'No'}</td>`;
-          tb.appendChild(tr);
-        });
-        tbl.appendChild(tb);
-        div.appendChild(tbl);
-        reportContent.appendChild(div);
-      } else if(name === 'auditTrail'){
-        const div = document.createElement('div');
-        div.innerHTML = `<h3>Audit Trail — ${biz.name}</h3>`;
-        const tbl = document.createElement('table'); tbl.className='ledger-table';
-        tbl.innerHTML = `<thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>`;
-        const tb=document.createElement('tbody');
-        (data.audit||[]).slice().reverse().forEach(a => {
-          const owner = findUser(a.userId);
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${a.timestamp}</td><td>${owner?owner.display||owner.username:'system'}</td><td>${a.actionType}</td><td>${a.entityType} (${a.entityId})</td><td>${a.details}</td>`;
-          tb.appendChild(tr);
-        });
-        tbl.appendChild(tb);
-        div.appendChild(tbl);
-        reportContent.appendChild(div);
-      } else if(name === 'receiptsFolder'){
-        const div = document.createElement('div');
-        div.innerHTML = `<h3>Receipts Folder — ${biz.name}</h3>`;
-        const atts = getAttachmentsForBiz(biz.id);
-        if(!atts.length) { div.innerHTML += '<div>No receipts uploaded for this business.</div>'; reportContent.appendChild(div); return; }
-        atts.forEach(a => {
-          const row = document.createElement('div');
-          row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.marginBottom='6px';
-          const thumb = document.createElement('div');
-          if(a.mime && a.mime.startsWith('image/')) thumb.innerHTML = `<img src="${a.dataUrl}" class="receipt-thumb" />`;
-          else thumb.innerHTML = `<div class="receipt-thumb" style="display:flex;align-items:center;justify-content:center;">${a.filename.split('.').pop().toUpperCase()}</div>`;
-          const meta = document.createElement('div');
-          meta.innerHTML = `<div><strong>${a.filename}</strong> (${a.mime})</div><div>Uploaded: ${a.timestamp}</div><div>Txn: ${a.txnId || 'n/a'}</div>`;
-          const actions = document.createElement('div');
-          const viewBtn = document.createElement('button'); viewBtn.className='small'; viewBtn.textContent='View'; viewBtn.addEventListener('click', ()=>openAttachment(a.id));
-          const dlBtn = document.createElement('button'); dlBtn.className='small'; dlBtn.textContent='Download'; dlBtn.addEventListener('click', ()=>downloadAttachment(a.id));
-          const delBtn = document.createElement('button'); delBtn.className='small danger'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=>{ if(!confirm('Delete attachment?')) return; data.attachments = data.attachments.filter(x=>x.id!==a.id); saveData(); addAudit('attachment.delete','attachment',a.id,`Deleted attachment ${a.filename}`); renderReport('receiptsFolder'); });
-          actions.appendChild(viewBtn); actions.appendChild(dlBtn); actions.appendChild(delBtn);
-          row.appendChild(thumb); row.appendChild(meta); row.appendChild(actions);
-          div.appendChild(row);
-        });
-        reportContent.appendChild(div);
+        const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
+        const rows = arr.filter(tx=>tx.vatApplied).map(tx=>`<div>${tx.date} — ${tx.description} — VAT: ₦ ${fmt(tx.vatAmount)}</div>`).join('');
+        reportContent.innerHTML = `<h4>VAT Report</h4>${rows || '<div>No VAT transactions</div>'}`;
+      } else if(name === 'whtPayable' || name === 'whtReceivable'){
+        const arr = (data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz]) || [];
+        const rows = arr.filter(tx=>tx.whtApplied).map(tx=>`<div>${tx.date} — ${tx.description} — WHT: ₦ ${fmt(tx.whtAmount)} (${tx.whtRate}%)</div>`).join('');
+        reportContent.innerHTML = `<h4>WHT ${name==='whtPayable' ? 'Payable' : 'Receivable'}</h4>${rows || '<div>No WHT transactions</div>'}`;
+      } else if(name==='profitSnapshot'){
+        reportContent.innerHTML = `<h4>Profit Snapshot</h4>` + plSnapshotDiv.innerHTML;
+      } else if(name==='inventoryReport'){
+        const rows = (biz.inventory||[]).map(it=>`<div>${it.name} — qty: ${it.qty} — avgCost: ₦ ${fmt(it.avgCost)}</div>`).join('');
+        reportContent.innerHTML = `<h4>Inventory Report</h4>${rows||'<div>No inventory</div>'}`;
+      } else if(name==='assetsReport'){
+        const rows = (biz.assets||[]).map(a=>`<div>${a.name} — cost: ₦ ${fmt(a.cost)} — purchased: ${a.purchaseDate} ${a.disposed ? ' — disposed: '+a.disposalDate : ''}</div>`).join('');
+        reportContent.innerHTML = `<h4>Fixed Assets</h4>${rows||'<div>No assets</div>'}`;
+      } else if(name==='auditTrail'){
+        const rows = (data.audit||[]).map(a=>`<div>${a.timestamp} — ${a.userId||''} — ${a.actionType} — ${a.details}</div>`).join('');
+        reportContent.innerHTML = `<h4>Audit Trail</h4>${rows||'<div>No audit entries</div>'}`;
+      } else if(name==='receiptsFolder'){
+        const atts = getAttachmentsForBiz(selectedBiz);
+        const rows = atts.map(a=>`<div><a href="#" data-id="${a.id}" class="att-link">${a.filename}</a> — uploaded: ${a.timestamp}</div>`).join('');
+        reportContent.innerHTML = `<h4>Receipts</h4>${rows || '<div>No attachments</div>'}`;
+        document.querySelectorAll('.att-link').forEach(el=>el.addEventListener('click', (e)=>{ e.preventDefault(); const id = el.dataset.id; openAttachment(id); }));
       }
     }
 
-    function downloadAttachment(attId){
-      const a = data.attachments.find(x=>x.id===attId);
-      if(!a) return alert('Attachment not found');
-      const link = document.createElement('a');
-      link.href = a.dataUrl;
-      link.download = a.filename;
-      link.click();
-    }
+    // Utility: convert all transactions across users? For now render current user's ledger (as designed)
+    // initialize some UI defaults
+    txnDate.value = today();
 
-    function computePLSnapshot(biz){
-      const txnsAll = gatherAllTxnsForBiz(biz.id);
-      let revenue=0,cogs=0,expenses=0;
-      txnsAll.forEach(tx => {
-        if(tx.action === 'InventorySale' || (tx.accountName && tx.accountName.toLowerCase().includes('sales')) ) revenue += Number(tx.netAmount || tx.amount || 0);
-        if(tx.cogs) cogs += Number(tx.cogs||0);
-        if(tx.accountName && tx.accountName.toLowerCase().includes('cogs')) cogs += Number(tx.amount||0);
-        if(tx.accountName && tx.accountName.toLowerCase().includes('expense')) expenses += Number(tx.amount||0);
-        if(tx.action === 'Expense') expenses += Number(tx.amount||0);
-      });
-      const gross = revenue - cogs;
-      const operating = gross - expenses;
-      return { revenue, cogs, expenses, gross, operating };
-    }
-
-    function computeTaxReconciliation(biz){
-      // For simplicity: Taxable profit = operating profit adjusted for disallowables and non-taxable items
-      const txns = gatherAllTxnsForBiz(biz.id);
-      let revenue = 0, expenses = 0, disallowable = 0, nonTaxableIncome = 0, cogs = 0;
-      txns.forEach(tx=>{
-        if(tx.action === 'InventorySale' || (tx.accountName && /sales/i.test(tx.accountName))) revenue += Number(tx.netAmount || tx.amount || 0);
-        if(tx.cogs) cogs += Number(tx.cogs||0);
-        if(tx.accountName && /cogs/i.test(tx.accountName)) cogs += Number(tx.amount||0);
-        if(tx.accountName && /expense/i.test(tx.accountName)) expenses += Number(tx.amount||0);
-        if(tx.disallowable) disallowable += Number(tx.amount||0);
-        if(tx.nonTaxable) nonTaxableIncome += Number(tx.amount||0);
-      });
-      const grossProfit = revenue - cogs;
-      const operatingProfit = grossProfit - expenses;
-      // taxable profit = operatingProfit - disallowable adjustments? Disallowable are added back => taxable = operatingProfit + disallowable (if expense is disallowable)
-      let taxableProfit = operatingProfit + disallowable; // nonTaxableIncome should be excluded from revenue earlier, but conservatively we add back disallowable
-      // subtract loss brought forward and capital brought forward and CA carryforward?
-      taxableProfit = taxableProfit - (biz.lossBroughtForward || 0);
-      // tax before credits:
-      const taxRate = (biz.citEnabled) ? Number(biz.citRate||0)/100 : 0;
-      const taxBeforeCredits = taxableProfit > 0 ? taxableProfit * taxRate : 0;
-      // WHT receivable
-      const wht = gatherWHT(biz.id);
-      const whtReceivable = wht.receivable || 0;
-      // apply CA carryforward (deduction)
-      const caCF = Number(biz.caCarryForward || 0);
-      // tax payable = taxBeforeCredits - whtReceivable - (caCF * taxRate?) We'll treat CA as reduction to taxable profit directly by applying CA up to taxableProfit
-      let taxAfterCA = taxBeforeCredits;
-      // apply CA: we subtract CA amount from taxableProfit and recompute taxBeforeCredits equivalently; simpler: reduce taxAfterCA by (caCF * taxRate)
-      taxAfterCA = Math.max(0, taxAfterCA - (caCF * taxRate));
-      let taxPayable = Math.max(0, taxAfterCA - whtReceivable);
-      return { taxableProfit, taxBeforeCredits, whtReceivable, taxPayable };
-    }
-
-    function gatherVAT(bizId){
-      const txns = gatherAllTxnsForBiz(bizId);
-      let collected = 0, paid = 0;
-      txns.forEach(tx=>{
-        if(tx.vatAmount) {
-          if(tx.action === 'InventorySale' || tx.accountName && /sales/i.test(tx.accountName)) collected += Number(tx.vatAmount||0);
-          else paid += Number(tx.vatAmount||0);
-        }
-      });
-      return { totalCollected: collected, totalPaid: paid, net: collected - paid };
-    }
-
-    function gatherWHT(bizId){
-      const txns = gatherAllTxnsForBiz(bizId);
-      let payable = 0, receivable = 0;
-      const details = [];
-      txns.forEach(tx=>{
-        if(tx.whtAmount){
-          // classify: if transaction is expense (we withheld on payment to vendor) it's payable; if transaction is revenue where payer withheld, it's receivable
-          if(tx.action === 'Expense' || (tx.accountName && /expense|cogs/i.test(tx.accountName))) {
-            payable += Number(tx.whtAmount||0);
-            details.push({ txnId: tx.id, date: tx.date, whtAmount: Number(tx.whtAmount||0), accountName: tx.accountName });
-          } else {
-            // treat as receivable (credit)
-            receivable += Number(tx.whtAmount||0);
-            details.push({ txnId: tx.id, date: tx.date, whtAmount: Number(tx.whtAmount||0), accountName: tx.accountName });
-          }
-        }
-      });
-      return { payable, receivable, details };
-    }
-
-    function gatherAllTxnsForBiz(bizId){
-      let all=[];
-      for(const uid of Object.keys(data.transactions||{})){
-        if(data.transactions[uid] && data.transactions[uid][bizId]) all = all.concat(data.transactions[uid][bizId]);
-      }
-      return all.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-    }
-
-    // totals & tax summary rendering below ledger
-    function renderTotalsAndTaxSummary(){
-      const biz = findBiz(selectedBiz);
-      if(!biz) return;
-      const txns = gatherAllTxnsForBiz(biz.id);
-      let totalAmount=0,totalVat=0,totalWht=0,totalPaye=0;
-      txns.forEach(tx => {
-        totalAmount += Number(tx.netAmount || tx.amount || 0);
-        totalVat += Number(tx.vatAmount||0);
-        totalWht += Number(tx.whtAmount||0);
-        totalPaye += Number(tx.payeAmount||0);
-      });
-      totalsSummaryDiv.innerHTML = `<div>Total transactions amount: ₦${fmt(totalAmount)} | VAT total: ₦${fmt(totalVat)} | WHT total: ₦${fmt(totalWht)} | PAYE total: ₦${fmt(totalPaye)}</div>`;
-      const recon = computeTaxReconciliation(biz);
-      taxSummaryDiv.innerHTML = `<div><strong>Tax reconciliation (summary):</strong> Taxable profit: ₦${fmt(recon.taxableProfit)} | Tax before credits: ₦${fmt(recon.taxBeforeCredits)} | WHT receivable: ₦${fmt(recon.whtReceivable)} | Tax payable after credits: ₦${fmt(recon.taxPayable)}</div>`;
-    }
-
-    // render ledger UI and quick panels
-    function renderAll(){
-      refreshSelectors();
-      ensureSelection();
-      populateAccountSelect();
-      renderLedger();
-      renderQuickPanels();
-    }
-
-    function renderQuickPanels(){
-      const biz = findBiz(selectedBiz);
-      inventoryListDiv.innerHTML=''; assetListDiv.innerHTML=''; plSnapshotDiv.innerHTML='';
-      if(!biz) return;
-      // inventory quick
-      const inv = biz.inventory || [];
-      if(!inv.length) inventoryListDiv.innerHTML = '<div>No inventory items</div>'; else {
-        const tbl = document.createElement('table'); tbl.className='ledger-table';
-        tbl.innerHTML = '<thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th></tr></thead>';
-        const tb = document.createElement('tbody');
-        inv.forEach(i => { const r = document.createElement('tr'); r.innerHTML = `<td>${i.name}</td><td>${fmt(i.qty)}</td><td>${fmt(i.avgCost)}</td>`; tb.appendChild(r); });
-        tbl.appendChild(tb); inventoryListDiv.appendChild(tbl);
-      }
-      // assets quick
-      const assets = biz.assets || [];
-      if(!assets.length) assetListDiv.innerHTML = '<div>No assets</div>'; else {
-        const tbl = document.createElement('table'); tbl.className='ledger-table';
-        tbl.innerHTML = '<thead><tr><th>Asset</th><th>Cost</th><th>Disposed</th></tr></thead>';
-        const tb = document.createElement('tbody');
-        assets.forEach(a => { const r = document.createElement('tr'); r.innerHTML = `<td>${a.name}</td><td>${fmt(a.cost)}</td><td>${a.disposed? 'Yes':'No'}</td>`; tb.appendChild(r); });
-        tbl.appendChild(tb); assetListDiv.appendChild(tbl);
-      }
-      // P&L quick
-      const snap = computePLSnapshot(biz);
-      plSnapshotDiv.innerHTML = `<div>Revenue: ₦${fmt(snap.revenue)}</div><div>COGS: ₦${fmt(snap.cogs)}</div><div>Expenses: ₦${fmt(snap.expenses)}</div><div>Operating profit: ₦${fmt(snap.operating)}</div>`;
-    }
-
-    // Accounts modal renderer
-    function renderAccounts(){
-      accountsList.innerHTML = '';
-      const b = findBiz(selectedBiz);
-      if(!b) return;
-      if(!b.accounts.length) accountsList.innerHTML = '<div>No accounts</div>';
-      b.accounts.forEach(a => {
-        const row = document.createElement('div'); row.className='account-row';
-        const left = document.createElement('div'); left.innerHTML = `<strong>${a.name}</strong> <span class="small-muted">(${a.category})</span>`;
-        const right = document.createElement('div');
-        const dis = document.createElement('label'); dis.style.marginRight='8px'; dis.innerHTML = `<input type="checkbox" data-acct="${a.id}" class="acct-dis" ${a.disallowableDefault ? 'checked':''} /> Disallowable`;
-        const nt = document.createElement('label'); nt.innerHTML = `<input type="checkbox" data-acct="${a.id}" class="acct-non" ${a.nonTaxableDefault ? 'checked':''} /> Non-taxable`;
-        const del = document.createElement('button'); del.className='small danger'; del.textContent='Delete'; del.addEventListener('click', ()=>{ if(!confirm('Delete account?')) return; b.accounts = b.accounts.filter(x=>x.id!==a.id); saveData(); populateAccountSelect(); renderAccounts(); addAudit('account.delete','account',a.id,`Deleted account ${a.name}`); });
-        right.appendChild(dis); right.appendChild(nt); right.appendChild(del);
-        row.appendChild(left); row.appendChild(right);
-        accountsList.appendChild(row);
-      });
-      // wire checkboxes
-      document.querySelectorAll('.acct-dis').forEach(cb => cb.addEventListener('change', (e)=>{ const id = e.target.dataset.acct; const acct = findBiz(selectedBiz).accounts.find(x=>x.id===id); if(acct) acct.disallowableDefault = !!e.target.checked; saveData(); }));
-      document.querySelectorAll('.acct-non').forEach(cb => cb.addEventListener('change', (e)=>{ const id = e.target.dataset.acct; const acct = findBiz(selectedBiz).accounts.find(x=>x.id===id); if(acct) acct.nonTaxableDefault = !!e.target.checked; saveData(); }));
-    }
-
-    function renderBizContacts(b){
-      bizContactsList.innerHTML = '';
-      (b.contacts||[]).forEach(c => {
-        const row = document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.marginBottom='6px';
-        row.innerHTML = `<div>${c.name} <span class="small-muted">(${c.type})</span></div>`;
-        const del = document.createElement('button'); del.className='small danger'; del.textContent='Delete'; del.addEventListener('click', ()=>{ if(!confirm('Delete contact?')) return; b.contacts = b.contacts.filter(x=>x.id!==c.id); saveData(); renderBizContacts(b); addAudit('contact.delete','contact',c.id,`Deleted contact ${c.name}`); });
-        row.appendChild(del);
-        bizContactsList.appendChild(row);
-      });
-    }
-
-    // small helper: prompt attach to a txn (already used above)
-    function promptAttachToTxnByUser(txnId){
-      promptAttachToTxn(txnId);
-    }
-
-    // helpers for attachments in addReceipt flow (not used directly)
-    function readFileAsDataUrl(file){ return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = ()=>resolve(r.result); r.onerror = reject; r.readAsDataURL(file); }); }
-
-    // initial tab render
-    renderTab();
-
-    // expose renderReport globally for tab buttons
-    window.renderReport = renderReport;
+    // expose functions to global for debugging (optional)
+    window.ntc = { data, saveData, loadData };
 
   </script>
 </body>
-  </html>
+          </html>
