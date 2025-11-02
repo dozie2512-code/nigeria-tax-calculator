@@ -1418,7 +1418,221 @@
     // small bindings for page load
     populateAccountSelect();
     renderFeatureVisibility();
+// --- WHT payable + PAYE supplement for tax summary ---
+(function(){
+  function computeWHT(txn, bizDefaultRatePct){
+    const ratePct = Number(txn.whtRate ?? bizDefaultRatePct ?? 0);
+    const rate = ratePct / 100;
+    const basis = (txn.whtBasis || 'gross').toString().toLowerCase();
+    const amount = Number(txn.amount || 0);
 
+    let gross = 0, net = 0, wht = 0;
+    if(basis === 'net'){
+      if(rate >= 1) {
+        gross = amount; wht = 0; net = amount;
+      } else {
+        gross = amount / (1 - rate || 1);
+        wht = gross - amount;
+        net = amount;
+      }
+    } else {
+      gross = amount;
+      wht = gross * rate;
+      net = gross - wht;
+    }
+    return { gross, net, wht, ratePct, rate };
+  }
+
+  function computeTaxFromBands(amount){
+    let remaining = Number(amount || 0);
+    let prevLimit = 0;
+    let tax = 0;
+    for(const band of PAYE_BANDS){
+      const upTo = band.upTo;
+      const bandCap = (upTo === Infinity) ? Infinity : upTo;
+      const taxableInBand = Math.max(0, Math.min(remaining, bandCap - prevLimit));
+      if(taxableInBand > 0){
+        tax += taxableInBand * band.rate;
+      }
+      prevLimit = bandCap;
+      if(remaining <= prevLimit) break;
+    }
+    return tax;
+  }
+
+  function computePAYEForBusiness(selectedUserId, selectedBizId){
+    const result = { totalPAYE:0, details:[] };
+    if(!selectedUserId || !selectedBizId) return result;
+    const b = findBiz(selectedBizId);
+    if(!b) return result;
+    const txns = ((data.transactions || {})[selectedUserId] || {})[selectedBizId] || [];
+    const salaryByContact = {};
+    for(const t of txns){
+      const isSalary = !!t.salary || !!t.txnSalary || !!t.isSalary;
+      if(!isSalary) continue;
+      const contactName = (t.contact || '').trim() || '(unspecified)';
+      salaryByContact[contactName] = salaryByContact[contactName] || { gross:0, txns:[] };
+      salaryByContact[contactName].gross += Number(t.amount || 0);
+      salaryByContact[contactName].txns.push(t);
+    }
+
+    for(const contactName of Object.keys(salaryByContact)){
+      const gross = salaryByContact[contactName].gross || 0;
+      let statutory = { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
+      const contactObj = (b.contacts || []).find(c => (c.name || '').trim() === contactName);
+      if(contactObj && contactObj.statutory){
+        statutory = Object.assign({}, statutory, contactObj.statutory);
+      } else {
+        statutory = Object.assign({}, statutory, b.statutoryDeductions || {});
+      }
+      const totalDeductions = (Number(statutory.pension||0) + Number(statutory.rent||0) + Number(statutory.life||0) + Number(statutory.mortgage||0) + Number(statutory.nhf||0));
+      const taxable = Math.max(0, gross - totalDeductions);
+      const paye = computeTaxFromBands(taxable);
+      result.details.push({ contact: contactName, gross, totalDeductions, taxable, paye });
+      result.totalPAYE += paye;
+    }
+
+    return result;
+  }
+
+  function computeWHTTotals(selectedUserId, selectedBizId){
+    const totals = { receivable:0, payable:0, byTransaction: [] };
+    if(!selectedUserId || !selectedBizId) return totals;
+    const b = findBiz(selectedBizId);
+    const defaultWhtRate = b ? Number(b.whtRate || DEFAULTS.whtRate) : DEFAULTS.whtRate;
+    const txns = ((data.transactions || {})[selectedUserId] || {})[selectedBizId] || [];
+    for(const t of txns){
+      const whtApplied = !!t.wht || !!t.whtApplied;
+      if(!whtApplied) continue;
+      const calc = computeWHT(t, defaultWhtRate);
+      const action = (t.action || '').toString().toLowerCase();
+      if(action === 'revenue' || action === 'sales' || action === 'income'){
+        totals.receivable += calc.wht;
+      } else if(action === 'expense' || action === 'purchase' || action === 'inventorypurchase' || action === 'inventorysale' || action === 'fixedassetpurchase' || action === 'fixedassetdisposal'){
+        totals.payable += calc.wht;
+      } else {
+        if(Number(t.amount || 0) >= 0) totals.receivable += calc.wht;
+        else totals.payable += calc.wht;
+      }
+      totals.byTransaction.push(Object.assign({ txnId: t.id || null }, calc));
+    }
+    return totals;
+  }
+
+  function makeRow(label, value){
+    const div = document.createElement('div');
+    div.style.display = 'flex';
+    div.style.justifyContent = 'space-between';
+    div.style.gap = '8px';
+    div.style.padding = '4px 0';
+    const l = document.createElement('div'); l.textContent = label;
+    const v = document.createElement('div'); v.textContent = typeof value === 'number' ? '₦ ' + fmt(value) : value;
+    div.appendChild(l); div.appendChild(v);
+    return div;
+  }
+
+  function updateTaxSummaryAugmentation(){
+    try {
+      const container = taxSummaryDiv;
+      if(!container) return;
+      const existing = container.querySelector('#__wht_paye_block');
+      if(existing) existing.remove();
+
+      const whtTotals = computeWHTTotals(selectedUser, selectedBiz);
+      const payeTotals = computePAYEForBusiness(selectedUser, selectedBiz);
+
+      const block = document.createElement('div');
+      block.id = '__wht_paye_block';
+      block.style.marginTop = '8px';
+      block.style.paddingTop = '8px';
+      block.style.borderTop = '1px dashed #e6e6e6';
+      const title = document.createElement('h4');
+      title.textContent = 'WHT & PAYE Summary';
+      title.style.margin = '4px 0';
+      block.appendChild(title);
+
+      block.appendChild(makeRow('WHT receivable (total):', whtTotals.receivable));
+      block.appendChild(makeRow('WHT payable (total):', whtTotals.payable));
+      const netWHT = (Number(whtTotals.payable || 0) - Number(whtTotals.receivable || 0));
+      block.appendChild(makeRow('WHT net (payable - receivable):', netWHT));
+
+      const payeTitle = document.createElement('div');
+      payeTitle.style.marginTop = '6px';
+      payeTitle.style.fontWeight = '600';
+      payeTitle.textContent = 'PAYE (computed using statutory deductions & PAYE bands)';
+      block.appendChild(payeTitle);
+
+      if(payeTotals.details.length === 0){
+        block.appendChild(makeRow('PAYE (total):', 0));
+        const note = document.createElement('small');
+        note.className = 'small-note';
+        note.textContent = 'No salary transactions found for selected business/user.';
+        block.appendChild(note);
+      } else {
+        for(const d of payeTotals.details){
+          const label = `${d.contact} — PAYE on taxable ${fmt(d.taxable)} (gross ${fmt(d.gross)}, deductions ${fmt(d.totalDeductions)})`;
+          block.appendChild(makeRow(label + ':', d.paye));
+        }
+        block.appendChild(makeRow('PAYE total:', payeTotals.totalPAYE));
+      }
+
+      const nodes = Array.from(container.children);
+      let insertAfter = null;
+      for(const n of nodes){
+        if((n.textContent || '').toUpperCase().includes('VAT')){
+          insertAfter = n;
+          break;
+        }
+      }
+      if(insertAfter && insertAfter.parentNode === container){
+        insertAfter.insertAdjacentElement('afterend', block);
+      } else {
+        container.appendChild(block);
+      }
+    } catch(err){
+      console.error('WHT/PAYE augmentation failed', err);
+    }
+  }
+
+  function initWhtPayeAugmentation(){
+    updateTaxSummaryAugmentation();
+
+    if(window.MutationObserver){
+      const obs = new MutationObserver(debounce(function(){
+        updateTaxSummaryAugmentation();
+      }, 150));
+      obs.observe(taxSummaryDiv, { childList: true, subtree: true, characterData: true });
+    }
+
+    ['userSelect','businessSelect'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.addEventListener('change', ()=> setTimeout(updateTaxSummaryAugmentation, 120));
+    });
+
+    const originalRenderAll = window.renderAll;
+    if(typeof originalRenderAll === 'function'){
+      window.renderAll = function(){
+        try { originalRenderAll.apply(this, arguments); } catch(e){ console.error(e); }
+        setTimeout(updateTaxSummaryAugmentation, 120);
+      };
+    }
+  }
+
+  function debounce(fn, wait){
+    let t;
+    return function(){
+      clearTimeout(t);
+      const args = arguments; const ctx = this;
+      t = setTimeout(()=> fn.apply(ctx, args), wait || 100);
+    };
+  }
+
+  if(document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(initWhtPayeAugmentation, 120);
+  } else {
+    document.addEventListener('DOMContentLoaded', ()=> setTimeout(initWhtPayeAugmentation, 120));
+  }
+})();
   </script>
 </body>
   </html>
