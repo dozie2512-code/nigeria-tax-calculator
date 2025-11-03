@@ -1465,33 +1465,62 @@
     if(!selectedUserId || !selectedBizId) return result;
     const b = findBiz(selectedBizId);
     if(!b) return result;
-    const txns = ((data.transactions || {})[selectedUserId] || {})[selectedBizId] || [];
-    const salaryByContact = {};
-    for(const t of txns){
-      const isSalary = !!t.salary || !!t.txnSalary || !!t.isSalary;
-      if(!isSalary) continue;
-      const contactName = (t.contact || '').trim() || '(unspecified)';
-      salaryByContact[contactName] = salaryByContact[contactName] || { gross:0, txns:[] };
-      salaryByContact[contactName].gross += Number(t.amount || 0);
-      salaryByContact[contactName].txns.push(t);
+    const rows = allTransactionsForBiz(selectedBizId);
+
+    // Group salary/PAYE-marked transactions by contact
+    const byContact = {};
+    for(const t of rows){
+      // accept both 'paye' and 'salary' flags (backcompat)
+      if(!t.paye && !t.salary) continue;
+      const contactName = t.contact || 'Unknown';
+      byContact[contactName] = byContact[contactName] || [];
+      byContact[contactName].push(t);
     }
 
-    for(const contactName of Object.keys(salaryByContact)){
-      const gross = salaryByContact[contactName].gross || 0;
-      let statutory = { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
-      const contactObj = (b.contacts || []).find(c => (c.name || '').trim() === contactName);
+    for(const contactName of Object.keys(byContact)){
+      const txns = byContact[contactName];
+      const totalGross = txns.reduce((s,tx) => s + Number(tx.amount || 0), 0);
+
+      // Determine months observed in the salary transactions (unique yyyy-mm)
+      const monthsSet = new Set();
+      for(const tx of txns){
+        if(tx.date){
+          monthsSet.add((tx.date || '').slice(0,7));
+        }
+      }
+      const monthsObserved = Math.max(1, monthsSet.size);
+
+      // Annualize gross if monthsObserved < 12
+      const annualGross = (monthsObserved >= 12) ? totalGross : totalGross * (12 / monthsObserved);
+
+      // Statutory deductions: per-contact statutory if present, otherwise business-level statutoryDeductions
+      let statutory = Object.assign({}, b.statutoryDeductions || {});
+      const contactObj = (b.contacts || []).find(c => (c.name||'').toString() === contactName);
       if(contactObj && contactObj.statutory){
         statutory = Object.assign({}, statutory, contactObj.statutory);
-      } else {
-        statutory = Object.assign({}, statutory, b.statutoryDeductions || {});
       }
-      const totalDeductions = (Number(statutory.pension||0) + Number(statutory.rent||0) + Number(statutory.life||0) + Number(statutory.mortgage||0) + Number(statutory.nhf||0));
-      const taxable = Math.max(0, gross - totalDeductions);
-      const paye = computeTaxFromBands(taxable);
-      result.details.push({ contact: contactName, gross, totalDeductions, taxable, paye });
-      result.totalPAYE += paye;
+      const totalDeductions = Number(statutory.pension||0) + Number(statutory.rent||0) + Number(statutory.life||0) + Number(statutory.mortgage||0) + Number(statutory.nhf||0);
+
+      // Taxable annual income for PAYE bands
+      const taxableAnnual = Math.max(0, annualGross - totalDeductions);
+
+      // Compute PAYE using the PIT bands (use computeTaxUsingBands which is the PIT band function)
+      const annualPaye = computeTaxUsingBands(taxableAnnual);
+
+      result.details.push({
+        contact: contactName,
+        monthsObserved,
+        totalGross: round2(totalGross),
+        annualGross: round2(annualGross),
+        totalDeductions: round2(totalDeductions),
+        taxableAnnual: round2(taxableAnnual),
+        annualPaye: round2(annualPaye)
+      });
+
+      result.totalPAYE += annualPaye;
     }
 
+    result.totalPAYE = round2(result.totalPAYE);
     return result;
   }
 
@@ -1559,7 +1588,7 @@
       const payeTitle = document.createElement('div');
       payeTitle.style.marginTop = '6px';
       payeTitle.style.fontWeight = '600';
-      payeTitle.textContent = 'PAYE (computed using statutory deductions & PAYE bands)';
+      payeTitle.textContent = 'PAYE (annualized, computed using PIT bands)';
       block.appendChild(payeTitle);
 
       if(payeTotals.details.length === 0){
@@ -1570,8 +1599,8 @@
         block.appendChild(note);
       } else {
         for(const d of payeTotals.details){
-          const label = `${d.contact} — PAYE on taxable ${fmt(d.taxable)} (gross ${fmt(d.gross)}, deductions ${fmt(d.totalDeductions)})`;
-          block.appendChild(makeRow(label + ':', d.paye));
+          const label = `${d.contact} — PAYE on taxable annual ${fmt(d.taxableAnnual)} (gross ${fmt(d.totalGross)}, months ${d.monthsObserved}, annualized ${fmt(d.annualGross)}, deductions ${fmt(d.totalDeductions)})`;
+          block.appendChild(makeRow(label + ':', d.annualPaye));
         }
         block.appendChild(makeRow('PAYE total:', payeTotals.totalPAYE));
       }
