@@ -26,7 +26,7 @@
     .actions { display:flex; gap:6px; }
     .danger { color:var(--danger); border-color:var(--danger); background: #fff5f5; }
     .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.25); z-index:50; }
-    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); box-shadow:0 8px 30px rgba(0,0,0,0.08);}
+    .modal { display:none; position:fixed; left:50%; top:8%; transform:translateX(-50%); background:white; border:1px solid #cfcfcf; padding:16px; z-index:51; border-radius:8px; width:min(960px,96vw); max-height:80vh; overflow:auto; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
     .spacer { flex:1 1 auto; }
     small.note { color:var(--muted); display:block; margin-top:6px; }
@@ -50,7 +50,7 @@
     .small-note { font-size:0.85rem; color:var(--muted); }
     .auth-bar { margin-left:auto; display:flex; gap:8px; align-items:center; }
   </style>
-  <!-- jsPDF CDN for PDF export -->
+  <!-- jsPDF CDN for PDF export (kept) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
@@ -136,12 +136,12 @@
 
         <!-- WHT applied -->
         <label class="inline-label">
-          <input type="checkbox" id="txnWht" /> WHT applied (receivable)
+          <input type="checkbox" id="txnWht" /> WHT applied
         </label>
         <label id="txnWhtBasisLabel" style="display:none;">Basis:
           <select id="txnWhtBasis">
             <option value="gross">Gross</option>
-            <option value="net">Net</option>
+            <option value="net">Net (excl. VAT)</option>
           </select>
         </label>
         <label id="txnWhtRateLabel" style="display:none;">Rate (%) <input type="number" id="txnWhtRate" class="smallInput" min="0" step="0.01" /></label>
@@ -157,6 +157,7 @@
         <label>Receipt: <input type="file" id="txnReceipt" /></label>
 
         <button class="primary" id="btnAddTxn">Add</button>
+        <button class="small" id="btnCancelEdit" style="display:none;">Cancel Edit</button>
       </div>
 
       <div id="inventorySubform" style="margin-top:10px; display:none;" class="panel inventory-panel">
@@ -236,7 +237,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -289,6 +290,14 @@
   </main>
 
   <div id="modalOverlay" class="modalOverlay"></div>
+
+  <div id="txnModal" class="modal">
+    <h3>Transaction details</h3>
+    <div id="txnDetails"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+      <button id="txnClose">Close</button>
+    </div>
+  </div>
 
   <div id="userModal" class="modal">
     <h3 id="userModalTitle">Add User</h3>
@@ -417,7 +426,6 @@
     </div>
   </div>
 
-  <!-- Auth modal omitted for brevity in logic - kept in initial seed and simple flows -->
   <footer class="muted" style="margin-top:16px;">GitHub Copilot Chat Assistant — implemented per request (attachments and audit stored in localStorage)</footer>
 
   <script>
@@ -440,8 +448,7 @@
     let selectedUser = null;
     let selectedBiz = null;
     let activeTab = 'ledger';
-    let inventoryHistory = [];
-    let assetHistory = [];
+    let editingTxnId = null;
 
     // DOM refs
     const userSelect = document.getElementById('userSelect');
@@ -470,7 +477,7 @@
     const txnContact = document.getElementById('txnContact');
     const txnReceipt = document.getElementById('txnReceipt');
     const btnAddTxn = document.getElementById('btnAddTxn');
-    const mainTxnForm = document.getElementById('mainTxnForm');
+    const btnCancelEdit = document.getElementById('btnCancelEdit');
 
     const inventorySubform = document.getElementById('inventorySubform');
     const invItemSelect = document.getElementById('invItemSelect');
@@ -515,6 +522,10 @@
     const reportContent = document.getElementById('reportContent');
 
     const modalOverlay = document.getElementById('modalOverlay');
+    const txnModal = document.getElementById('txnModal');
+    const txnDetails = document.getElementById('txnDetails');
+    const txnClose = document.getElementById('txnClose');
+
     const userModal = document.getElementById('userModal');
     const userModalTitle = document.getElementById('userModalTitle');
     const userName = document.getElementById('userName');
@@ -647,8 +658,9 @@
       };
       data.transactions[u] = {};
       data.transactions[u][b] = [
-        { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', vatAmount: (150000*DEFAULTS.vatRate/100), whtApplied:false, whtAmount:0, whtRate:0, whtBasis:'gross', paye:false, contact:'', receipt:null },
-        { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', vatAmount:0, whtApplied:false, whtAmount:0, whtRate:0, whtBasis:'gross', paye:true, contact:'John Employee', receipt:null }
+        // example: revenue with exclusive VAT and WHT not set
+        { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', vatAmount: (150000*DEFAULTS.vatRate/100), whtApplied:false, whtRate:0, whtBasis:'gross', whtAmount:0, paye:false, payeAmount:0, contact:'Customer A', receiptId:null },
+        { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', vatAmount:0, whtApplied:false, whtRate:0, whtBasis:'gross', whtAmount:0, paye:true, payeAmount: computePayeForSalary(50000, null, findBiz(b)), contact:'John Employee', receiptId:null }
       ];
       addAudit('seed','system','',`Seeded demo data`);
       saveData();
@@ -666,8 +678,9 @@
     function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; window.scrollTo({top:0}); }
     function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; }
     modalOverlay.addEventListener('click', ()=> {
-      [userModal, businessModal, accountsModal].forEach(m => { if(m.style.display==='block') closeModal(m); });
+      [userModal, businessModal, accountsModal, txnModal].forEach(m => { if(m.style.display==='block') closeModal(m); });
     });
+    txnClose.addEventListener('click', ()=> closeModal(txnModal));
 
     // INIT
     loadData();
@@ -702,7 +715,7 @@
           u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked };
           saveData(); addAudit('user.edit','user',u.id,'Edited user');
         } else {
-          const newUser = { id: uid('user'), username, display: userDisplay.value || username, role: userRole.value, isAdmin: userRole.value === 'Admin', permissions: { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked }, passwordHash:null };
+          const newUser = { id: uid('user'), username, display: userDisplay.value || username, role: userRole.value, isAdmin: userRole.value === 'Admin', permissions: { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked }, passwordHash: null };
           data.users.push(newUser);
           for(const b of data.businesses){ data.transactions[newUser.id] = data.transactions[newUser.id] || {}; data.transactions[newUser.id][b.id] = data.transactions[newUser.id][b.id] || []; }
           addAudit('user.add','user',newUser.id,'Added user');
@@ -843,17 +856,7 @@
         txnWhtBasisLabel.style.display = show ? 'inline-flex' : 'none';
       } );
       btnAddTxn.addEventListener('click', handleAddTransaction);
-
-      // inventory
-      btnAddInv.addEventListener('click', handleInventoryAction);
-      btnInvCancel.addEventListener('click', ()=>{ txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
-      btnInvUndo.addEventListener('click', handleUndoInventory);
-
-      // assets
-      btnAddAsset.addEventListener('click', handleAddAsset);
-      btnDisposeAsset.addEventListener('click', handleDisposeAsset);
-      btnAssetCancel.addEventListener('click', ()=>{ txnAction.value=''; assetSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
-      btnAssetUndo.addEventListener('click', handleUndoAsset);
+      btnCancelEdit.addEventListener('click', ()=> { editingTxnId = null; btnAddTxn.textContent='Add'; btnCancelEdit.style.display='none'; resetForms(); });
 
       // ledger search
       document.getElementById('btnSearch').addEventListener('click', renderLedger);
@@ -968,6 +971,7 @@
       txnReceipt.value = '';
       invNewName.value=''; invQty.value=''; invUnitPrice.value=''; invContact.value=''; invReceipt.value='';
       assetName.value=''; assetCost.value=''; assetPurchaseDate.value=''; assetLife.value=''; assetCA.value=''; assetDisposalDate.value=''; assetDisposalProceeds.value=''; assetContact.value=''; assetReceipt.value='';
+      editingTxnId = null; btnAddTxn.textContent='Add'; btnCancelEdit.style.display='none';
     }
 
     function openUserModal(editId){
@@ -998,641 +1002,429 @@
 
     function deleteBusiness(id){
       data.businesses = data.businesses.filter(b=>b.id!==id);
-      for(const uid of Object.keys(data.transactions||{})){ if(data.transactions[uid]) delete data.transactions[uid][id]; }
+      // remove transactions for this biz across users
+      for(const uid of Object.keys(data.transactions || {})){
+        if(data.transactions[uid]) delete data.transactions[uid][id];
+      }
       saveData();
       refreshSelectors();
       ensureSelection();
-      populateAccountSelect();
       renderAll();
     }
 
+    // TAX / COMPUTE HELPERS
+
+    function computeVatAmount(amount, vatType, vatRate){
+      vatRate = Number(vatRate || 0);
+      if(vatType === 'none' || !vatRate) return 0;
+      if(vatType === 'exclusive'){
+        return round2(amount * vatRate / 100);
+      } else if(vatType === 'inclusive'){
+        // amount includes VAT -> extract VAT
+        const net = amount / (1 + vatRate/100);
+        return round2(amount - net);
+      }
+      return 0;
+    }
+
+    function round2(n){ return Math.round((n||0) * 100) / 100; }
+
+    function computeWht(amount, vatAmount, basis, rate){
+      rate = Number(rate || 0);
+      if(!rate) return 0;
+      let base = amount;
+      if(basis === 'net') {
+        base = Math.max(0, amount - (vatAmount || 0));
+      }
+      return round2(base * rate / 100);
+    }
+
+    function computePayeForSalary(amountMonthly, contactName, biz){
+      // amountMonthly is amount for the transaction (assume monthly salary)
+      // compute annual taxable = annual income - statutory deductions (use biz or contact)
+      const annualIncome = Number(amountMonthly || 0) * 12;
+      let deductions = 0;
+      if(biz){
+        deductions += Number(biz.statutoryDeductions?.pension || 0);
+        deductions += Number(biz.statutoryDeductions?.rent || 0);
+        deductions += Number(biz.statutoryDeductions?.life || 0);
+        deductions += Number(biz.statutoryDeductions?.mortgage || 0);
+        deductions += Number(biz.statutoryDeductions?.nhf || 0);
+      }
+      // if contact has statutory, that would be implemented later
+      const taxable = Math.max(0, annualIncome - deductions);
+      let remaining = taxable;
+      let tax = 0;
+      let lower = 0;
+      for(const band of PAYE_BANDS){
+        const upper = band.upTo;
+        const bracket = Math.max(0, Math.min(remaining, upper - lower));
+        if(bracket > 0){
+          tax += bracket * band.rate;
+          remaining -= bracket;
+        }
+        lower = upper;
+        if(remaining <= 0) break;
+      }
+      const annualTax = tax;
+      const monthly = round2(annualTax / 12);
+      return monthly;
+    }
+
+    // TRANSACTION CRUD
+    function handleAddTransaction(){
+      if(!selectedUser || !selectedBiz) return alert('Select user and business');
+      const b = findBiz(selectedBiz);
+      if(!b) return alert('Business not found');
+
+      const date = txnDate.value || today();
+      const action = txnAction.value || 'Revenue';
+      const accountId = txnAccount.value;
+      const acct = findAccount(b, accountId);
+      const accountName = acct ? acct.name : 'Unknown';
+      const description = txnDesc.value || '';
+      const amount = Number(txnAmount.value || 0);
+      const vatType = txnVatType.value || 'none';
+      const vatAmount = computeVatAmount(amount, vatType, b.vatRate);
+      const whtApplied = !!txnWht.checked;
+      const whtRate = Number(txnWhtRate.value || b.whtRate || 0);
+      const whtBasis = txnWhtBasis.value || 'gross';
+      const whtAmount = whtApplied ? computeWht(amount, vatAmount, whtBasis, whtRate) : 0;
+      const paye = !!txnSalary.checked;
+      const payeAmount = paye ? computePayeForSalary(amount, txnContact.value, b) : 0;
+      const contact = txnContact.value || '';
+      const receiptId = null;
+
+      if(editingTxnId){
+        // update
+        const arr = data.transactions[selectedUser][selectedBiz];
+        const idx = arr.findIndex(t=>t.id===editingTxnId);
+        if(idx === -1) return alert('Transaction not found for edit');
+        arr[idx] = { ...arr[idx], date, action, accountId, accountName, accountCategory: acct ? acct.category : '', description, amount, vatType, vatAmount, whtApplied, whtRate, whtBasis, whtAmount, paye, payeAmount, contact, receiptId };
+        addAudit('txn.edit','transaction', arr[idx].id, `Edited transaction ${arr[idx].id}`);
+        saveData();
+        editingTxnId = null;
+        btnAddTxn.textContent = 'Add';
+        btnCancelEdit.style.display='none';
+      } else {
+        const txn = { id: uid('txn'), date, action, accountId, accountName, accountCategory: acct ? acct.category : '', description, amount, vatType, vatAmount, whtApplied, whtRate, whtBasis, whtAmount, paye, payeAmount, contact, receiptId };
+        data.transactions[selectedUser][selectedBiz].push(txn);
+        addAudit('txn.add','transaction', txn.id, `Added transaction ${txn.id}`);
+        saveData();
+      }
+
+      resetForms();
+      renderAll();
+    }
+
+    function handleDeleteTransaction(txnId){
+      if(!confirm('Delete transaction?')) return;
+      const arr = data.transactions[selectedUser][selectedBiz];
+      const idx = arr.findIndex(t=>t.id===txnId);
+      if(idx === -1) return alert('Transaction not found');
+      const removed = arr.splice(idx,1)[0];
+      addAudit('txn.delete','transaction', removed.id, 'Deleted transaction');
+      saveData();
+      renderAll();
+    }
+
+    function handleEditTransaction(txnId){
+      const arr = data.transactions[selectedUser][selectedBiz];
+      const t = arr.find(x=>x.id===txnId);
+      if(!t) return alert('Transaction not found');
+      // load into form
+      editingTxnId = t.id;
+      txnDate.value = t.date || today();
+      txnAction.value = t.action || '';
+      txnAccount.value = t.accountId || (txnAccount.options[0] && txnAccount.options[0].value);
+      txnDesc.value = t.description || '';
+      txnAmount.value = t.amount || 0;
+      txnVatType.value = t.vatType || 'none';
+      txnWht.checked = !!t.whtApplied;
+      txnWhtRate.value = t.whtRate || '';
+      txnWhtBasis.value = t.whtBasis || 'gross';
+      txnSalary.checked = !!t.paye;
+      txnContact.value = t.contact || '';
+      btnAddTxn.textContent = 'Save';
+      btnCancelEdit.style.display='inline-block';
+      renderFeatureVisibility();
+    }
+
+    function handleViewTransaction(txnId){
+      const arr = data.transactions[selectedUser][selectedBiz];
+      const t = arr.find(x=>x.id===txnId);
+      if(!t) return alert('Transaction not found');
+      txnDetails.innerHTML = `
+        <div><strong>Date:</strong> ${t.date}</div>
+        <div><strong>Action:</strong> ${t.action}</div>
+        <div><strong>Account:</strong> ${t.accountName} (${t.accountCategory})</div>
+        <div><strong>Description:</strong> ${t.description}</div>
+        <div><strong>Amount:</strong> ₦${fmt(t.amount)}</div>
+        <div><strong>VAT Type:</strong> ${t.vatType} ${t.vatAmount ? ' — ₦'+fmt(t.vatAmount) : ''}</div>
+        <div><strong>WHT Applied:</strong> ${t.whtApplied ? 'Yes' : 'No'} ${t.whtApplied ? ' — ₦'+fmt(t.whtAmount)+' @'+fmt(t.whtRate)+'% ('+t.whtBasis+')' : ''}</div>
+        <div><strong>PAYE:</strong> ${t.paye ? 'Yes — ₦'+fmt(t.payeAmount)+' (monthly)' : 'No'}</div>
+        <div><strong>Contact:</strong> ${t.contact || ''}</div>
+      `;
+      openModal(txnModal);
+    }
+
+    // Rendering
+    function renderLedger(){
+      ledgerTableBody.innerHTML = '';
+      if(!selectedUser || !selectedBiz) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      const query = (document.getElementById('ledgerSearch').value || '').toLowerCase().trim();
+      const filtered = arr.filter(t => {
+        if(!query) return true;
+        return (t.date||'').toLowerCase().includes(query) ||
+               (t.accountName||'').toLowerCase().includes(query) ||
+               (t.description||'').toLowerCase().includes(query) ||
+               String(t.amount||'').toLowerCase().includes(query) ||
+               (t.contact||'').toLowerCase().includes(query);
+      });
+      filtered.sort((a,b) => new Date(b.date) - new Date(a.date));
+      for(const t of filtered){
+        const tr = document.createElement('tr');
+        const vatTxt = t.vatAmount ? '₦'+fmt(t.vatAmount) + (t.vatType ? ' ('+t.vatType+')' : '') : '-';
+        const whtTxt = t.whtApplied ? '₦'+fmt(t.whtAmount) + ' @'+fmt(t.whtRate)+'%' : '-';
+        const payeTxt = t.paye ? '₦'+fmt(t.payeAmount) : '-';
+        tr.innerHTML = `
+          <td>${t.date}</td>
+          <td>${t.action}</td>
+          <td>${t.accountName||''}</td>
+          <td>${t.description||''}</td>
+          <td>₦${fmt(t.amount||0)}</td>
+          <td>${vatTxt}</td>
+          <td>${whtTxt}</td>
+          <td>${payeTxt}</td>
+          <td>${t.contact||''}</td>
+          <td>${t.receiptId ? '<a href="#">View</a>' : '-'}</td>
+          <td class="actions">
+            <button class="small" data-act="view" data-id="${t.id}">View</button>
+            <button class="small" data-act="edit" data-id="${t.id}">Edit</button>
+            <button class="small danger" data-act="delete" data-id="${t.id}">Delete</button>
+          </td>
+        `;
+        ledgerTableBody.appendChild(tr);
+      }
+
+      // attach event listeners for row actions
+      ledgerTableBody.querySelectorAll('button').forEach(btn => {
+        const id = btn.dataset.id;
+        if(btn.dataset.act === 'view') btn.addEventListener('click', ()=> handleViewTransaction(id));
+        if(btn.dataset.act === 'edit') btn.addEventListener('click', ()=> handleEditTransaction(id));
+        if(btn.dataset.act === 'delete') btn.addEventListener('click', ()=> handleDeleteTransaction(id));
+      });
+    }
+
+    function renderTaxSummary(){
+      taxSummaryDiv.innerHTML = '';
+      const b = findBiz(selectedBiz);
+      if(!b) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      // aggregate
+      let vatPayable = 0;
+      let vatReceivable = 0;
+      let whtPayable = 0;
+      let whtReceivable = 0;
+      let payeTotal = 0;
+      let pitTotal = 0;
+      let citTotal = 0;
+
+      for(const t of arr){
+        // VAT: treat revenue actions as output VAT, purchases as input VAT (simplified by action)
+        if(t.vatAmount){
+          if(t.action === 'Revenue' || t.action === 'InventorySale') vatPayable += t.vatAmount;
+          else vatReceivable += t.vatAmount;
+        }
+        if(t.whtApplied){
+          // if this business is payer or receiver is ambiguous; assume WHT on expenses is WHT withheld by the business (payable to authorities) and WHT on revenue is receivable
+          if(t.action === 'Expense' || t.action === 'FixedAssetPurchase' || t.action === 'InventoryPurchase' || t.action === 'FixedAssetDisposal'){
+            // business withheld WHT on a payment -> WHT payable to authorities (company withheld)
+            whtPayable += t.whtAmount;
+          } else {
+            // on revenue/sales this probably represents WHT received (for customer withholding) -> receivable
+            whtReceivable += t.whtAmount;
+          }
+        }
+        if(t.paye){
+          // PAYE amounts collected (monthly) are shown as liability; sum them
+          payeTotal += t.payeAmount || 0;
+        }
+        // PIT/CIT simple placeholders - computing properly requires more accounting context
+      }
+
+      // CIT: naive: if turnover > threshold mark CIT as applicable, compute on net profit placeholder (not full accounting)
+      // For simplicity, citTotal left as 0 unless business citEnabled and aggregated
+      // PIT: placeholder 0
+
+      const lines = [];
+      lines.push(`<div><strong>VAT</strong></div>
+        <div class="mutedBlock">Output VAT payable: ₦${fmt(vatPayable)}</div>
+        <div class="mutedBlock">Input VAT receivable: ₦${fmt(vatReceivable)}</div>
+        <hr />`);
+      lines.push(`<div><strong>WHT</strong></div>
+        <div class="mutedBlock">WHT payable (withheld by business): ₦${fmt(whtPayable)}</div>
+        <div class="mutedBlock">WHT receivable (withheld by others / credit): ₦${fmt(whtReceivable)}</div>
+        <hr />`);
+      lines.push(`<div><strong>PAYE</strong></div>
+        <div class="mutedBlock">PAYE monthly total (from salary transactions): ₦${fmt(payeTotal)}</div>
+        <hr />`);
+      lines.push(`<div><strong>PIT</strong></div>
+        <div class="mutedBlock">PIT (summary not implemented in detail): ₦${fmt(pitTotal)}</div>
+        <hr />`);
+      lines.push(`<div><strong>CIT</strong></div>
+        <div class="mutedBlock">CIT (summary not implemented in detail): ₦${fmt(citTotal)}</div>
+      `);
+
+      taxSummaryDiv.innerHTML = lines.join('');
+    }
+
+    function renderPLSnapshot(){
+      const b = findBiz(selectedBiz);
+      if(!b) return;
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      let revenue = 0, expenses = 0;
+      for(const t of arr){
+        if(t.accountCategory === 'Revenue') revenue += t.amount || 0;
+        if(t.accountCategory === 'Expense') expenses += t.amount || 0;
+      }
+      const profit = revenue - expenses;
+      plSnapshotDiv.innerHTML = `<div><strong>Profit & Loss (snapshot)</strong></div>
+        <div class="mutedBlock">Revenue: ₦${fmt(revenue)}</div>
+        <div class="mutedBlock">Expenses: ₦${fmt(expenses)}</div>
+        <div class="mutedBlock"><strong>Net profit: ₦${fmt(profit)}</strong></div>`;
+      plSnapshotQuick.innerHTML = plSnapshotDiv.innerHTML;
+    }
+
+    // Helper used in seed
+    function computePayeForSalaryFromSeed(amountMonthly, biz){
+      return computePayeForSalary(amountMonthly, null, biz);
+    }
+
+    // Alias used in seed demo creation
+    function computePayeForSalary(amountMonthly, contactName, biz){
+      return computePayeForSalary(amountMonthly, contactName, biz);
+    }
+
+    // Renders accounts list in accounts modal
     function renderAccounts(){
       accountsList.innerHTML = '';
       const b = findBiz(selectedBiz);
-      if(!b) { accountsList.textContent = 'Select business'; return; }
+      if(!b) return;
       for(const a of b.accounts){
-        const row = document.createElement('div'); row.className='account-row';
-        row.innerHTML = `<div>${a.name} <span class="small-muted">(${a.category})</span></div><div><button class="small" data-id="${a.id}">Edit</button> <button class="small danger" data-del="${a.id}">Delete</button></div>`;
-        accountsList.appendChild(row);
+        const div = document.createElement('div');
+        div.className = 'account-row';
+        div.innerHTML = `<div>${a.name} <span class="small-muted">(${a.category})</span></div>
+          <div><button class="small" data-id="${a.id}" data-act="del">Delete</button></div>`;
+        accountsList.appendChild(div);
       }
-      accountsList.querySelectorAll('button[data-del]').forEach(btn => {
-        btn.addEventListener('click', ()=> {
-          const id = btn.getAttribute('data-del');
-          if(!confirm('Delete account?')) return;
-          const b = findBiz(selectedBiz);
-          b.accounts = b.accounts.filter(ac=>ac.id!==id);
-          saveData();
-          renderAccounts();
-          populateAccountSelect();
-          renderAll();
-        });
+      accountsList.querySelectorAll('button').forEach(btn=>{
+        if(btn.dataset.act === 'del'){
+          btn.addEventListener('click', ()=> {
+            if(!confirm('Delete account?')) return;
+            const b = findBiz(selectedBiz);
+            b.accounts = b.accounts.filter(x=>x.id!==btn.dataset.id);
+            saveData();
+            renderAccounts();
+            populateAccountSelect();
+          });
+        }
       });
     }
 
     function renderBizContacts(b){
       bizContactsList.innerHTML = '';
-      for(const c of b.contacts||[]){
-        const div = document.createElement('div'); div.className='row';
-        div.innerHTML = `<div style="flex:1">${c.name} <span class="small-muted">(${c.type})</span></div>
-          <div>
-            <button class="small" data-edit="${c.id}">Edit</button>
-            <button class="small danger" data-del="${c.id}">Delete</button>
-          </div>`;
+      (b.contacts || []).forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'account-row';
+        div.innerHTML = `<div>${c.name} <span class="small-muted">(${c.type})</span></div>
+          <div><button class="small" data-id="${c.id}">Remove</button></div>`;
         bizContactsList.appendChild(div);
-      }
-      bizContactsList.querySelectorAll('button[data-del]').forEach(btn => {
-        btn.addEventListener('click', ()=> {
-          const id = btn.getAttribute('data-del');
-          if(!confirm('Delete contact?')) return;
-          b.contacts = b.contacts.filter(cc=>cc.id!==id);
-          saveData();
-          renderBizContacts(b);
-        });
-      });
-      bizContactsList.querySelectorAll('button[data-edit]').forEach(btn => {
-        btn.addEventListener('click', ()=> {
-          const id = btn.getAttribute('data-edit'); const c = b.contacts.find(x=>x.id===id);
-          if(!c) return;
-          const newName = prompt('Contact name', c.name); if(newName===null) return;
-          c.name = newName;
+        div.querySelector('button').addEventListener('click', ()=>{
+          b.contacts = b.contacts.filter(x=>x.id!==c.id);
           saveData();
           renderBizContacts(b);
         });
       });
     }
 
-    function renderFeatureVisibility(){
-      const b = findBiz(selectedBiz);
-      // VAT control visible only if biz.vatEnabled
-      const vatVisible = b && b.vatEnabled;
-      document.getElementById('txnVatLabel').style.display = vatVisible ? 'inline-flex' : 'none';
-      document.getElementById('invVatLabel').style.display = vatVisible ? 'inline-flex' : 'none';
-      // PAYE visible only if enabled
-      txnPayeLabel.style.display = b && b.payeEnabled ? 'inline-flex' : 'none';
-      // WHT: show checkbox only if biz exists (we always allow toggling per txn) but hide if biz.whtRate undefined? keep shown
-      // For safety, if biz.whtRate missing then default to DEFAULTS
-    }
-
-    // Add transaction
-    function handleAddTransaction(){
-      if(!selectedUser || !selectedBiz) return alert('Select user and business');
-      const b = findBiz(selectedBiz);
-      const amount = Number(txnAmount.value || 0);
-      if(!txnDate.value) return alert('Date required');
-      if(!txnAccount.value) return alert('Account required');
-      if(amount <= 0) return alert('Amount must be > 0');
-
-      const acct = findAccount(b, txnAccount.value);
-      const vatType = txnVatType.value;
-      let vatAmount = 0;
-      if(b.vatEnabled && vatType !== 'none'){
-        if(vatType === 'exclusive'){ vatAmount = round2(amount * (b.vatRate/100)); }
-        else if(vatType === 'inclusive'){ vatAmount = round2(amount - (amount / (1 + (b.vatRate/100)))); }
-      }
-      let whtAmount = 0; let whtRate = 0; let whtBasis = 'gross';
-      if(txnWht.checked){
-        whtRate = Number(txnWhtRate.value || b.whtRate || DEFAULTS.whtRate);
-        whtBasis = txnWhtBasis.value || 'gross';
-        let base = amount;
-        if(whtBasis === 'net'){ base = Math.max(0, amount - vatAmount); }
-        whtAmount = round2(base * (whtRate/100));
-      }
-      const txn = {
-        id: uid('txn'),
-        date: txnDate.value,
-        action: txnAction.value || 'General',
-        accountId: acct.id,
-        accountName: acct.name,
-        accountCategory: acct.category,
-        description: txnDesc.value || '',
-        amount: amount,
-        vatType: vatType,
-        vatAmount: vatAmount,
-        whtApplied: !!txnWht.checked,
-        whtAmount: whtAmount,
-        whtRate: whtRate,
-        whtBasis: whtBasis,
-        paye: !!txnSalary.checked,
-        contact: txnContact.value || '',
-        receipt: null
-      };
-
-      // attachments not stored in this demo beyond placeholder
-      data.transactions[selectedUser] = data.transactions[selectedUser] || {};
-      data.transactions[selectedUser][selectedBiz] = data.transactions[selectedUser][selectedBiz] || [];
-      data.transactions[selectedUser][selectedBiz].push(txn);
-      saveData();
-      addAudit('txn.add','transaction',txn.id,`Added txn ${txn.description || txn.id}`);
-      resetForms();
-      renderAll();
-    }
-
-    // inventory handlers (basic)
-    function handleInventoryAction(){
-      if(!selectedUser || !selectedBiz) return alert('Select user and business');
-      const b = findBiz(selectedBiz);
-      const itemName = invNewName.value || (invItemSelect.value || '');
-      if(!itemName) return alert('Item name required');
-      const qty = Number(invQty.value || 0);
-      const price = Number(invUnitPrice.value || 0);
-      if(qty <=0 || price <=0) return alert('Qty and unit price must be > 0');
-      // if new item, add to inventory
-      let item = b.inventory.find(i=>i.name===itemName);
-      if(!item){
-        item = { id: uid('item'), name: itemName, qty:0, avgCost:0 };
-        b.inventory.push(item);
-      }
-      // treat as purchase if action is InventoryPurchase else sale
-      if(txnAction.value === 'InventoryPurchase'){
-        // update weighted avg
-        const totalCost = item.avgCost * item.qty;
-        const newTotalQty = item.qty + qty;
-        const newAvg = newTotalQty ? ((totalCost + (price * qty)) / newTotalQty) : price;
-        item.qty = newTotalQty; item.avgCost = round2(newAvg);
-        saveData(); addAudit('inventory.purchase','inventory', item.id, `Purchased ${qty} @ ${price}`);
-      } else {
-        // sale: reduce qty
-        if(qty > item.qty) return alert('Not enough inventory');
-        item.qty -= qty;
-        saveData(); addAudit('inventory.sale','inventory', item.id, `Sold ${qty}`);
-      }
-      renderAll();
-    }
-    function handleUndoInventory(){ alert('Undo inventory not implemented in demo'); }
-
-    // assets (basic placeholders)
-    function handleAddAsset(){
-      if(!selectedBiz) return alert('Select business');
-      const b = findBiz(selectedBiz);
-      if(!assetName.value || Number(assetCost.value||0) <=0) return alert('Provide asset name and cost');
-      b.assets = b.assets || [];
-      b.assets.push({ id: uid('asset'), name: assetName.value, cost: Number(assetCost.value||0), purchaseDate: assetPurchaseDate.value || today(), usefulLife: Number(assetLife.value||1), capitalAllowance: Number(assetCA.value||0) });
-      saveData(); addAudit('asset.add','asset', b.assets[b.assets.length-1].id, `Added asset ${assetName.value}`);
-      renderAll();
-    }
-    function handleDisposeAsset(){
-      alert('Asset disposal simplified: create transactions manually in demo');
-    }
-    function handleUndoAsset(){ alert('Undo asset not implemented in demo'); }
-
-    // Rendering ledger
-    function renderLedger(){
-      ledgerTableBody.innerHTML = '';
-      if(!selectedUser || !selectedBiz) return;
-      const rows = data.transactions[selectedUser] && data.transactions[selectedUser][selectedBiz] ? data.transactions[selectedUser][selectedBiz] : [];
-      const q = (document.getElementById('ledgerSearch').value||'').toLowerCase();
-      for(const t of rows){
-        if(q){
-          const combined = `${t.date} ${t.action} ${t.accountName} ${t.description} ${t.amount} ${t.contact}`.toLowerCase();
-          if(!combined.includes(q)) continue;
-        }
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${t.date}</td><td>${t.action}</td><td>${t.accountName}</td><td>${escapeHtml(t.description)}</td><td>${fmt(t.amount)}</td><td>${fmt(t.vatAmount||0)}</td><td>${fmt(t.whtAmount||0)}</td><td>${t.paye? 'Yes':''}</td><td>${escapeHtml(t.contact||'')}</td><td>${t.receipt? 'yes':''}</td>`;
-        ledgerTableBody.appendChild(tr);
-      }
-    }
-
-    // Main renderer: P&L snapshot and Tax summary
     function renderAll(){
+      populateAccountSelect();
       renderLedger();
-      renderPLSnapshot();
       renderTaxSummary();
-      renderQuickLists();
-      renderFeatureVisibility();
+      renderPLSnapshot();
+      renderInventoryQuick();
+      renderAssetsQuick();
     }
 
-    function renderQuickLists(){
-      // inventory list
+    function renderInventoryQuick(){
       inventoryListDiv.innerHTML = '';
       const b = findBiz(selectedBiz);
       if(!b) return;
-      for(const it of b.inventory || []){ const div = document.createElement('div'); div.textContent = `${it.name} — qty ${it.qty} — avg ${fmt(it.avgCost)}`; inventoryListDiv.appendChild(div); }
+      if(!(b.inventory || []).length) { inventoryListDiv.textContent='No inventory'; return; }
+      const ul = document.createElement('div');
+      for(const it of b.inventory){
+        const d = document.createElement('div');
+        d.className='account-row';
+        d.innerHTML = `<div><strong>${it.name}</strong> <span class="small-muted">Qty: ${it.qty} @ avg ₦${fmt(it.avgCost)}</span></div>`;
+        ul.appendChild(d);
+      }
+      inventoryListDiv.appendChild(ul);
+    }
+    function renderAssetsQuick(){
       assetListDiv.innerHTML = '';
-      for(const a of b.assets || []){ const div = document.createElement('div'); div.textContent = `${a.name} — cost ${fmt(a.cost)} — purchased ${a.purchaseDate}`; assetListDiv.appendChild(div); }
-    }
-
-    function renderPLSnapshot(){
       const b = findBiz(selectedBiz);
-      if(!b){ plSnapshotDiv.innerHTML = ''; plSnapshotQuick.innerHTML=''; return; }
-      // accumulate totals across transactions for current selected user+biz
-      const rows = allTransactionsForBiz(selectedBiz);
-      // Sum revenue and expenses excluding chargeable asset accounts for netProfitPretax
-      let totalRevenue = 0, totalExpense = 0;
-      let chargeableIncome = 0, chargeableCost = 0;
-      let totalVatCollected = 0, totalVatPaid = 0;
-      for(const t of rows){
-        const acct = findAccount(b, t.accountId) || { name: t.accountName, category: t.accountCategory };
-        const amt = Number(t.amount || 0);
-        if(acct && acct.name === 'Chargeable asset income'){ chargeableIncome += amt; }
-        else if(acct && acct.name === 'Chargeable asset cost'){ chargeableCost += amt; }
-        else {
-          if(acct && acct.category === 'Revenue') totalRevenue += amt;
-          if(acct && acct.category === 'Expense') totalExpense += amt;
-        }
-        // VAT: consider revenue sales VAT as collected; expenses purchases as paid
-        if(t.vatAmount) {
-          if(acct && acct.category === 'Revenue') totalVatCollected += Number(t.vatAmount || 0);
-          else totalVatPaid += Number(t.vatAmount || 0);
-        }
-      }
-      const netProfitPretax = round2(totalRevenue - totalExpense);
-      const capitalGains = round2(chargeableIncome - chargeableCost);
-      // For display include capital gains after netProfitPretax. When calculating net profit pretax we EXCLUDED chargeable items as above (per requirement)
-      // Build HTML
-      plSnapshotDiv.innerHTML = `<h3 style="margin:6px 0;">Profit & Loss Snapshot</h3>
-        <div class="mutedBlock">Total Revenue: ₦ ${fmt(totalRevenue)}</div>
-        <div class="mutedBlock">Total Expense: ₦ ${fmt(totalExpense)}</div>
-        <div style="margin-top:6px;font-weight:600;">Net profit (pretax, excl. chargeable asset items): ₦ ${fmt(netProfitPretax)}</div>
-        <div class="mutedBlock" style="margin-top:8px;">Chargeable asset income: ₦ ${fmt(chargeableIncome)}</div>
-        <div class="mutedBlock">Chargeable asset cost: ₦ ${fmt(chargeableCost)}</div>
-        <div style="margin-top:6px;font-weight:600;">Capital gains (chargeable asset income - cost): ₦ ${fmt(capitalGains)}</div>
-      `;
-      plSnapshotQuick.innerHTML = `<div>Net pretax: ₦ ${fmt(netProfitPretax)}</div><div>Capital gains: ₦ ${fmt(capitalGains)}</div><div>Total VAT collected: ₦ ${fmt(totalVatCollected)}</div>`;
-    }
-
-    // Tax summary
-    function renderTaxSummary(){
-      const b = findBiz(selectedBiz);
-      taxSummaryDiv.innerHTML = '';
       if(!b) return;
-      const rows = allTransactionsForBiz(selectedBiz);
-
-      // VAT calculations
-      let vatCollected = 0, vatPaid = 0;
-      for(const t of rows){
-        const acct = findAccount(b, t.accountId) || { category: t.accountCategory };
-        if(t.vatAmount){
-          if(acct && acct.category === 'Revenue') vatCollected += Number(t.vatAmount||0);
-          else vatPaid += Number(t.vatAmount||0);
-        }
+      if(!(b.assets || []).length) { assetListDiv.textContent='No assets'; return; }
+      const ul = document.createElement('div');
+      for(const a of b.assets){
+        const d = document.createElement('div');
+        d.className='account-row';
+        d.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">Cost: ₦${fmt(a.cost)} Purchased: ${a.purchaseDate}</span></div>`;
+        ul.appendChild(d);
       }
-      const vatNet = round2(vatCollected - vatPaid);
-
-      // WHT receivable (sum of wht on revenue)
-      let totalWhtReceivable = 0;
-      for(const t of rows){
-        // treat WHT on revenue transactions as receivable
-        const acct = findAccount(b, t.accountId) || { category: t.accountCategory };
-        if(t.whtApplied && acct && acct.category === 'Revenue'){ totalWhtReceivable += Number(t.whtAmount || 0); }
-      }
-      totalWhtReceivable = round2(totalWhtReceivable);
-
-      // Compute P&L basics (matching P&L snapshot)
-      let totalRevenue = 0, totalExpense = 0, chargeableIncome = 0, chargeableCost = 0;
-      for(const t of rows){
-        const acct = findAccount(b, t.accountId) || { name:t.accountName, category:t.accountCategory };
-        const amt = Number(t.amount || 0);
-        if(acct && acct.name === 'Chargeable asset income'){ chargeableIncome += amt; }
-        else if(acct && acct.name === 'Chargeable asset cost'){ chargeableCost += amt; }
-        else {
-          if(acct && acct.category === 'Revenue') totalRevenue += amt;
-          if(acct && acct.category === 'Expense') totalExpense += amt;
-        }
-      }
-      const netProfitPretax = round2(totalRevenue - totalExpense);
-      const capitalGains = round2(chargeableIncome - chargeableCost);
-      // Taxable profit includes capital gains
-      let taxableProfit = round2(netProfitPretax + capitalGains);
-      // For PIT: subtract statutory deductions (sole trader contact if present, otherwise business statutoryDeductions)
-      let statDeductions = { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
-      // find sole trader contact (type SoleTrader or name "Sole trader")
-      const soleContact = (b.contacts||[]).find(c => c.type === 'SoleTrader' || (c.name && c.name.toLowerCase().includes('sole trader')));
-      if(soleContact && soleContact.statutory) statDeductions = soleContact.statutory;
-      else if(b.statutoryDeductions) statDeductions = b.statutoryDeductions;
-      const totalStatDeductions = round2(Object.values(statDeductions || {}).reduce((s,v)=>s+Number(v||0),0));
-      // Apply PIT if pitEnabled
-      let personalIncomeTax = 0;
-      let pitApplied = false;
-      if(b.pitEnabled){
-        pitApplied = true;
-        const pitTaxable = Math.max(0, taxableProfit - totalStatDeductions);
-        personalIncomeTax = computeTaxUsingBands(pitTaxable);
-        personalIncomeTax = round2(personalIncomeTax);
-      }
-      // CIT: apply only if citEnabled AND turnover (totalRevenue + chargeableIncome?) above threshold
-      const turnover = round2(totalRevenue + chargeableIncome);
-      let cit = 0;
-      let citApplied = false;
-      if(b.citEnabled && turnover > CIT_TURNOVER_THRESHOLD){
-        citApplied = true;
-        cit = round2(Math.max(0, taxableProfit) * (b.citRate/100));
-      }
-      const finalCITLiability = round2(Math.max(0, cit - totalWhtReceivable)); // CIT computed less WHT receivable
-
-      // Compose summary HTML
-      let html = `<h3 style="margin:6px 0;">Tax Summary</h3>`;
-      // WHT section
-      html += `<div class="mutedBlock"><strong>WHT Receivable (total):</strong> ₦ ${fmt(totalWhtReceivable)}</div>`;
-      // VAT section (moved after WHT per requirement)
-      html += `<div class="mutedBlock" style="margin-top:6px;"><strong>VAT collected:</strong> ₦ ${fmt(vatCollected)} | <strong>VAT paid:</strong> ₦ ${fmt(vatPaid)} | <strong>VAT net:</strong> ₦ ${fmt(vatNet)}</div>`;
-      // Taxable profit calculation
-      html += `<div style="margin-top:8px;">`;
-      html += `<div class="small-muted">Net profit (pretax, excl. chargeable asset items): ₦ ${fmt(netProfitPretax)}</div>`;
-      html += `<div class="small-muted">+ Capital gains: ₦ ${fmt(capitalGains)}</div>`;
-      html += `<div class="small-muted">= Taxable profit: ₦ ${fmt(taxableProfit)}</div>`;
-      html += `</div>`;
-      // PIT / Personal income tax
-      if(pitApplied){
-        html += `<div style="margin-top:8px;"><strong>PIT / Personal Income Tax (using PAYE bands):</strong></div>`;
-        html += `<div class="small-muted">Statutory deductions used for PIT: ₦ ${fmt(totalStatDeductions)}</div>`;
-        html += `<div style="font-weight:600;">Taxable after deductions: ₦ ${fmt(Math.max(0, taxableProfit - totalStatDeductions))}</div>`;
-        html += `<div style="margin-top:4px;">Computed PIT (band rates): ₦ ${fmt(personalIncomeTax)}</div>`;
-      } else {
-        html += `<div style="margin-top:8px;" class="small-muted">PIT disabled for this business.</div>`;
-      }
-      // CIT section
-      if(b.citEnabled){
-        html += `<div style="margin-top:8px;"><strong>CIT</strong></div>`;
-        html += `<div class="small-muted">Turnover used for CIT threshold: ₦ ${fmt(turnover)} (threshold: ₦ ${fmt(CIT_TURNOVER_THRESHOLD)})</div>`;
-        if(citApplied){
-          html += `<div>Computed CIT (@ ${b.citRate}%): ₦ ${fmt(cit)}</div>`;
-          html += `<div>Less WHT receivable: ₦ ${fmt(totalWhtReceivable)}</div>`;
-          html += `<div style="font-weight:600;">Final tax liability after CIT: ₦ ${fmt(finalCITLiability)}</div>`;
-        } else {
-          html += `<div class="small-muted">CIT not applied because turnover is not above threshold.</div>`;
-        }
-      } else {
-        html += `<div style="margin-top:8px;" class="small-muted">CIT disabled for this business.</div>`;
-      }
-
-      taxSummaryDiv.innerHTML = html;
+      assetListDiv.appendChild(ul);
     }
 
-    // Utilities for tax computations
-    function computeTaxUsingBands(amount){
-      // amount is annual taxable amount (we assume business taxableProfit is annual for sole trader PIT)
-      // Apply marginal rates: compute tax = sum of (taxable portion * rate)
-      let remaining = Number(amount || 0);
-      let lastLimit = 0;
-      let tax = 0;
-      for(const band of PAYE_BANDS){
-        const bandAmount = Math.min(remaining, band.upTo - lastLimit);
-        if(bandAmount > 0){
-          tax += bandAmount * band.rate;
-          remaining -= bandAmount;
-        }
-        lastLimit = band.upTo;
-        if(remaining <= 0) break;
-      }
-      return tax;
+    function renderFeatureVisibility(){
+      txnWhtRateLabel.style.display = txnWht.checked ? 'inline-flex' : 'none';
+      txnWhtBasisLabel.style.display = txnWht.checked ? 'inline-flex' : 'none';
     }
 
-    function allTransactionsForBiz(bizId){
-      // return all transactions across users for the business (consolidated)
-      let rows = [];
-      for(const uid of Object.keys(data.transactions||{})){
-        const userTx = data.transactions[uid] && data.transactions[uid][bizId] ? data.transactions[uid][bizId] : [];
-        rows = rows.concat(userTx || []);
-      }
-      return rows;
-    }
-
-    // Helper rounding and escaping
-    function round2(n){ return Math.round((Number(n)||0) * 100) / 100; }
-    function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; }); }
-
-    // Accounts management: ensure chargeable accounts exist on load
-    function ensureChargeableAccounts(){
-      for(const b of data.businesses){
-        const hasInc = (b.accounts||[]).some(a=>a.name === 'Chargeable asset income');
-        const hasCost = (b.accounts||[]).some(a=>a.name === 'Chargeable asset cost');
-        if(!hasInc) b.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        if(!hasCost) b.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      }
-    }
-
-    // Small helpers for UI
-    function renderTab(){
-      if(activeTab === 'ledger'){ ledgerSection.style.display = 'block'; reportsSection.style.display = 'none'; btnLedgerTab.classList.add('active'); btnReportsTab.classList.remove('active'); }
-      else { ledgerSection.style.display = 'none'; reportsSection.style.display = 'block'; btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active'); }
-    }
-
+    // simple report renderer
     function renderReport(name){
-      reportContent.innerHTML = `<div class="mutedBlock">Report: ${name} (simple demo view)</div>`;
+      reportContent.innerHTML = `<div class="muted">Report: ${name} (basic)</div>`;
     }
 
-    // initial housekeeping
-    ensureChargeableAccounts();
-    saveData();
+    function renderTab(){
+      if(activeTab === 'ledger'){
+        ledgerSection.style.display = 'block';
+        reportsSection.style.display = 'none';
+        btnLedgerTab.classList.add('active');
+        btnReportsTab.classList.remove('active');
+      } else {
+        ledgerSection.style.display = 'none';
+        reportsSection.style.display = 'block';
+        btnLedgerTab.classList.remove('active');
+        btnReportsTab.classList.add('active');
+      }
+    }
 
-    // small bindings for page load
+    // small helpers
+    function findTransaction(txnId){
+      const arr = data.transactions[selectedUser][selectedBiz] || [];
+      return arr.find(x=>x.id===txnId);
+    }
+
+    // ensure essential structure exists
+    if(!data.users || data.users.length === 0){ seedDemo(); }
+
+    // ensure selectedUser and selectedBiz set after possible seeding
+    refreshSelectors();
+    ensureSelection();
     populateAccountSelect();
-    renderFeatureVisibility();
-// --- WHT payable + PAYE supplement for tax summary ---
-(function(){
-  function computeWHT(txn, bizDefaultRatePct){
-    const ratePct = Number(txn.whtRate ?? bizDefaultRatePct ?? 0);
-    const rate = ratePct / 100;
-    const basis = (txn.whtBasis || 'gross').toString().toLowerCase();
-    const amount = Number(txn.amount || 0);
-
-    let gross = 0, net = 0, wht = 0;
-    if(basis === 'net'){
-      if(rate >= 1) {
-        gross = amount; wht = 0; net = amount;
-      } else {
-        gross = amount / (1 - rate || 1);
-        wht = gross - amount;
-        net = amount;
-      }
-    } else {
-      gross = amount;
-      wht = gross * rate;
-      net = gross - wht;
-    }
-    return { gross, net, wht, ratePct, rate };
-  }
-
-  function computeTaxFromBands(amount){
-    let remaining = Number(amount || 0);
-    let prevLimit = 0;
-    let tax = 0;
-    for(const band of PAYE_BANDS){
-      const upTo = band.upTo;
-      const bandCap = (upTo === Infinity) ? Infinity : upTo;
-      const taxableInBand = Math.max(0, Math.min(remaining, bandCap - prevLimit));
-      if(taxableInBand > 0){
-        tax += taxableInBand * band.rate;
-      }
-      prevLimit = bandCap;
-      if(remaining <= prevLimit) break;
-    }
-    return tax;
-  }
-
-  function computePAYEForBusiness(selectedUserId, selectedBizId){
-    const result = { totalPAYE:0, details:[] };
-    if(!selectedUserId || !selectedBizId) return result;
-    const b = findBiz(selectedBizId);
-    if(!b) return result;
-    const txns = ((data.transactions || {})[selectedUserId] || {})[selectedBizId] || [];
-    const salaryByContact = {};
-    for(const t of txns){
-      const isSalary = !!t.salary || !!t.txnSalary || !!t.isSalary;
-      if(!isSalary) continue;
-      const contactName = (t.contact || '').trim() || '(unspecified)';
-      salaryByContact[contactName] = salaryByContact[contactName] || { gross:0, txns:[] };
-      salaryByContact[contactName].gross += Number(t.amount || 0);
-      salaryByContact[contactName].txns.push(t);
-    }
-
-    for(const contactName of Object.keys(salaryByContact)){
-      const gross = salaryByContact[contactName].gross || 0;
-      let statutory = { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
-      const contactObj = (b.contacts || []).find(c => (c.name || '').trim() === contactName);
-      if(contactObj && contactObj.statutory){
-        statutory = Object.assign({}, statutory, contactObj.statutory);
-      } else {
-        statutory = Object.assign({}, statutory, b.statutoryDeductions || {});
-      }
-      const totalDeductions = (Number(statutory.pension||0) + Number(statutory.rent||0) + Number(statutory.life||0) + Number(statutory.mortgage||0) + Number(statutory.nhf||0));
-      const taxable = Math.max(0, gross - totalDeductions);
-      const paye = computeTaxFromBands(taxable);
-      result.details.push({ contact: contactName, gross, totalDeductions, taxable, paye });
-      result.totalPAYE += paye;
-    }
-
-    return result;
-  }
-
-  function computeWHTTotals(selectedUserId, selectedBizId){
-    const totals = { receivable:0, payable:0, byTransaction: [] };
-    if(!selectedUserId || !selectedBizId) return totals;
-    const b = findBiz(selectedBizId);
-    const defaultWhtRate = b ? Number(b.whtRate || DEFAULTS.whtRate) : DEFAULTS.whtRate;
-    const txns = ((data.transactions || {})[selectedUserId] || {})[selectedBizId] || [];
-    for(const t of txns){
-      const whtApplied = !!t.wht || !!t.whtApplied;
-      if(!whtApplied) continue;
-      const calc = computeWHT(t, defaultWhtRate);
-      const action = (t.action || '').toString().toLowerCase();
-      if(action === 'revenue' || action === 'sales' || action === 'income'){
-        totals.receivable += calc.wht;
-      } else if(action === 'expense' || action === 'purchase' || action === 'inventorypurchase' || action === 'inventorysale' || action === 'fixedassetpurchase' || action === 'fixedassetdisposal'){
-        totals.payable += calc.wht;
-      } else {
-        if(Number(t.amount || 0) >= 0) totals.receivable += calc.wht;
-        else totals.payable += calc.wht;
-      }
-      totals.byTransaction.push(Object.assign({ txnId: t.id || null }, calc));
-    }
-    return totals;
-  }
-
-  function makeRow(label, value){
-    const div = document.createElement('div');
-    div.style.display = 'flex';
-    div.style.justifyContent = 'space-between';
-    div.style.gap = '8px';
-    div.style.padding = '4px 0';
-    const l = document.createElement('div'); l.textContent = label;
-    const v = document.createElement('div'); v.textContent = typeof value === 'number' ? '₦ ' + fmt(value) : value;
-    div.appendChild(l); div.appendChild(v);
-    return div;
-  }
-
-  function updateTaxSummaryAugmentation(){
-    try {
-      const container = taxSummaryDiv;
-      if(!container) return;
-      const existing = container.querySelector('#__wht_paye_block');
-      if(existing) existing.remove();
-
-      const whtTotals = computeWHTTotals(selectedUser, selectedBiz);
-      const payeTotals = computePAYEForBusiness(selectedUser, selectedBiz);
-
-      const block = document.createElement('div');
-      block.id = '__wht_paye_block';
-      block.style.marginTop = '8px';
-      block.style.paddingTop = '8px';
-      block.style.borderTop = '1px dashed #e6e6e6';
-      const title = document.createElement('h4');
-      title.textContent = 'WHT & PAYE Summary';
-      title.style.margin = '4px 0';
-      block.appendChild(title);
-
-      block.appendChild(makeRow('WHT receivable (total):', whtTotals.receivable));
-      block.appendChild(makeRow('WHT payable (total):', whtTotals.payable));
-      const netWHT = (Number(whtTotals.payable || 0) - Number(whtTotals.receivable || 0));
-      block.appendChild(makeRow('WHT net (payable - receivable):', netWHT));
-
-      const payeTitle = document.createElement('div');
-      payeTitle.style.marginTop = '6px';
-      payeTitle.style.fontWeight = '600';
-      payeTitle.textContent = 'PAYE (computed using statutory deductions & PAYE bands)';
-      block.appendChild(payeTitle);
-
-      if(payeTotals.details.length === 0){
-        block.appendChild(makeRow('PAYE (total):', 0));
-        const note = document.createElement('small');
-        note.className = 'small-note';
-        note.textContent = 'No salary transactions found for selected business/user.';
-        block.appendChild(note);
-      } else {
-        for(const d of payeTotals.details){
-          const label = `${d.contact} — PAYE on taxable ${fmt(d.taxable)} (gross ${fmt(d.gross)}, deductions ${fmt(d.totalDeductions)})`;
-          block.appendChild(makeRow(label + ':', d.paye));
-        }
-        block.appendChild(makeRow('PAYE total:', payeTotals.totalPAYE));
-      }
-
-      const nodes = Array.from(container.children);
-      let insertAfter = null;
-      for(const n of nodes){
-        if((n.textContent || '').toUpperCase().includes('VAT')){
-          insertAfter = n;
-          break;
-        }
-      }
-      if(insertAfter && insertAfter.parentNode === container){
-        insertAfter.insertAdjacentElement('afterend', block);
-      } else {
-        container.appendChild(block);
-      }
-    } catch(err){
-      console.error('WHT/PAYE augmentation failed', err);
-    }
-  }
-
-  function initWhtPayeAugmentation(){
-    updateTaxSummaryAugmentation();
-
-    if(window.MutationObserver){
-      const obs = new MutationObserver(debounce(function(){
-        updateTaxSummaryAugmentation();
-      }, 150));
-      obs.observe(taxSummaryDiv, { childList: true, subtree: true, characterData: true });
-    }
-
-    ['userSelect','businessSelect'].forEach(id => {
-      const el = document.getElementById(id);
-      if(el) el.addEventListener('change', ()=> setTimeout(updateTaxSummaryAugmentation, 120));
-    });
-
-    const originalRenderAll = window.renderAll;
-    if(typeof originalRenderAll === 'function'){
-      window.renderAll = function(){
-        try { originalRenderAll.apply(this, arguments); } catch(e){ console.error(e); }
-        setTimeout(updateTaxSummaryAugmentation, 120);
-      };
-    }
-  }
-
-  function debounce(fn, wait){
-    let t;
-    return function(){
-      clearTimeout(t);
-      const args = arguments; const ctx = this;
-      t = setTimeout(()=> fn.apply(ctx, args), wait || 100);
-    };
-  }
-
-  if(document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(initWhtPayeAugmentation, 120);
-  } else {
-    document.addEventListener('DOMContentLoaded', ()=> setTimeout(initWhtPayeAugmentation, 120));
-  }
-})();
+    renderAll();
   </script>
 </body>
   </html>
