@@ -1495,13 +1495,63 @@
     // - Show chargeable gains/losses from disposals
     const txns = (state.transactions[selectedUserId]||{})[selectedBizId] || [];
     let revenue = 0, expense = 0, payeTotal = 0;
+    // VAT and WHT tracking
+    let vatPayable = 0, vatReceivable = 0;
+    let whtPayable = 0, whtReceivable = 0;
+    
     for(const t of txns){
       const acct = findAccount(b, t.accountId);
       const cat = acct ? acct.category : t.accountCategory || 'Expense';
-      if(cat === 'Revenue') revenue += Number(t.amount||0);
-      else expense += Number(t.amount||0);
+      const amount = Number(t.amount||0);
+      
+      if(cat === 'Revenue') revenue += amount;
+      else expense += amount;
       if(t.paye) payeTotal += Number(t.paye.amount||0);
+      
+      // Calculate VAT (if enabled)
+      if(b.vatEnabled && t.vatType && t.vatType !== 'none'){
+        const vatRate = (b.vatRate || DEFAULTS.vatRate) / 100;
+        let vatAmount = 0;
+        
+        if(t.vatType === 'exclusive'){
+          // VAT is additional to the amount
+          vatAmount = amount * vatRate;
+        } else if(t.vatType === 'inclusive'){
+          // VAT is included in the amount
+          vatAmount = amount * (vatRate / (1 + vatRate));
+        }
+        
+        // Sales/Revenue = VAT payable (output VAT)
+        // Purchases/Expenses = VAT receivable (input VAT)
+        if(cat === 'Revenue' || t.action === 'Revenue' || t.action === 'InventorySale'){
+          vatPayable += vatAmount;
+        } else {
+          vatReceivable += vatAmount;
+        }
+      }
+      
+      // Calculate WHT
+      if(t.whtApplied){
+        const whtRate = (t.whtRate || b.whtRate || DEFAULTS.whtRate) / 100;
+        const whtBasis = t.whtBasis || 'gross';
+        let whtAmount = 0;
+        
+        if(whtBasis === 'gross'){
+          whtAmount = amount * whtRate;
+        } else { // net basis
+          whtAmount = (amount / (1 - whtRate)) * whtRate;
+        }
+        
+        // Revenue/receipts = WHT payable (you withhold from customer payments)
+        // Expenses/payments = WHT receivable (supplier withholds from your payments)
+        if(cat === 'Revenue' || t.action === 'Revenue' || t.action === 'BankReceipt'){
+          whtPayable += whtAmount;
+        } else {
+          whtReceivable += whtAmount;
+        }
+      }
     }
+    
     // For taxable profit, PAYE is payroll withholding and should NOT reduce business taxable profit (per requirement).
     // So taxableExpense = expense (excluding paye)
     const taxableExpense = Math.max(0, expense - payeTotal);
@@ -1527,6 +1577,50 @@
         else chargeableLoss += Math.abs(pl);
       }
     }
+    
+    // Calculate taxable profit with all adjustments
+    const accountingProfit = revenue - taxableExpense - depreciationForPL;
+    // Tax adjustments: add back depreciation, subtract capital allowance
+    const taxableProfit = accountingProfit + depreciationForPL - caApplied - (b.lossBroughtForward || 0) + chargeableGain - chargeableLoss;
+    const finalTaxableProfit = Math.max(0, taxableProfit);
+
+    // Calculate PIT and CIT
+    const showPIT = (b.entity === 'SoleProprietor') || (!!b.pitEnabled);
+    const showCIT = (b.entity === 'Company') && (!!b.citEnabled);
+    
+    let pitAmount = 0;
+    let citAmount = 0;
+    
+    if(showPIT && b.pitEnabled){
+      // PIT uses progressive tax bands similar to PAYE
+      // Get statutory deductions
+      const soleTraderContact = (b.contacts||[]).find(c => c.type === 'SoleTrader' || c.name === 'Sole trader');
+      const deductions = soleTraderContact?.statutory || b.statutoryDeductions || {};
+      const totalDeductions = (deductions.pension||0) + (deductions.rent||0) + (deductions.life||0) + (deductions.mortgage||0) + (deductions.nhf||0);
+      
+      // Apply deductions to taxable profit
+      const taxableForPIT = Math.max(0, finalTaxableProfit - totalDeductions);
+      
+      // Calculate using progressive bands
+      pitAmount = calcAnnualTaxFromBands(taxableForPIT);
+    }
+    
+    if(showCIT && b.citEnabled){
+      // CIT calculation
+      const citRate = (b.citRate || DEFAULTS.citRate) / 100;
+      
+      // Check for small company exemption (turnover threshold)
+      if(revenue < CIT_TURNOVER_THRESHOLD){
+        // Small companies may have reduced rate or exemption
+        citAmount = 0; // or apply reduced rate if needed
+      } else {
+        citAmount = finalTaxableProfit * citRate;
+      }
+    }
+    
+    // Net VAT (payable - receivable)
+    const netVAT = vatPayable - vatReceivable;
+    const netWHT = whtPayable - whtReceivable;
 
     // render summary with existing content preserved (we'll present primary numbers)
     let html = `<div><strong>Tax Summary</strong></div>`;
@@ -1534,18 +1628,66 @@
     html += `<div>Expenses (excluding PAYE): ₦${fmt(taxableExpense)}</div>`;
     html += `<div>PAYE (withheld, included in expense/P&L): ₦${fmt(payeTotal)}</div>`;
 
+    // VAT Section (if enabled)
+    if(b.vatEnabled){
+      html += `<div style="margin-top:8px;"><strong>VAT Summary:</strong></div>`;
+      html += `<div>VAT Payable (output VAT on sales): ₦${fmt(vatPayable)}</div>`;
+      html += `<div>VAT Receivable (input VAT on purchases): ₦${fmt(vatReceivable)}</div>`;
+      html += `<div><strong>Net VAT ${netVAT >= 0 ? 'Payable' : 'Receivable'}:</strong> ₦${fmt(Math.abs(netVAT))}</div>`;
+    }
+    
+    // WHT Section
+    html += `<div style="margin-top:8px;"><strong>WHT Summary:</strong></div>`;
+    html += `<div>WHT Payable (withheld on receipts): ₦${fmt(whtPayable)}</div>`;
+    html += `<div>WHT Receivable (withheld on payments): ₦${fmt(whtReceivable)}</div>`;
+    html += `<div><strong>Net WHT ${netWHT >= 0 ? 'Payable' : 'Receivable'}:</strong> ₦${fmt(Math.abs(netWHT))}</div>`;
+    
+    // Taxable Profit Section
+    html += `<div style="margin-top:8px;"><strong>Taxable Profit Calculation:</strong></div>`;
+    html += `<div>Accounting Profit: ₦${fmt(accountingProfit)}</div>`;
+
     if(b.showLines){
-      html += `<div style="margin-top:8px;"><em>Detailed lines:</em></div>`;
+      html += `<div style="margin-top:8px;"><em>Detailed adjustments:</em></div>`;
       html += `<div>Depreciation (accounting expense, computed): ₦${fmt(depreciationForPL)}</div>`;
       html += `<div>Capital Allowance (tax) for period: ₦${fmt(caAmount)} (Applied: ₦${fmt(caApplied)}; Carryforward: ₦${fmt(b.caCarryForward)})</div>`;
       html += `<div>Chargeable gains from disposals: ₦${fmt(chargeableGain)}</div>`;
       html += `<div>Chargeable losses from disposals: ₦${fmt(chargeableLoss)}</div>`;
+      html += `<div>Loss brought forward: ₦${fmt(b.lossBroughtForward || 0)}</div>`;
     }
+    
+    html += `<div><strong>Final Taxable Profit:</strong> ₦${fmt(finalTaxableProfit)}</div>`;
 
-    // PIT vs CIT visibility
-    const showPIT = (b.entity === 'SoleProprietor') || (!!b.pitEnabled);
-    const showCIT = (b.entity === 'Company') && (!!b.citEnabled);
-    html += `<div style="margin-top:8px;"><strong>Tax Types Visible:</strong> ${showPIT ? 'PIT ' : ''} ${showCIT ? 'CIT' : ''}</div>`;
+    // PIT Calculation (if applicable)
+    if(showPIT && b.pitEnabled){
+      html += `<div style="margin-top:8px;"><strong>PIT (Personal Income Tax) Calculation:</strong></div>`;
+      const soleTraderContact = (b.contacts||[]).find(c => c.type === 'SoleTrader' || c.name === 'Sole trader');
+      const deductions = soleTraderContact?.statutory || b.statutoryDeductions || {};
+      const totalDeductions = (deductions.pension||0) + (deductions.rent||0) + (deductions.life||0) + (deductions.mortgage||0) + (deductions.nhf||0);
+      html += `<div>Taxable profit: ₦${fmt(finalTaxableProfit)}</div>`;
+      html += `<div>Less: Statutory deductions: ₦${fmt(totalDeductions)}</div>`;
+      html += `<div><strong>PIT Amount:</strong> ₦${fmt(pitAmount)}</div>`;
+    }
+    
+    // CIT Calculation (if applicable)
+    if(showCIT && b.citEnabled){
+      html += `<div style="margin-top:8px;"><strong>CIT (Company Income Tax) Calculation:</strong></div>`;
+      html += `<div>Taxable profit: ₦${fmt(finalTaxableProfit)}</div>`;
+      html += `<div>CIT rate: ${b.citRate || DEFAULTS.citRate}%</div>`;
+      if(revenue < CIT_TURNOVER_THRESHOLD){
+        html += `<div><em>Note: Turnover below ₦${fmt(CIT_TURNOVER_THRESHOLD)} threshold</em></div>`;
+      }
+      html += `<div><strong>CIT Amount:</strong> ₦${fmt(citAmount)}</div>`;
+    }
+    
+    // Tax Types Visibility
+    html += `<div style="margin-top:8px;"><strong>Tax Types Enabled:</strong> `;
+    const enabledTaxes = [];
+    if(b.vatEnabled) enabledTaxes.push('VAT');
+    if(b.payeEnabled) enabledTaxes.push('PAYE');
+    if(showPIT && b.pitEnabled) enabledTaxes.push('PIT');
+    if(showCIT && b.citEnabled) enabledTaxes.push('CIT');
+    html += enabledTaxes.join(', ') || 'None';
+    html += `</div>`;
 
     taxSummaryDiv.innerHTML = html;
   }
