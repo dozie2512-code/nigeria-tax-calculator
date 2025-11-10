@@ -120,7 +120,8 @@ async function invite(req, res) {
     
     if (!user) {
       // Create invited user with temporary password
-      const tempPassword = Math.random().toString(36).slice(-8);
+      const crypto = require('crypto');
+      const tempPassword = crypto.randomBytes(8).toString('hex').slice(0, 8);
       const hashedPassword = await hashPassword(tempPassword);
       
       user = await db.User.create({
@@ -131,8 +132,8 @@ async function invite(req, res) {
         isActive: true
       });
       
-      // In production, send email with temp password
-      console.log(`Temporary password for ${email}: ${tempPassword}`);
+      // TODO: In production, send email with temp password instead of logging
+      // For MVP, temp password should be communicated through secure channel
     }
     
     // Check if already associated
