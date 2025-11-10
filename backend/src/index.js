@@ -25,6 +25,13 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/api/businesses', require('./routes/business'));
+app.use('/api/businesses/:businessId/accounts', require('./routes/chartAccount'));
+app.use('/api/businesses/:businessId/transactions', require('./routes/transaction'));
+app.use('/api/businesses/:businessId/fixed-assets', require('./routes/fixedAsset'));
+app.use('/api/businesses/:businessId/inventory', require('./routes/inventory'));
+app.use('/api/businesses/:businessId/contacts', require('./routes/contact'));
+app.use('/api/businesses/:businessId/tax', require('./routes/tax'));
 
 // Monthly depreciation cron job (runs on 1st of each month at midnight)
 cron.schedule('0 0 1 * *', async () => {
