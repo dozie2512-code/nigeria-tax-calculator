@@ -37,5 +37,16 @@ module.exports = (sequelize, DataTypes) => {
     ],
   });
 
+  BusinessUser.associate = (models) => {
+    BusinessUser.belongsTo(models.User, {
+      foreignKey: 'user_id',
+      as: 'user',
+    });
+    BusinessUser.belongsTo(models.Business, {
+      foreignKey: 'business_id',
+      as: 'business',
+    });
+  };
+
   return BusinessUser;
 };
