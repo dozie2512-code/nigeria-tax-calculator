@@ -1362,6 +1362,35 @@
 
   // TAX COMPUTATIONS core functions
 
+  // Helper function to apply PAYE tax bands to taxable income
+  function calculateTaxFromBands(taxableIncome){
+    let remaining = taxableIncome;
+    let tax = 0;
+    const bandBreakdown = [];
+    let lower = 0;
+    for(const band of PAYE_BANDS){
+      const up = band.upTo;
+      const rate = band.rate;
+      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
+      tax += bandAmount * rate;
+      bandBreakdown.push({ upTo: up, rate, amount: bandAmount, tax: bandAmount * rate });
+      remaining -= bandAmount;
+      lower = up;
+      if(remaining <= 0) break;
+    }
+    return { tax, bandBreakdown };
+  }
+
+  // Helper function to calculate total statutory deductions
+  function calculateStatutoryDeductions(deductions){
+    const pension = Number(deductions.pension || 0);
+    const mortgage = Number(deductions.mortgage || 0);
+    const life = Number(deductions.life || 0);
+    const nhf = Number(deductions.nhf || 0);
+    const rent = Number(deductions.rent || 0);
+    return pension + mortgage + life + nhf + rent;
+  }
+
   // compute accumulated depreciation up to a date (straight-line monthly prorated)
   function computeAccumulatedDepreciation(asset, asOfDate){
     if(!asset) return 0;
@@ -1579,23 +1608,10 @@
       }
       rentRelief = 0.20 * rentPaid;
     }
-    const totalDeductions = pension + mortgage + life + nhf + rentRelief;
+    const totalDeductions = calculateStatutoryDeductions({ pension, mortgage, life, nhf, rent: rentRelief });
     const taxableIncome = Math.max(0, grossAnnual - totalDeductions);
-    // apply PAYE bands on taxableIncome
-    let remaining = taxableIncome;
-    let tax = 0;
-    const bandBreakdown = [];
-    let lower = 0;
-    for(const band of PAYE_BANDS){
-      const up = band.upTo;
-      const rate = band.rate;
-      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
-      tax += bandAmount * rate;
-      bandBreakdown.push({ upTo: up, rate, amount: bandAmount, tax: bandAmount * rate });
-      remaining -= bandAmount;
-      lower = up;
-      if(remaining <= 0) break;
-    }
+    // apply PAYE bands on taxableIncome using helper function
+    const { tax, bandBreakdown } = calculateTaxFromBands(taxableIncome);
     const monthly = tax / 12;
     return { annualTax: tax, monthlyTax: monthly, grossAnnual, totalDeductions, taxableIncome, bandBreakdown };
   }
@@ -1606,22 +1622,11 @@
     if(!b) return { pit:0, breakdown:{} };
     const taxRes = computeTaxableProfit(bizId);
     let taxableProfit = Number(taxRes.taxableProfit || 0);
-    // apply statutory deductions for business
-    const totalStatutory = (b.statutoryDeductions?.pension || 0) + (b.statutoryDeductions?.mortgage || 0) + (b.statutoryDeductions?.life || 0) + (b.statutoryDeductions?.nhf || 0) + (b.statutoryDeductions?.rent || 0);
+    // apply statutory deductions for business using helper function
+    const totalStatutory = calculateStatutoryDeductions(b.statutoryDeductions || {});
     taxableProfit = Math.max(0, taxableProfit - totalStatutory);
-    // apply PAYE bands to taxableProfit
-    let remaining = taxableProfit;
-    let tax = 0;
-    let lower = 0;
-    for(const band of PAYE_BANDS){
-      const up = band.upTo;
-      const rate = band.rate;
-      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
-      tax += bandAmount * rate;
-      remaining -= bandAmount;
-      lower = up;
-      if(remaining <= 0) break;
-    }
+    // apply PAYE bands to taxableProfit using helper function
+    const { tax } = calculateTaxFromBands(taxableProfit);
     return { pit: tax, taxableProfit, totalStatutory };
   }
 
