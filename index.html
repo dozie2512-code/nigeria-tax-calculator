@@ -606,6 +606,51 @@
   function toISO(date){ if(!date) return null; return new Date(date).toISOString().slice(0,10); }
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
 
+  function calcPAYEForSalary(biz, contactNameOrId, grossAmount, period = 'monthly'){
+    // determine gross annual
+    const gross = Number(grossAmount || 0);
+    const grossAnnual = (period === 'yearly') ? gross : gross * 12;
+
+    // find contact by id or name (case-insensitive)
+    let contact = null;
+    if(!biz || !biz.contacts) contact = null;
+    else {
+      contact = biz.contacts.find(c => c.id === contactNameOrId) || biz.contacts.find(c => (c.name||'').toLowerCase() === (contactNameOrId||'').toLowerCase());
+    }
+    const sd = (contact && contact.statutory) ? contact.statutory : (biz && biz.statutoryDeductions) ? biz.statutoryDeductions : { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
+    const pensionAnnual = Number(sd.pension || 0);
+    const rentAnnual = Number(sd.rent || 0);
+    const lifeAnnual = Number(sd.life || 0);
+    const mortgageAnnual = Number(sd.mortgage || 0);
+    const nhfAnnual = Number(sd.nhf || 0);
+
+    const totalDeductions = pensionAnnual + rentAnnual + lifeAnnual + mortgageAnnual + nhfAnnual;
+    const taxableAnnual = Math.max(0, grossAnnual - totalDeductions);
+
+    // apply progressive PAYE_BANDS
+    let remaining = taxableAnnual;
+    let lower = 0;
+    let taxAnnual = 0;
+    for(const band of PAYE_BANDS){
+      const upper = band.upTo;
+      const rate = Number(band.rate || 0);
+      const bandWidth = (upper === Infinity) ? Infinity : Math.max(0, upper - lower);
+      const portion = Math.min(remaining, bandWidth);
+      if(portion <= 0) break;
+      taxAnnual += portion * rate;
+      remaining -= portion;
+      lower = upper;
+      if(remaining <= 0) break;
+    }
+
+    return {
+      grossAnnual, taxableAnnual, taxAnnual,
+      taxMonthly: taxAnnual / 12,
+      deductions: { pensionAnnual, rentAnnual, lifeAnnual, mortgageAnnual, nhfAnnual },
+      contactId: contact ? contact.id : null
+    };
+  }
+
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function loadState(){
@@ -1162,6 +1207,18 @@
 
     function addTxnRecord(){
       const tx = { id: uid('txn'), date, action, accountId: acctId, accountName: account ? account.name : '', accountCategory: account ? account.category : '', description: desc, amount, vatType, vatAmount, whtApplied, whtAmount, whtRate, whtBasis, paye, contactName, receiptId, createdBy:selectedUserId, createdAt:new Date().toISOString() };
+      
+      // If this is a salary / PAYE transaction, compute PAYE using contact statutory deductions
+      if(txnSalary && txnSalary.checked){
+        const b = findBiz(selectedBizId);
+        const gross = Number(tx.amount || 0); // amount entered is treated as monthly salary
+        const payroll = calcPAYEForSalary(b, txnContact.value || '', gross, 'monthly');
+        tx.paye = Number((payroll.taxMonthly || 0).toFixed(2));
+        tx.payeAnnual = Number((payroll.taxAnnual || 0).toFixed(2));
+        tx.payeTaxableAnnual = Number((payroll.taxableAnnual || 0).toFixed(2));
+        tx.payeContactId = payroll.contactId;
+      }
+      
       state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
       state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
       state.transactions[selectedUserId][selectedBizId].push(tx);
@@ -1703,7 +1760,7 @@
       const tr = document.createElement('tr');
       const receiptThumb = tx.receiptId && state.attachments[tx.receiptId] ? `<img class="receipt-thumb" src="${state.attachments[tx.receiptId].data}" alt="${state.attachments[tx.receiptId].name}" />` : '';
       const whtText = tx.whtApplied ? fmt(tx.whtAmount||0) : '';
-      const payeText = tx.paye ? 'YES' : '';
+      const payeText = tx.paye ? fmt(tx.paye) : '';
       const canEdit = userHasPermission(selectedUserId,'edit');
       const canDelete = userHasPermission(selectedUserId,'delete');
       tr.innerHTML = `<td>${tx.date || ''}</td><td>${tx.action||''}</td><td>${tx.accountName||''}</td><td>${tx.description||''}</td><td style="text-align:right;">${fmt(tx.amount||0)}</td><td style="text-align:right;">${fmt(tx.vatAmount||0)}</td><td style="text-align:right;">${whtText}</td><td>${payeText}</td><td>${tx.contactName||''}</td><td>${receiptThumb}</td><td style="white-space:nowrap;">
