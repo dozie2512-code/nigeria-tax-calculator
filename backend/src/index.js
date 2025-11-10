@@ -25,6 +25,7 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/api/upload', require('./routes/upload'));
 app.use('/api/businesses', require('./routes/business'));
 app.use('/api/businesses/:businessId/accounts', require('./routes/chartAccount'));
 app.use('/api/businesses/:businessId/transactions', require('./routes/transaction'));
@@ -74,6 +75,10 @@ async function startServer() {
     // Sync database (in production, use migrations)
     await db.sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
     console.log('Database synced');
+    
+    // Ensure MinIO bucket exists
+    const { ensureBucket } = require('./services/minioService');
+    await ensureBucket();
     
     // Start server
     app.listen(PORT, '0.0.0.0', () => {
