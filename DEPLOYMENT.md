@@ -21,3 +21,6 @@ docker-compose exec backend npm run seed
 - Password: Password123!
 
 See README.md for complete documentation.
+
+## Branch Information
+This MVP is implemented on the `mvp/accounting-mvp` branch as requested.
