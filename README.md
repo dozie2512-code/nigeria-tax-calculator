@@ -64,45 +64,38 @@ A comprehensive multi-user, multi-business accounting application built with Rea
    cd nigeria-tax-calculator
    ```
 
-2. **Create environment file**
+2. **Run setup script**
    ```bash
-   cp .env.example .env
+   ./setup.sh
    ```
    
-   Update `.env` with your preferred settings (optional, defaults are provided).
-
-3. **Build and run with Docker Compose**
+   Or manually:
    ```bash
-   docker-compose up --build
+   docker compose up --build -d
+   sleep 15
+   docker compose exec backend npx sequelize-cli db:seed:all
    ```
 
-4. **Access the application**
+3. **Access the application**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:3001
    - MinIO Console: http://localhost:9001
 
-5. **Seeded Admin Credentials**
+4. **Login with seeded credentials**
+   - **Admin**: admin@example.com / admin123
+   - **Manager**: manager@example.com / manager123
+   - **Accountant**: accountant@example.com / accountant123
+   - **Viewer**: viewer@example.com / viewer123
+
+5. **Run tests**
+   ```bash
+   cd backend
+   npm test
+   ```
    
-   The system comes pre-seeded with test users:
-   - **Admin User**
-     - Email: admin@example.com
-     - Password: admin123
-     - Role: Admin
-   
-   - **Manager User**
-     - Email: manager@example.com
-     - Password: manager123
-     - Role: Manager
-   
-   - **Accountant User**
-     - Email: accountant@example.com
-     - Password: accountant123
-     - Role: Accountant
-   
-   - **Viewer User**
-     - Email: viewer@example.com
-     - Password: viewer123
-     - Role: Viewer
+For detailed testing scenarios, see [TESTING.md](TESTING.md).
+
+For API documentation, see [API_DOCS.md](API_DOCS.md).
 
 ### Development Setup
 
@@ -134,17 +127,17 @@ npm run seed
 
 ## API Endpoints
 
-### Authentication
+See [API_DOCS.md](API_DOCS.md) for complete API documentation.
+
+### Key Endpoints
 - `POST /auth/register` - Register new user
 - `POST /auth/login` - User login
 - `POST /auth/invite` - Invite user to business (Admin only)
 - `GET /auth/profile` - Get current user profile
-
-### Depreciation
 - `POST /api/depreciation/run` - Manually trigger monthly depreciation
-
-### Health Check
 - `GET /health` - API health check
+
+For business, transactions, tax computations, and more, see the full API documentation.
 
 ## Project Structure
 
