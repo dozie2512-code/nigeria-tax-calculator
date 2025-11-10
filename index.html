@@ -1541,47 +1541,8 @@
     return { taxableProfit, breakdown };
   }
 
-  // PAYE computation on gross salary (per-contact); apply statutory deductions (rent relief = 20% of rent paid)
-  function computePAYEForContact(contactName, bizId){
-    const b = findBiz(bizId);
-    if(!b) return { annualTax:0, monthlyTax:0, breakdown:{} };
-    // collect all salary transactions for contact
-    const txs = getAllTxsForBusiness(bizId).filter(t => t.paye && t.contactName === contactName);
-    // sum gross salary annual
-    let grossAnnual = 0;
-    for(const t of txs) grossAnnual += Number(t.amount || 0);
-    // statutory deductions: pension, mortgage interest, life assurance, nhf, rent relief (20% of rent paid)
-    // rent paid: find transactions marked as Rent paid for this contact or accounts with rentFreq
-    let pension = 0, mortgage=0, life=0, nhf=0, rentRelief = 0;
-    // try find contact statutory if exists
-    let contact = null;
-    const bContacts = (b.contacts||[]);
-    contact = bContacts.find(c=>c.name === contactName) || null;
-    if(contact && contact.statutory){
-      pension = Number(contact.statutory.pension || 0);
-      mortgage = Number(contact.statutory.mortgage || 0);
-      life = Number(contact.statutory.life || 0);
-      nhf = Number(contact.statutory.nhf || 0);
-      rentRelief = Number(contact.statutory.rent || 0); // if provided assume already calculated
-    } else {
-      // fallback to business-level default
-      pension = Number(b.statutoryDeductions?.pension || 0);
-      mortgage = Number(b.statutoryDeductions?.mortgage || 0);
-      life = Number(b.statutoryDeductions?.life || 0);
-      nhf = Number(b.statutoryDeductions?.nhf || 0);
-      // compute rent paid in transactions for the contact (accounts with rentFreq)
-      let rentPaid = 0;
-      for(const t of getAllTxsForBusiness(bizId)){
-        if(t.contactName === contactName){
-          const acct = b.accounts.find(a=>a.id === t.accountId);
-          if(acct && acct.rentFreq){ rentPaid += Number(t.amount || 0); }
-        }
-      }
-      rentRelief = 0.20 * rentPaid;
-    }
-    const totalDeductions = pension + mortgage + life + nhf + rentRelief;
-    const taxableIncome = Math.max(0, grossAnnual - totalDeductions);
-    // apply PAYE bands on taxableIncome
+  // Helper function: Calculate tax from PAYE bands given taxable income
+  function calculateTaxFromBands(taxableIncome){
     let remaining = taxableIncome;
     let tax = 0;
     const bandBreakdown = [];
@@ -1596,8 +1557,63 @@
       lower = up;
       if(remaining <= 0) break;
     }
-    const monthly = tax / 12;
-    return { annualTax: tax, monthlyTax: monthly, grossAnnual, totalDeductions, taxableIncome, bandBreakdown };
+    return { tax, bandBreakdown };
+  }
+
+  // Helper function: Compute statutory deductions for a contact
+  function computeStatutoryDeductions(contactName, bizId){
+    const b = findBiz(bizId);
+    if(!b) return { pension:0, mortgage:0, life:0, nhf:0, rentRelief:0, total:0 };
+    
+    let pension = 0, mortgage=0, life=0, nhf=0, rentRelief = 0;
+    const bContacts = (b.contacts||[]);
+    const contact = bContacts.find(c=>c.name === contactName) || null;
+    
+    if(contact && contact.statutory){
+      pension = Number(contact.statutory.pension || 0);
+      mortgage = Number(contact.statutory.mortgage || 0);
+      life = Number(contact.statutory.life || 0);
+      nhf = Number(contact.statutory.nhf || 0);
+      rentRelief = Number(contact.statutory.rent || 0);
+    } else {
+      pension = Number(b.statutoryDeductions?.pension || 0);
+      mortgage = Number(b.statutoryDeductions?.mortgage || 0);
+      life = Number(b.statutoryDeductions?.life || 0);
+      nhf = Number(b.statutoryDeductions?.nhf || 0);
+      // compute rent paid in transactions for the contact (accounts with rentFreq)
+      let rentPaid = 0;
+      for(const t of getAllTxsForBusiness(bizId)){
+        if(t.contactName === contactName){
+          const acct = b.accounts.find(a=>a.id === t.accountId);
+          if(acct && acct.rentFreq){ rentPaid += Number(t.amount || 0); }
+        }
+      }
+      rentRelief = 0.20 * rentPaid;
+    }
+    const total = pension + mortgage + life + nhf + rentRelief;
+    return { pension, mortgage, life, nhf, rentRelief, total };
+  }
+
+  // PAYE computation on gross salary (per-contact); apply statutory deductions (rent relief = 20% of rent paid)
+  function computePAYEForContact(contactName, bizId){
+    const b = findBiz(bizId);
+    if(!b) return { annualTax:0, monthlyTax:0, breakdown:{} };
+    // collect all salary transactions for contact
+    const txs = getAllTxsForBusiness(bizId).filter(t => t.paye && t.contactName === contactName);
+    // sum gross salary annual
+    let grossAnnual = 0;
+    for(const t of txs) grossAnnual += Number(t.amount || 0);
+    
+    // compute statutory deductions using helper function
+    const deductions = computeStatutoryDeductions(contactName, bizId);
+    const totalDeductions = deductions.total;
+    const taxableIncome = Math.max(0, grossAnnual - totalDeductions);
+    
+    // apply PAYE bands using helper function
+    const taxResult = calculateTaxFromBands(taxableIncome);
+    const monthly = taxResult.tax / 12;
+    
+    return { annualTax: taxResult.tax, monthlyTax: monthly, grossAnnual, totalDeductions, taxableIncome, bandBreakdown: taxResult.bandBreakdown };
   }
 
   // PIT computed by applying PAYE bands to business taxable profit less statutory deductions for the business
@@ -1609,20 +1625,11 @@
     // apply statutory deductions for business
     const totalStatutory = (b.statutoryDeductions?.pension || 0) + (b.statutoryDeductions?.mortgage || 0) + (b.statutoryDeductions?.life || 0) + (b.statutoryDeductions?.nhf || 0) + (b.statutoryDeductions?.rent || 0);
     taxableProfit = Math.max(0, taxableProfit - totalStatutory);
-    // apply PAYE bands to taxableProfit
-    let remaining = taxableProfit;
-    let tax = 0;
-    let lower = 0;
-    for(const band of PAYE_BANDS){
-      const up = band.upTo;
-      const rate = band.rate;
-      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
-      tax += bandAmount * rate;
-      remaining -= bandAmount;
-      lower = up;
-      if(remaining <= 0) break;
-    }
-    return { pit: tax, taxableProfit, totalStatutory };
+    
+    // apply PAYE bands using helper function
+    const taxResult = calculateTaxFromBands(taxableProfit);
+    
+    return { pit: taxResult.tax, taxableProfit, totalStatutory };
   }
 
   // CIT computed at 0% for turnover <= threshold else at b.citRate, and WHT receivable deduction rule
