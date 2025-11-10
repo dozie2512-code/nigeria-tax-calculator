@@ -1541,6 +1541,25 @@
     return { taxableProfit, breakdown };
   }
 
+  // Apply PAYE bands to a taxable income amount and return tax calculation details
+  function applyPAYEBands(taxableIncome){
+    let remaining = taxableIncome;
+    let tax = 0;
+    const bandBreakdown = [];
+    let lower = 0;
+    for(const band of PAYE_BANDS){
+      const up = band.upTo;
+      const rate = band.rate;
+      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
+      tax += bandAmount * rate;
+      bandBreakdown.push({ upTo: up, rate, amount: bandAmount, tax: bandAmount * rate });
+      remaining -= bandAmount;
+      lower = up;
+      if(remaining <= 0) break;
+    }
+    return { tax, bandBreakdown };
+  }
+
   // PAYE computation on gross salary (per-contact); apply statutory deductions (rent relief = 20% of rent paid)
   function computePAYEForContact(contactName, bizId){
     const b = findBiz(bizId);
@@ -1582,22 +1601,9 @@
     const totalDeductions = pension + mortgage + life + nhf + rentRelief;
     const taxableIncome = Math.max(0, grossAnnual - totalDeductions);
     // apply PAYE bands on taxableIncome
-    let remaining = taxableIncome;
-    let tax = 0;
-    const bandBreakdown = [];
-    let lower = 0;
-    for(const band of PAYE_BANDS){
-      const up = band.upTo;
-      const rate = band.rate;
-      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
-      tax += bandAmount * rate;
-      bandBreakdown.push({ upTo: up, rate, amount: bandAmount, tax: bandAmount * rate });
-      remaining -= bandAmount;
-      lower = up;
-      if(remaining <= 0) break;
-    }
-    const monthly = tax / 12;
-    return { annualTax: tax, monthlyTax: monthly, grossAnnual, totalDeductions, taxableIncome, bandBreakdown };
+    const payeResult = applyPAYEBands(taxableIncome);
+    const monthly = payeResult.tax / 12;
+    return { annualTax: payeResult.tax, monthlyTax: monthly, grossAnnual, totalDeductions, taxableIncome, bandBreakdown: payeResult.bandBreakdown };
   }
 
   // PIT computed by applying PAYE bands to business taxable profit less statutory deductions for the business
@@ -1610,19 +1616,8 @@
     const totalStatutory = (b.statutoryDeductions?.pension || 0) + (b.statutoryDeductions?.mortgage || 0) + (b.statutoryDeductions?.life || 0) + (b.statutoryDeductions?.nhf || 0) + (b.statutoryDeductions?.rent || 0);
     taxableProfit = Math.max(0, taxableProfit - totalStatutory);
     // apply PAYE bands to taxableProfit
-    let remaining = taxableProfit;
-    let tax = 0;
-    let lower = 0;
-    for(const band of PAYE_BANDS){
-      const up = band.upTo;
-      const rate = band.rate;
-      const bandAmount = Math.max(0, Math.min(remaining, up - lower));
-      tax += bandAmount * rate;
-      remaining -= bandAmount;
-      lower = up;
-      if(remaining <= 0) break;
-    }
-    return { pit: tax, taxableProfit, totalStatutory };
+    const pitResult = applyPAYEBands(taxableProfit);
+    return { pit: pitResult.tax, taxableProfit, totalStatutory };
   }
 
   // CIT computed at 0% for turnover <= threshold else at b.citRate, and WHT receivable deduction rule
