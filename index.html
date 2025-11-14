@@ -1,30 +1,4 @@
-Updated index.html uploaded below. I implemented the changes you confirmed and applied option A for editing (limited edit). Key changes made:
-
-- Renamed "Fixed asset" to "Asset" everywhere (labels, action values, variables where applicable).
-- Action values changed to AssetPurchase / AssetDisposal.
-- Inventory subform: added Opening Qty and Opening Average Cost (₦).
-- Asset purchase subform: added Opening Cost (₦) and Opening Accumulated Depreciation (₦).
-- Separate Asset Purchase and Asset Disposal subforms (shown depending on action).
-- Asset schedule lines now include Quantity and Unit Price (for assets bought in batches).
-- PAYE computed per contact using existing PAYE_BANDS. Tax summary displays only monthly and annual PAYE totals; full per-contact PAYE breakdown is shown in the Reports tab.
-- Depreciation and Capital Allowance computed daily (365-day year, using 366 for leap years). Depreciation is included in expenses to derive accounting profit; capital allowance applied daily and used to compute taxable profit.
-- CIT turnover threshold changed to ₦100,000,000.
-- CGT rules implemented as requested:
-  - For companies: chargeable gains excluded from taxable profit and charged CGT @ 30% unless disposal value <= ₦150,000,000 OR gains <= ₦10,000,000 (those are exempt for companies).
-  - For sole proprietors: gains on shares where disposal value <= ₦150,000,000 OR gain <= ₦10,000,000 are excluded from taxable profit (no CGT).
-- Reports tab hides other panels (ledger / quick panels) and shows full report breakdowns; CGT computations included in reports.
-- Tax summary adjusted to show the requested content by business entity:
-  - Sole proprietor: Accounting Profit, Taxable Profit and taxes excluding CIT and CGT (VAT, WHT, PAYE, PIT).
-  - Company: Accounting Profit, Taxable Profit and taxes excluding PIT (VAT, WHT, PAYE, CIT, CGT where applicable).
-- Removed "Capital brought forward" from Business UI and state.
-- Currency displays are prefixed with the naira symbol (₦).
-- Added Edit button in the transactions ledger which allows limited editing of transaction fields (date, account, description, amount, VAT/WHT/PAYE flags, contact, and replace receipt). Inventory or asset records remain edited only via their dedicated subforms; if you attempt to edit an inventory or asset action the appropriate subform opens prefilled (limited edits) and after saving returns the form to default main form.
-- After applying Inventory or Asset actions the UI returns to the default main transaction form.
-- Preserved other existing behaviours where possible and left comments where further refinement could be made.
-
-Note: Because this is a single-file prototype, I updated the index.html in-place and preserved localStorage format for compatibility. The implementation attempts to stay compatible with the rest of your codebase and to keep state migration safe.
-
-Below is the updated index.html content. (Save/replace your repository's index.html with this file and reload the app; test the new flows, especially asset purchase/disposal, PAYE reports, and CGT logic.)
+Below is a corrected, complete index.html with the runtime/JS errors fixed (notably: safe receipt link handling in the ledger, corrected findItemName, and other small fixes to keep event handlers consistent). Replace your existing index.html with this content.
 
 <!DOCTYPE html>
 <html lang="en">
@@ -476,22 +450,7 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   <script>
   /************************************************************************
    * Nigeria Multi-User Multi-Business Accounting & Tax Engine (Prototype)
-   * Single-file SPA (updated)
-   * Storage key: ntc_full_accounting_v1
-   *
-   * Changes in this update:
-   * - Renamed Fixed Asset -> Asset
-   * - Added inventory opening qty & avg cost
-   * - Added asset opening cost & opening accumulated depreciation
-   * - Separate asset purchase & disposal subforms
-   * - Asset schedule shows qty & unit price
-   * - PAYE per-contact computed using PAYE_BANDS; monthly & annual shown in tax summary
-   * - Depreciation and Capital Allowance computed daily (365 / 366 leap year)
-   * - CGT handling adjusted (company threshold 100,000,000; exemptions per rules)
-   * - Reports tab shows breakdown and hides other UI
-   * - Removed capital brought forward
-   * - Naira symbol prefix for currency formatting
-   * - Added Edit button in ledger (limited edit)
+   * Single-file SPA (corrected)
    ************************************************************************/
 
   // Constants & defaults
@@ -499,13 +458,13 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   const DEFAULTS = { vatRate:7.5, whtRate:5.0, citRate:25.0, vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, caRateDefault:20.0, depRateDefault:20.0 };
   const PAYE_BANDS = [
     { upTo: 800000, rate: 0.00 },
-    { upTo: 3000000, rate: 0.15 },   // 800k..3,000,000 => next 2.2m @15%
+    { upTo: 3000000, rate: 0.15 },
     { upTo: 12000000, rate: 0.18 },
     { upTo: 25000000, rate: 0.21 },
     { upTo: 50000000, rate: 0.23 },
     { upTo: Infinity, rate: 0.25 }
   ];
-  const CIT_TURNOVER_THRESHOLD = 100000000; // changed to 100,000,000
+  const CIT_TURNOVER_THRESHOLD = 100000000; // 100,000,000
 
   // App state
   let state = {
@@ -697,11 +656,9 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       b.statutoryDeductions = b.statutoryDeductions || { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
       b.lossBroughtForward = Number(b.lossBroughtForward || 0);
       b.caCarryForward = Number(b.caCarryForward || 0);
-      // removed capitalBroughtForward migration (field removed)
       b.defaultExpenseDisallowable = !!b.defaultExpenseDisallowable;
       b.defaultRevenueNonTax = !!b.defaultRevenueNonTax;
     });
-    // ensure transactions map for each user and business
     for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; for(const b of state.businesses){ state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || []; } }
     saveState();
   }
@@ -732,9 +689,7 @@ Below is the updated index.html content. (Save/replace your repository's index.h
         accounts: [sales, cogs, salaries, rent, bank, chargeInc, chargeCost],
         inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
         assets: [
-          // Asset sample with qty & unitPrice
           { id: uid('asset'), name: 'Office PC', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, disposed:false, disposal:{}, openingAccDep:0 },
-          // Chargeable asset sample (disposed)
           { id: uid('asset'), name: 'Land Plot', qty:1, unitPrice:2000000, cost: 2000000, purchaseDate: '2020-01-01', lifeYears: 20, caPercent: 5, depRate: 0, classification: 'Chargeable', accumulatedDep:0, disposed:false, disposal:{}, openingAccDep:0 }
         ],
         contacts: [{ id: uid('c'), name:'John Employee', type:'Employee', statutory:{ pension: 20000, rent: 120000, life: 5000, mortgage: 100000, nhf: 5000 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } }],
@@ -747,14 +702,10 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       audit: [],
       auth: { currentUserId: u }
     };
-    // initialize transactions map
     state.transactions[u] = {};
     state.transactions[u][b] = [
-      // sample revenue (with VAT exclusive)
       { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', whtApplied:false, paye:false, contact:'', receiptId:null },
-      // sample salary (PAYE)
       { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', whtApplied:false, paye:true, contact:'John Employee', receiptId:null },
-      // inventory purchase
       { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
     ];
     addAudit('seed','system','',`Seeded demo data`);
@@ -784,171 +735,24 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   renderAll();
 
   function initUI(){
-    // Users
     btnAddUser.addEventListener('click', ()=> openUserModal());
     btnEditUser.addEventListener('click', ()=> { if(!selectedUserId) return alert('Select a user'); openUserModal(selectedUserId); });
     btnDeleteUser.addEventListener('click', ()=> { if(!selectedUserId) return alert('Select a user'); if(!confirm('Delete user? This cannot be undone')) return; deleteUser(selectedUserId); });
-    userSave.addEventListener('click', ()=> {
-      const username = (userName.value||'').trim();
-      if(!username) return alert('Username required');
-      const editId = userSave.dataset.edit;
-      if(editId){
-        const u = state.users.find(x=>x.id===editId);
-        u.username = username; u.display = userDisplay.value || username; u.role = userRole.value;
-        u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked };
-        addAudit('user.edit','user',u.id,'Edited user');
-      } else {
-        const newUser = { id: uid('user'), username, display: userDisplay.value || username, role: userRole.value, isAdmin: userRole.value==='Admin', permissions: { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked } };
-        state.users.push(newUser);
-        // ensure transactions map
-        state.transactions[newUser.id] = state.transactions[newUser.id] || {};
-        for(const b of state.businesses) state.transactions[newUser.id][b.id] = state.transactions[newUser.id][b.id] || [];
-        addAudit('user.add','user',newUser.id,'Added user');
-      }
-      saveState();
-      closeModal(userModal);
-      refreshSelectors();
-      ensureSelection();
-      renderAll();
-    });
+    userSave.addEventListener('click', saveUser);
     userCancel.addEventListener('click', ()=> closeModal(userModal));
 
-    // Business
-    btnAddBusiness.addEventListener('click', ()=> {
-      businessModalTitle.textContent = 'Add Business';
-      bizName.value = ''; bizOwnerSelect.value = state.users[0] ? state.users[0].id : '';
-      bizEntity.value = 'Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate;
-      bizVatEnabled.checked = true; bizPitEnabled.checked = true; bizPayeEnabled.checked = true; bizShowLines.checked = true; bizCitEnabled.checked = true;
-      bizSave.dataset.edit = '';
-      bizContactsList.innerHTML = '';
-      openModal(businessModal);
-    });
-    btnEditBusiness.addEventListener('click', ()=> {
-      if(!selectedBizId) return alert('Select business');
-      const b = findBiz(selectedBizId); if(!b) return alert('Business not found');
-      businessModalTitle.textContent = 'Edit Business';
-      bizName.value = b.name || ''; bizOwnerSelect.value = b.ownerId || (state.users[0] && state.users[0].id) || '';
-      bizEntity.value = b.entity || 'Company'; bizVat.value = b.vatRate || DEFAULTS.vatRate; bizWht.value = b.whtRate || DEFAULTS.whtRate; bizCit.value = b.citRate || DEFAULTS.citRate;
-      bizVatEnabled.checked = !!b.vatEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled;
-      bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0;
-      bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
-      bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
-      bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0;
-      renderBizContacts(b);
-      bizSave.dataset.edit = b.id;
-      openModal(businessModal);
-    });
-    btnDeleteBusiness.addEventListener('click', ()=> {
-      if(!selectedBizId) return alert('Select business');
-      if(!confirm('Delete business and all its transactions/attachments?')) return;
-      deleteBusiness(selectedBizId);
-    });
-    bizSave.addEventListener('click', ()=> {
-      const name = (bizName.value||'').trim();
-      if(!name) return alert('Business name required');
-      const editId = bizSave.dataset.edit;
-      if(editId){
-        const b = findBiz(editId);
-        if(!b) return alert('Business not found');
-        b.name = name; b.ownerId = bizOwnerSelect.value; b.entity = bizEntity.value;
-        b.vatRate = Number(bizVat.value || DEFAULTS.vatRate); b.whtRate = Number(bizWht.value || DEFAULTS.whtRate); b.citRate = Number(bizCit.value || DEFAULTS.citRate);
-        b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked;
-        b.lossBroughtForward = Number(bizLossBF.value || 0); b.caCarryForward = Number(bizCACF.value || 0);
-        b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
-        b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) };
-        addAudit('business.edit','business', b.id, 'Edited business');
-      } else {
-        const newBiz = {
-          id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
-          entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate),
-          vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
-          accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-          lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault
-        };
-        // default accounts
-        newBiz.accounts.push({ id: uid('acct'), name:'Sales', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        state.businesses.push(newBiz);
-        for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
-        addAudit('business.add','business', newBiz.id, 'Added business');
-      }
-      saveState();
-      closeModal(businessModal);
-      refreshSelectors();
-      ensureSelection();
-      populateAccountSelect();
-      renderAll();
-    });
+    btnAddBusiness.addEventListener('click', openAddBusinessModal);
+    btnEditBusiness.addEventListener('click', openEditBusinessModal);
+    btnDeleteBusiness.addEventListener('click', ()=> { if(!selectedBizId) return alert('Select business'); if(!confirm('Delete business and all its transactions/attachments?')) return; deleteBusiness(selectedBizId); });
+    bizSave.addEventListener('click', saveBusiness);
     bizCancel.addEventListener('click', ()=>closeModal(businessModal));
-    btnAddContact.addEventListener('click', ()=> {
-      if(!selectedBizId) return alert('Select business first');
-      const b = findBiz(selectedBizId);
-      const name = (newContactName.value||'').trim();
-      if(!name) return alert('Contact name required');
-      b.contacts = b.contacts || [];
-      b.contacts.push({ id: uid('c'), name, type: newContactType.value, statutory:{ pension:0, rent:0, life:0, mortgage:0, nhf:0 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } });
-      saveState();
-      renderBizContacts(b);
-    });
+    btnAddContact.addEventListener('click', addContactToBiz);
 
-    // accounts modal
-    btnManageAccounts.addEventListener('click', ()=> {
-      if(!selectedBizId) return alert('Select business');
-      renderAccounts();
-      openModal(accountsModal);
-    });
-    addAccountBtn.addEventListener('click', ()=> {
-      const name = (newAccountName.value||'').trim();
-      const cat = newAccountCategory.value;
-      const dis = !!newAccountDisallowable.checked;
-      const nt = !!newAccountNonTax.checked;
-      const rentFreq = newAccountRentFreq.value || '';
-      if(!name) return alert('Account name required');
-      const b = findBiz(selectedBizId);
-      b.accounts = b.accounts || [];
-      b.accounts.push({ id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq });
-      saveState();
-      renderAccounts();
-      populateAccountSelect();
-    });
+    btnManageAccounts.addEventListener('click', ()=> { if(!selectedBizId) return alert('Select business'); renderAccounts(); openModal(accountsModal); });
+    addAccountBtn.addEventListener('click', addAccount);
     closeAccountsBtn.addEventListener('click', ()=> closeModal(accountsModal));
 
-    // transaction form behavior
-    txnAction.addEventListener('change', ()=> {
-      const val = txnAction.value;
-      if(val === 'InventoryPurchase' || val === 'InventorySale'){
-        mainTxnForm.style.display = 'none';
-        inventorySubform.style.display = 'block';
-        assetPurchaseSubform.style.display = 'none';
-        assetDisposalSubform.style.display = 'none';
-        populateAccountSelect();
-        renderFeatureVisibility();
-      } else if(val === 'AssetPurchase'){
-        mainTxnForm.style.display = 'none';
-        assetPurchaseSubform.style.display = 'block';
-        assetDisposalSubform.style.display = 'none';
-        inventorySubform.style.display = 'none';
-        populateAccountSelect();
-        renderFeatureVisibility();
-      } else if(val === 'AssetDisposal'){
-        mainTxnForm.style.display = 'none';
-        assetDisposalSubform.style.display = 'block';
-        assetPurchaseSubform.style.display = 'none';
-        inventorySubform.style.display = 'none';
-        populateAccountSelect();
-        renderFeatureVisibility();
-      } else {
-        mainTxnForm.style.display = 'flex';
-        inventorySubform.style.display = 'none';
-        assetPurchaseSubform.style.display = 'none';
-        assetDisposalSubform.style.display = 'none';
-        renderFeatureVisibility();
-      }
-    });
+    txnAction.addEventListener('change', txnActionChanged);
     txnWht.addEventListener('change', ()=> {
       const show = txnWht.checked;
       txnWhtRateLabel.style.display = show ? 'inline-flex' : 'none';
@@ -957,66 +761,26 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     } );
     btnAddTxn.addEventListener('click', handleAddTransaction);
 
-    // inventory
     btnAddInv.addEventListener('click', handleInventoryAction);
     btnInvCancel.addEventListener('click', ()=>{ txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnInvUndo.addEventListener('click', handleUndoInventory);
 
-    // assets
     btnAddAsset.addEventListener('click', handleAddAsset);
     btnDisposeAsset.addEventListener('click', handleDisposeAsset);
     btnAssetCancel.addEventListener('click', ()=>{ txnAction.value=''; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnAssetUndo.addEventListener('click', handleUndoAsset);
 
-    // ledger search
     document.getElementById('btnSearch').addEventListener('click', renderLedger);
     document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
 
-    // export/import/clear
-    document.getElementById('btnExport').addEventListener('click', ()=> {
-      const dataStr = JSON.stringify(state, null, 2);
-      const blob = new Blob([dataStr], { type:'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'ntc_full_data.json'; a.click(); URL.revokeObjectURL(url);
-    });
+    document.getElementById('btnExport').addEventListener('click', exportJSON);
     document.getElementById('btnImport').addEventListener('click', ()=> document.getElementById('fileInput').click());
-    document.getElementById('fileInput').addEventListener('change', (e)=> {
-      const f = e.target.files[0]; if(!f) return;
-      const r = new FileReader();
-      r.onload = () => {
-        try {
-          const incoming = JSON.parse(r.result);
-          if(!confirm('Import will replace current data. Continue?')) return;
-          state = incoming;
-          migrateState();
-          refreshSelectors();
-          ensureSelection();
-          populateAccountSelect();
-          resetForms();
-          renderAll();
-          saveState();
-          alert('Import complete');
-        } catch(err){ alert('Invalid JSON'); }
-      };
-      r.readAsText(f);
-    });
-    document.getElementById('btnClearAll').addEventListener('click', ()=> {
-      if(!confirm('Clear all stored data?')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      state = { users:[], businesses:[], transactions:{}, attachments:{}, audit:[], auth:{ currentUserId:null } };
-      seedDemo();
-      refreshSelectors();
-      ensureSelection();
-      populateAccountSelect();
-      resetForms();
-      renderAll();
-    });
+    document.getElementById('fileInput').addEventListener('change', importJSON);
+    document.getElementById('btnClearAll').addEventListener('click', clearAllData);
 
-    // tabs
     btnLedgerTab.addEventListener('click', ()=> { activeTab='ledger'; renderTab(); });
     btnReportsTab.addEventListener('click', ()=> { activeTab='reports'; renderTab(); });
 
-    // Report tab handlers
     document.querySelectorAll('#reportsSection .tab').forEach(tb => {
       tb.addEventListener('click', (e) => {
         document.querySelectorAll('#reportsSection .tab').forEach(t=>t.classList.remove('active'));
@@ -1025,10 +789,204 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       });
     });
 
-    // exports from reports
     document.getElementById('btnExportCsv').addEventListener('click', ()=> exportCurrentReport('csv'));
     document.getElementById('btnExportPdf').addEventListener('click', ()=> exportCurrentReport('pdf'));
     document.getElementById('btnExportXlsx').addEventListener('click', ()=> exportCurrentReport('xlsx'));
+  }
+
+  // UI helper functions
+  function openUserModal(editId){
+    userModalTitle.textContent = editId ? 'Edit User' : 'Add User';
+    userName.value = ''; userDisplay.value = ''; userRole.value = 'User';
+    permView.checked = permEdit.checked = permDelete.checked = false;
+    userSave.dataset.edit = editId || '';
+    if(editId){
+      const u = state.users.find(x=>x.id===editId);
+      if(u){ userName.value = u.username; userDisplay.value = u.display || u.username; userRole.value = u.role; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; }
+    }
+    openModal(userModal);
+  }
+  function saveUser(){
+    const username = (userName.value||'').trim();
+    if(!username) return alert('Username required');
+    const editId = userSave.dataset.edit;
+    if(editId){
+      const u = state.users.find(x=>x.id===editId);
+      u.username = username; u.display = userDisplay.value || username; u.role = userRole.value;
+      u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked };
+      addAudit('user.edit','user',u.id,'Edited user');
+    } else {
+      const newUser = { id: uid('user'), username, display: userDisplay.value || username, role: userRole.value, isAdmin: userRole.value==='Admin', permissions: { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked } };
+      state.users.push(newUser);
+      state.transactions[newUser.id] = state.transactions[newUser.id] || {};
+      for(const b of state.businesses) state.transactions[newUser.id][b.id] = state.transactions[newUser.id][b.id] || [];
+      addAudit('user.add','user',newUser.id,'Added user');
+    }
+    saveState();
+    closeModal(userModal);
+    refreshSelectors();
+    ensureSelection();
+    renderAll();
+  }
+
+  function openAddBusinessModal(){
+    businessModalTitle.textContent = 'Add Business';
+    bizName.value = ''; bizOwnerSelect.value = state.users[0] ? state.users[0].id : '';
+    bizEntity.value = 'Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate;
+    bizVatEnabled.checked = true; bizPitEnabled.checked = true; bizPayeEnabled.checked = true; bizShowLines.checked = true; bizCitEnabled.checked = true;
+    bizSave.dataset.edit = '';
+    bizContactsList.innerHTML = '';
+    openModal(businessModal);
+  }
+  function openEditBusinessModal(){
+    if(!selectedBizId) return alert('Select business');
+    const b = findBiz(selectedBizId); if(!b) return alert('Business not found');
+    businessModalTitle.textContent = 'Edit Business';
+    bizName.value = b.name || ''; bizOwnerSelect.value = b.ownerId || (state.users[0] && state.users[0].id) || '';
+    bizEntity.value = b.entity || 'Company'; bizVat.value = b.vatRate || DEFAULTS.vatRate; bizWht.value = b.whtRate || DEFAULTS.whtRate; bizCit.value = b.citRate || DEFAULTS.citRate;
+    bizVatEnabled.checked = !!b.vatEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled;
+    bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0;
+    bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
+    bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
+    bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0;
+    renderBizContacts(b);
+    bizSave.dataset.edit = b.id;
+    openModal(businessModal);
+  }
+  function saveBusiness(){
+    const name = (bizName.value||'').trim();
+    if(!name) return alert('Business name required');
+    const editId = bizSave.dataset.edit;
+    if(editId){
+      const b = findBiz(editId);
+      if(!b) return alert('Business not found');
+      b.name = name; b.ownerId = bizOwnerSelect.value; b.entity = bizEntity.value;
+      b.vatRate = Number(bizVat.value || DEFAULTS.vatRate); b.whtRate = Number(bizWht.value || DEFAULTS.whtRate); b.citRate = Number(bizCit.value || DEFAULTS.citRate);
+      b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked;
+      b.lossBroughtForward = Number(bizLossBF.value || 0); b.caCarryForward = Number(bizCACF.value || 0);
+      b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
+      b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) };
+      addAudit('business.edit','business', b.id, 'Edited business');
+    } else {
+      const newBiz = {
+        id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
+        entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate),
+        vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
+        accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
+        lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault
+      };
+      newBiz.accounts.push({ id: uid('acct'), name:'Sales', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      state.businesses.push(newBiz);
+      for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
+      addAudit('business.add','business', newBiz.id, 'Added business');
+    }
+    saveState();
+    closeModal(businessModal);
+    refreshSelectors();
+    ensureSelection();
+    populateAccountSelect();
+    renderAll();
+  }
+
+  function addContactToBiz(){
+    if(!selectedBizId) return alert('Select business first');
+    const b = findBiz(selectedBizId);
+    const name = (newContactName.value||'').trim();
+    if(!name) return alert('Contact name required');
+    b.contacts = b.contacts || [];
+    b.contacts.push({ id: uid('c'), name, type: newContactType.value, statutory:{ pension:0, rent:0, life:0, mortgage:0, nhf:0 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } });
+    saveState();
+    renderBizContacts(b);
+  }
+
+  function addAccount(){
+    const name = (newAccountName.value||'').trim();
+    const cat = newAccountCategory.value;
+    const dis = !!newAccountDisallowable.checked;
+    const nt = !!newAccountNonTax.checked;
+    const rentFreq = newAccountRentFreq.value || '';
+    if(!name) return alert('Account name required');
+    const b = findBiz(selectedBizId);
+    b.accounts = b.accounts || [];
+    b.accounts.push({ id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq });
+    saveState();
+    renderAccounts();
+    populateAccountSelect();
+  }
+
+  function txnActionChanged(){
+    const val = txnAction.value;
+    if(val === 'InventoryPurchase' || val === 'InventorySale'){
+      mainTxnForm.style.display = 'none';
+      inventorySubform.style.display = 'block';
+      assetPurchaseSubform.style.display = 'none';
+      assetDisposalSubform.style.display = 'none';
+      populateAccountSelect();
+      renderFeatureVisibility();
+    } else if(val === 'AssetPurchase'){
+      mainTxnForm.style.display = 'none';
+      assetPurchaseSubform.style.display = 'block';
+      assetDisposalSubform.style.display = 'none';
+      inventorySubform.style.display = 'none';
+      populateAccountSelect();
+      renderFeatureVisibility();
+    } else if(val === 'AssetDisposal'){
+      mainTxnForm.style.display = 'none';
+      assetDisposalSubform.style.display = 'block';
+      assetPurchaseSubform.style.display = 'none';
+      inventorySubform.style.display = 'none';
+      populateAccountSelect();
+      renderFeatureVisibility();
+    } else {
+      mainTxnForm.style.display = 'flex';
+      inventorySubform.style.display = 'none';
+      assetPurchaseSubform.style.display = 'none';
+      assetDisposalSubform.style.display = 'none';
+      renderFeatureVisibility();
+    }
+  }
+
+  function exportJSON(){
+    const dataStr = JSON.stringify(state, null, 2);
+    const blob = new Blob([dataStr], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'ntc_full_data.json'; a.click(); URL.revokeObjectURL(url);
+  }
+  function importJSON(e){
+    const f = e.target.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const incoming = JSON.parse(r.result);
+        if(!confirm('Import will replace current data. Continue?')) return;
+        state = incoming;
+        migrateState();
+        refreshSelectors();
+        ensureSelection();
+        populateAccountSelect();
+        resetForms();
+        renderAll();
+        saveState();
+        alert('Import complete');
+      } catch(err){ alert('Invalid JSON'); }
+    };
+    r.readAsText(f);
+  }
+  function clearAllData(){
+    if(!confirm('Clear all stored data?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    state = { users:[], businesses:[], transactions:{}, attachments:{}, audit:[], auth:{ currentUserId:null } };
+    seedDemo();
+    refreshSelectors();
+    ensureSelection();
+    populateAccountSelect();
+    resetForms();
+    renderAll();
   }
 
   // Helper finders
@@ -1052,7 +1010,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     businessSelect.value = selectedBizId || (state.businesses[0] && state.businesses[0].id) || '';
     userSelect.addEventListener('change', ()=> { selectedUserId = userSelect.value; renderAll(); });
     businessSelect.addEventListener('change', ()=> { selectedBizId = businessSelect.value; populateAccountSelect(); renderAll(); renderFeatureVisibility(); });
-    // set auth current user
     if(state.auth.currentUserId) selectedUserId = state.auth.currentUserId;
     userSelect.value = selectedUserId;
   }
@@ -1118,6 +1075,12 @@ Below is the updated index.html content. (Save/replace your repository's index.h
 
     assetName.value=''; assetQty.value=1; assetUnitPrice.value=''; assetCost.value=''; assetOpeningCost.value=''; assetOpeningAccDep.value=''; assetPurchaseDate.value=''; assetLife.value=''; assetCA.value=''; assetPurchaseAccount.selectedIndex=0; assetClassification.value='Fixed'; assetDepRate.value=''; assetContact.value=''; assetReceipt.value='';
     assetDisposalDate.value=''; assetDisposalProceeds.value=''; assetDisposalAccount.selectedIndex=0; assetDisposalContact.value=''; assetDisposalReceipt.value='';
+
+    // ensure add button text resets
+    btnAddTxn.textContent = 'Add';
+    btnAddTxn.dataset.edit = '';
+    try { btnAddTxn.removeEventListener('click', saveEditedTxnHandler); } catch(e){}
+    try { btnAddTxn.addEventListener('click', handleAddTransaction); } catch(e){}
   }
 
   // Add transaction (basic)
@@ -1141,7 +1104,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       contact: txnContact.value || '',
       receiptId: null
     };
-    // handle receipt
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
       const reader = new FileReader();
@@ -1163,7 +1125,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     addAudit('txn.add','txn',txn.id, `Added txn ${txn.action} ${txn.amount}`);
     saveState();
     resetForms();
-    // Return to default main form view
     txnAction.value=''; inventorySubform.style.display='none'; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
     renderAll();
   }
@@ -1190,7 +1151,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       const qty = Number(invQty.value || 0);
       const unit = Number(invUnitPrice.value || 0);
       if(txnAction.value === 'InventoryPurchase'){
-        // weighted avg
         const existingValue = (item.qty || 0) * (item.avgCost || 0);
         const incomingValue = qty * unit;
         const newQty = (item.qty || 0) + qty;
@@ -1202,8 +1162,7 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       }
       addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`);
     }
-    // push a transaction record for ledger
-    const t = { id: uid('txn'), date: today(), action: txnAction.value || 'InventoryPurchase', accountId: invAccountSelect.value, accountName: findAccount(b, invAccountSelect.value)?.name || '', accountCategory: findAccount(b, invAccountSelect.value)?.category || '', description: 'Inventory '+ (invNewName.value||findItemName(b, invItemSelect.value)), qty: Number(invQty.value||0), unitPrice: Number(invUnitPrice.value||0), amount: Number((invQty.value||0)*(invUnitPrice.value||0)), vatType: invVatType.value || 'none', whtApplied:false, paye:false, contact: invContact.value || '', receiptId:null };
+    const t = { id: uid('txn'), date: today(), action: txnAction.value || 'InventoryPurchase', accountId: invAccountSelect.value, accountName: findAccount(b, invAccountSelect.value)?.name || '', accountCategory: findAccount(b, invAccountSelect.value)?.category || '', description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), qty: Number(invQty.value||0), unitPrice: Number(invUnitPrice.value||0), amount: Number((invQty.value||0)*(invUnitPrice.value||0)), vatType: invVatType.value || 'none', whtApplied:false, paye:false, contact: invContact.value || '', receiptId:null };
     if(invReceipt.files && invReceipt.files[0]){
       const r = invReceipt.files[0];
       const reader = new FileReader();
@@ -1222,13 +1181,11 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     state.transactions[selectedUserId][selectedBizId].push(t);
     addAudit('txn.inv','txn',t.id, `Inventory txn ${t.action} ${t.amount}`);
     saveState();
-    // Return to default main form view
     txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
     renderAll();
   }
   function handleUndoInventory(){
-    // simple undo: remove last inventory-related transaction and revert last inventory change (not perfect)
     const arr = state.transactions[selectedUserId][selectedBizId];
     for(let i=arr.length-1;i>=0;i--){
       if(arr[i].action && arr[i].action.startsWith('Inventory')){
@@ -1265,7 +1222,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     };
     b.assets = b.assets || [];
     b.assets.push(item);
-    // add ledger txn for asset purchase
     const t = { id: uid('txn'), date: item.purchaseDate, action: 'AssetPurchase', accountId: assetPurchaseAccount.value, accountName: findAccount(b, assetPurchaseAccount.value)?.name || '', accountCategory: findAccount(b, assetPurchaseAccount.value)?.category || '', description: `Asset purchase ${item.name}`, amount: item.cost, qty: item.qty, unitPrice: item.unitPrice, vatType:'none', whtApplied:false, paye:false, contact: assetContact.value || '', receiptId:null };
     if(assetReceipt.files && assetReceipt.files[0]){
       const r = assetReceipt.files[0];
@@ -1285,7 +1241,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     state.transactions[selectedUserId][selectedBizId].push(t);
     addAudit('asset.add','asset',t.id, `Added asset txn ${t.description}`);
     saveState();
-    // Return to default main form
     txnAction.value=''; assetPurchaseSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
     renderAll();
@@ -1298,12 +1253,10 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     if(!asset) return alert('Select asset to dispose');
     asset.disposed = true;
     asset.disposal = { date: assetDisposalDate.value || today(), proceeds: Number(assetDisposalProceeds.value || 0), accountId: assetDisposalAccount.value || '', accountName: findAccount(b, assetDisposalAccount.value)?.name || '' };
-    // compute gain/loss
     const netBook = (asset.cost || 0) - (asset.accumulatedDep || 0) - (asset.openingAccDep || 0);
     const gain = (asset.disposal.proceeds || 0) - netBook;
     asset.disposal.gain = gain;
     addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} gain ${gain}`);
-    // add ledger txn for disposal
     const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name}`, amount: asset.disposal.proceeds, gain: gain, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id };
     if(assetDisposalReceipt.files && assetDisposalReceipt.files[0]){
       const r = assetDisposalReceipt.files[0];
@@ -1323,13 +1276,11 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     state.transactions[selectedUserId][selectedBizId].push(t);
     addAudit('txn.asset.dispose','txn',t.id, `Asset disposal txn ${t.amount}`);
     saveState();
-    // Return to default main form
     txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
     renderAll();
   }
   function handleUndoAsset(){
-    // simple undo: remove last asset-related transaction and mark last asset not disposed
     const arr = state.transactions[selectedUserId][selectedBizId] || [];
     for(let i=arr.length-1;i>=0;i--){
       if(arr[i].action && (arr[i].action === 'AssetPurchase' || arr[i].action === 'AssetDisposal')){
@@ -1348,15 +1299,15 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     alert('No asset transaction found to undo');
   }
 
-  // Find item name helper
-  function findItemName(biz, id){
+  // Find item name helper (fixed)
+  function findItemName(id){
     const b = findBiz(selectedBizId);
     if(!b) return '';
     const it = (b.inventory||[]).find(x=>x.id===id);
     return it ? it.name : '';
   }
 
-  // Ledger rendering & edit
+  // Ledger rendering & edit (fixed to avoid inline onclick string issues)
   function renderLedger(){
     ledgerTableBody.innerHTML = '';
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
@@ -1367,22 +1318,48 @@ Below is the updated index.html content. (Save/replace your repository's index.h
         if(!hay.includes(search)) continue;
       }
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${t.date||''}</td>
-                      <td>${t.action||''}</td>
-                      <td>${t.accountName||''}</td>
-                      <td>${t.description||''}</td>
-                      <td>${fmt(t.amount||0)}</td>
-                      <td>${t.vatType||''}</td>
-                      <td>${t.whtApplied ? (t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%' : ''}</td>
-                      <td>${t.paye ? 'Yes' : ''}</td>
-                      <td>${t.contact||''}</td>
-                      <td>${t.receiptId ? '<span class="link-like" onclick="viewReceipt(\\''+t.receiptId+'\\')">View</span>' : ''}</td>
-                      <td></td>`;
-      // actions cell
-      const actionTd = tr.querySelector('td:last-child');
-      const editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.className='small'; editBtn.addEventListener('click', ()=> openEditTxn(t));
-      const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.className='small danger'; delBtn.addEventListener('click', ()=> { if(!confirm('Delete txn?')) return; deleteTxn(t.id); });
-      actionTd.appendChild(editBtn); actionTd.appendChild(delBtn);
+
+      const tdDate = document.createElement('td'); tdDate.textContent = t.date || '';
+      const tdAction = document.createElement('td'); tdAction.textContent = t.action || '';
+      const tdAccount = document.createElement('td'); tdAccount.textContent = t.accountName || '';
+      const tdDesc = document.createElement('td'); tdDesc.textContent = t.description || '';
+      const tdAmount = document.createElement('td'); tdAmount.textContent = fmt(t.amount||0);
+      const tdVat = document.createElement('td'); tdVat.textContent = t.vatType || '';
+      const tdWht = document.createElement('td'); tdWht.textContent = t.whtApplied ? ((t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%') : '';
+      const tdPaye = document.createElement('td'); tdPaye.textContent = t.paye ? 'Yes' : '';
+      const tdContact = document.createElement('td'); tdContact.textContent = t.contact || '';
+      const tdReceipt = document.createElement('td');
+      if(t.receiptId){
+        const link = document.createElement('span');
+        link.className = 'link-like';
+        link.textContent = 'View';
+        link.addEventListener('click', ()=> viewReceipt(t.receiptId));
+        tdReceipt.appendChild(link);
+      } else {
+        tdReceipt.textContent = '';
+      }
+      const tdActions = document.createElement('td');
+
+      const editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.className='small';
+      editBtn.addEventListener('click', ()=> openEditTxn(t));
+      const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.className='small danger';
+      delBtn.addEventListener('click', ()=> { if(!confirm('Delete txn?')) return; deleteTxn(t.id); });
+
+      tdActions.appendChild(editBtn);
+      tdActions.appendChild(delBtn);
+
+      tr.appendChild(tdDate);
+      tr.appendChild(tdAction);
+      tr.appendChild(tdAccount);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdAmount);
+      tr.appendChild(tdVat);
+      tr.appendChild(tdWht);
+      tr.appendChild(tdPaye);
+      tr.appendChild(tdContact);
+      tr.appendChild(tdReceipt);
+      tr.appendChild(tdActions);
+
       ledgerTableBody.appendChild(tr);
     }
   }
@@ -1395,11 +1372,8 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   }
 
   function openEditTxn(tx){
-    // limited edit per option A
     if(!tx) return;
-    // prefill based on tx.action
     if(tx.action === 'InventoryPurchase' || tx.action === 'InventorySale'){
-      // open inventory subform and prefill
       txnAction.value = tx.action;
       mainTxnForm.style.display='none';
       inventorySubform.style.display='block';
@@ -1407,7 +1381,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       assetDisposalSubform.style.display='none';
       renderInventorySelect();
       invNewName.value = tx.description || '';
-      // best-effort prefill
       invQty.value = tx.qty || '';
       invUnitPrice.value = tx.unitPrice || '';
       invContact.value = tx.contact || '';
@@ -1435,7 +1408,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       assetDisposalContact.value = tx.contact || '';
       return;
     }
-    // otherwise populate main form fields
     txnDate.value = tx.date || today();
     txnAction.value = tx.action || '';
     txnAccount.value = tx.accountId || '';
@@ -1445,7 +1417,7 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     txnWht.checked = !!tx.whtApplied; txnWhtRate.value = tx.whtRate || '';
     txnSalary.checked = !!tx.paye;
     txnContact.value = tx.contact || '';
-    // mark as editing
+
     btnAddTxn.textContent = 'Save';
     btnAddTxn.dataset.edit = tx.id;
     btnAddTxn.removeEventListener('click', handleAddTransaction);
@@ -1469,7 +1441,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     tx.whtApplied = !!txnWht.checked; tx.whtRate = Number(txnWhtRate.value || 0); tx.whtBasis = txnWhtBasis.value || 'gross';
     tx.paye = !!txnSalary.checked;
     tx.contact = txnContact.value || '';
-    // handle receipt replace
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
       const reader = new FileReader();
@@ -1487,8 +1458,8 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     addAudit('txn.edit','txn',tx.id,'Edited txn');
     btnAddTxn.textContent = 'Add';
     btnAddTxn.dataset.edit = '';
-    btnAddTxn.removeEventListener('click', saveEditedTxnHandler);
-    btnAddTxn.addEventListener('click', handleAddTransaction);
+    try { btnAddTxn.removeEventListener('click', saveEditedTxnHandler); } catch(e){}
+    try { btnAddTxn.addEventListener('click', handleAddTransaction); } catch(e){}
     resetForms();
     renderAll();
   }
@@ -1509,11 +1480,10 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   }
 
   function renderQuickPanels(){
-    // inventory quick
-    const b = findBiz(selectedBizId);
     inventoryListDiv.innerHTML = '';
     assetListDiv.innerHTML = '';
     plSnapshotQuick.innerHTML = '';
+    const b = findBiz(selectedBizId);
     if(!b) return;
     if(b.inventory && b.inventory.length){
       for(const it of b.inventory){
@@ -1528,12 +1498,11 @@ Below is the updated index.html content. (Save/replace your repository's index.h
         assetListDiv.appendChild(d);
       }
     }
-    // P&L quick snapshot
     const pl = computePLSnapshot();
     plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
   }
 
-  // PL computation (basic)
+  // PL computation
   function computePLSnapshot(){
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     let revenue=0, expenses=0, depreciation=0;
@@ -1541,7 +1510,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
     }
-    // include daily depreciation as expense
     const dep = computeTotalDepreciation();
     depreciation = dep;
     expenses += depreciation;
@@ -1558,19 +1526,16 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     const asOf = asOfDate || today();
     for(const a of arr){
       if(!a.purchaseDate) continue;
-      const days = daysBetween(a.purchaseDate, asOf);
+      const days = Math.max(0, daysBetween(a.purchaseDate, asOf));
       const dinYear = daysInYear(a.purchaseDate);
-      const annualDepRate = Number(a.depRate || a.caPercent || 0);
-      // straight line based on cost over life
       if(a.lifeYears && a.lifeYears>0){
         const annualDep = (a.cost || 0) / a.lifeYears;
         const daily = annualDep / dinYear;
-        totalDep += daily * Math.max(0, days);
+        totalDep += daily * days;
       } else {
-        // if depRate provided, use percentage of cost
         const annual = ((a.depRate || 0)/100) * (a.cost || 0);
         const daily = annual / dinYear;
-        totalDep += daily * Math.max(0, days);
+        totalDep += daily * days;
       }
     }
     return totalDep;
@@ -1585,19 +1550,18 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     const asOf = asOfDate || today();
     for(const a of arr){
       if(!a.purchaseDate) continue;
-      const days = daysBetween(a.purchaseDate, asOf);
+      const days = Math.max(0, daysBetween(a.purchaseDate, asOf));
       const dinYear = daysInYear(a.purchaseDate);
       const caPercent = Number(a.caPercent || b.caRateDefault || DEFAULTS.caRateDefault);
       const annualCA = (caPercent/100) * (a.cost || 0);
       const daily = annualCA / dinYear;
-      totalCA += daily * Math.max(0, days);
+      totalCA += daily * days;
     }
     return totalCA;
   }
 
   // PAYE computation per contact using PAYE_BANDS
   function computePAYEOnAnnualIncome(annualTaxable){
-    // progressive bands calculation (simple marginal)
     if(!annualTaxable || annualTaxable <= 0) return 0;
     let remaining = annualTaxable;
     let tax = 0;
@@ -1620,92 +1584,69 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     const b = findBiz(selectedBizId);
     taxSummaryDiv.innerHTML = '';
     if(!b) return;
-    // compute basic P&L
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0;
-    let payeTotalAnnual = 0;
-    const payeByContact = {}; // sum salaries by contact
+    const payeByContact = {};
     for(const t of arr){
       if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
-      // VAT
       if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') vatCollected += (Number(t.amount||0) * (b.vatRate/100));
       if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') vatPaid += (Number(t.amount||0) * (b.vatRate/100));
-      // WHT (simplified)
       if(t.whtApplied && t.accountCategory === 'Expense') whtPayable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
       if(t.whtApplied && t.accountCategory === 'Revenue') whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
-      // PAYE
       if(t.paye && t.contact){
         payeByContact[t.contact] = (payeByContact[t.contact]||0) + Number(t.amount||0);
       }
     }
-    // Depreciation daily included as expense
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
-    // accounting profit
     const accountingProfit = revenue - expenses;
-    // Capital allowance daily for taxable profit calculation
     const capitalAllowanceDaily = computeTotalCapitalAllowance();
-    // Taxable profit (simplified): accountingProfit + disallowable expenses - capital allowance - lossBf etc.
     let taxableProfit = accountingProfit - capitalAllowanceDaily - (b.caCarryForward || 0) + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
-    // Chargeable gains handling (from disposed assets with classification 'Chargeable')
     const chargeableGains = computeChargeableGainsForBiz();
-    const turnover = revenue; // simple turnover based on revenue
+    const turnover = revenue;
     let cgtCharge = 0;
     let cgtExcludedFromTaxable = 0;
-    // apply company rules for CGT
     if(b.entity === 'Company'){
       if(turnover > CIT_TURNOVER_THRESHOLD){
-        // for each gain, if disposal value <=150M or gain <=10M => exempt
         for(const g of chargeableGains){
           if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
-            // exempt
             cgtExcludedFromTaxable += g.gain;
           } else {
             cgtCharge += g.gain * 0.30;
-            cgtExcludedFromTaxable += g.gain; // excluded from taxable profit as per rule
+            cgtExcludedFromTaxable += g.gain;
           }
         }
-        // remove excluded gains from taxable profit
         taxableProfit -= cgtExcludedFromTaxable;
       } else {
-        // turnover <= threshold: CGT may not be treated specially - keep gains included in taxable profit
-        // But apply exemption rules for companies with small disposals/gains
         for(const g of chargeableGains){
           if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
-            // exempt => do not include in taxable profit
             taxableProfit -= g.gain;
           } else {
-            // charge CGT
             cgtCharge += g.gain * 0.30;
             taxableProfit -= g.gain;
           }
         }
       }
     } else {
-      // Sole proprietor rules: chargeable gains on shares for disposal value <=150M or gain <=10M excluded from taxable profit
       for(const g of chargeableGains){
         if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
           taxableProfit -= g.gain;
         } else {
-          // for sole proprietor we don't calculate CGT at 30% per your instruction
-          // leave gain included as taxable if not exempt (but instruction said exclude for <= thresholds)
+          // leaves in taxable profit (per instructions)
         }
       }
     }
 
-    // PAYE totals aggregated
     let payeMonthlyTotal = 0;
     let payeAnnualTotal = 0;
     for(const cName in payeByContact){
-      // payeByContact contains sums of salary transactions (assumed periodic). Treat sum as ANNUAL taxable (best-effort)
       const annualSalary = payeByContact[cName];
       const computedTax = computePAYEOnAnnualIncome(annualSalary || 0);
       payeAnnualTotal += computedTax;
       payeMonthlyTotal += computedTax / 12;
     }
 
-    // CIT (company tax) simplified: only if enabled
     let citCharge = 0;
     if(b.entity === 'Company' && b.citEnabled){
       if(taxableProfit > 0){
@@ -1713,19 +1654,15 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       }
     }
 
-    // PIT - for sole proprietor
     let pitCharge = 0;
     if(b.entity === 'SoleProprietor' && b.pitEnabled){
       if(taxableProfit > 0){
-        // simple flat PIT placeholder (for prototype keep 20% - real rules complex)
         pitCharge = 0.20 * taxableProfit;
       }
     }
 
-    // VAT net
     const vatNet = vatCollected - vatPaid;
 
-    // Draw summary based on entity type
     let html = `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
     html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
     html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
@@ -1769,12 +1706,10 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       btnLedgerTab.classList.add('active'); btnReportsTab.classList.remove('active');
       renderAll();
     } else {
-      // when showing reports, hide other UI per request
       ledgerSection.style.display = 'none';
       reportsSection.style.display = 'block';
       quickPanels.style.display = 'none';
       btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active');
-      // default report
       document.querySelectorAll('#reportsSection .tab').forEach(t=>t.classList.remove('active'));
       const tb = document.querySelector('#reportsSection .tab[data-report="taxReconciliation"]');
       if(tb) tb.classList.add('active');
@@ -1783,7 +1718,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
   }
 
   function renderReportsTabState(){
-    // ensure right visibility when starting
     if(activeTab === 'reports') {
       ledgerSection.style.display = 'none';
       reportsSection.style.display = 'block';
@@ -1799,7 +1733,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     const b = findBiz(selectedBizId);
     if(!b) { reportContent.innerHTML = '<div>Select a business to view reports</div>'; return; }
     if(name === 'taxReconciliation'){
-      // show accounting profit, taxable profit and a breakdown incl. CGT calculations
       const pl = computePLSnapshot();
       const ca = computeTotalCapitalAllowance();
       const gains = computeChargeableGainsForBiz();
@@ -1825,7 +1758,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
       }
       reportContent.innerHTML = html;
     } else if(name === 'payeReport'){
-      // PAYE breakdown per contact
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const payeByContact = {};
       for(const t of arr){
@@ -1848,7 +1780,6 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     } else if(name === 'assetsReport'){
       const gains = computeChargeableGainsForBiz();
       let html = `<h3>Assets Report</h3>`;
-      const b = findBiz(selectedBizId);
       html += `<div><strong>Assets</strong></div>`;
       if(b.assets && b.assets.length){
         html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Name</th><th>Qty</th><th>Unit Price</th><th>Cost</th><th>Acc Dep</th><th>Classification</th><th>Disposed</th></tr></thead><tbody>`;
@@ -1881,7 +1812,9 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     if(!b) return;
     for(const c of b.contacts || []){
       const div = document.createElement('div'); div.className='account-row';
-      div.innerHTML = `<div><strong>${c.name}</strong> <span class="small-muted">(${c.type})</span></div><div><button class="small" onclick="editContact('${c.id}')">Edit</button></div>`;
+      const editBtn = document.createElement('button'); editBtn.className='small'; editBtn.textContent='Edit'; editBtn.addEventListener('click', ()=> editContact(c.id));
+      div.innerHTML = `<div><strong>${c.name}</strong> <span class="small-muted">(${c.type})</span></div>`;
+      div.appendChild(editBtn);
       bizContactsList.appendChild(div);
     }
   }
@@ -1896,7 +1829,9 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     if(!b) return;
     for(const a of b.accounts){
       const div = document.createElement('div'); div.className='account-row';
-      div.innerHTML = `<div><strong>${a.name}</strong> <div class="small-muted">${a.category}</div></div><div><button class="small" onclick="deleteAccount('${a.id}')">Delete</button></div>`;
+      const delBtn = document.createElement('button'); delBtn.className='small'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=> deleteAccount(a.id));
+      div.innerHTML = `<div><strong>${a.name}</strong> <div class="small-muted">${a.category}</div></div>`;
+      div.appendChild(delBtn);
       accountsList.appendChild(div);
     }
   }
@@ -1928,6 +1863,11 @@ Below is the updated index.html content. (Save/replace your repository's index.h
     renderAll();
   }
 
+  // utilities for tax computations reused earlier
+  function computePLAndTaxesForReports(){
+    // placeholder if needed
+  }
+
   // final initialization
   refreshSelectors();
   ensureSelection();
@@ -1939,9 +1879,10 @@ Below is the updated index.html content. (Save/replace your repository's index.h
 </body>
 </html>
 
-If you'd like, I can:
-- Produce a pull request in your repository with this updated index.html (I can create the PR and push the file), or
-- Narrow changes further (e.g., change PAYE PIT computation rules, refine CGT handling for additional asset types), or
-- Add unit tests / a migration utility to convert existing stored data that still has older field names.
+Notes:
+- I fixed the ledger receipt handling to use event listeners (no inline onclick string escapes).
+- I fixed findItemName to accept the item id correctly.
+- I ensured btnAddTxn event handler switching uses named functions and cleaned up add/remove calls (guarded removals).
+- This file preserves the behavioral changes you requested earlier (Assets/Inventory opening balances, PAYE aggregation, daily depreciation/CA, CGT rules, reports layout), while fixing runtime errors that would break the SPA.
 
-Which would you like next?
+If you encounter console errors after replacing your file, paste the console stack trace here and I’ll fix the remaining issues. If you want, I can also commit this file to your repository and open a pull request — tell me which branch to use.
