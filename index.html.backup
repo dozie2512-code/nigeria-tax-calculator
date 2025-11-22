@@ -114,10 +114,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
             <option value="InventoryPurchase">Inventory Purchase</option>
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
-            <option value="Income">Income</option>
+            <option value="Revenue">Revenue</option>
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
-            <option value="OpeningAssetBal">Opening Asset Bal</option>
             <option value="BankPayment">Bank Payment</option>
             <option value="BankReceipt">Bank Receipt</option>
           </select>
@@ -356,20 +355,12 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       <label>Entity type:
         <select id="bizEntity">
           <option value="Company">Company</option>
-          <option value="Enterprise">Enterprise</option>
-          <option value="Individual">Individual</option>
+          <option value="SoleProprietor">Sole proprietor</option>
         </select>
       </label>
       <label>VAT rate %: <input type="number" id="bizVat" class="smallInput" min="0" step="0.01" /></label>
       <label>WHT rate %: <input type="number" id="bizWht" class="smallInput" min="0" step="0.01" /></label>
       <label>CIT rate %: <input type="number" id="bizCit" class="smallInput" min="0" step="0.01" /></label>
-      <label>CIT Turnover Threshold:
-        <select id="bizTurnoverThreshold" class="smallInput">
-          <option value="0">No CIT</option>
-          <option value="50000000">₦50M</option>
-          <option value="100000000">₦100M</option>
-        </select>
-      </label>
     </div>
 
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
@@ -459,53 +450,21 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   <script>
   /************************************************************************
    * Nigeria Multi-User Multi-Business Accounting & Tax Engine (Prototype)
-   * Enhanced Version 2.0 - Comprehensive Tax & Entity Management
-   * 
-   * CHANGELOG:
-   * - Renamed SoleProprietor → Enterprise
-   * - Added Individual entity type with restricted UI/tax rules
-   * - Renamed Revenue action → Income
-   * - Added turnoverThreshold configuration (0, 50M, 100M)
-   * - Enhanced asset management with opening balances
-   * - Improved tax calculations for PIT, CIT, CGT with thresholds
-   * - Added comprehensive account types
-   * - Enhanced VAT/WHT calculations (inclusive/net options)
+   * Single-file SPA (corrected)
    ************************************************************************/
 
   // Constants & defaults
-  const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
-  const DEFAULTS = { 
-    vatRate:7.5, whtRate:5.0, citRate:25.0, citRate50M:25.0, citRate100M:30.0,
-    vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, 
-    caRateDefault:20.0, depRateDefault:20.0, turnoverThreshold:100000000 
-  };
-  
-  // PIT/PAYE bands per Nigerian tax law (updated to match requirements)
+  const STORAGE_KEY = 'ntc_full_accounting_v1';
+  const DEFAULTS = { vatRate:7.5, whtRate:5.0, citRate:25.0, vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, caRateDefault:20.0, depRateDefault:20.0 };
   const PAYE_BANDS = [
-    { upTo: 800000, rate: 0.00 },       // First ₦800,000 @ 0%
-    { upTo: 3000000, rate: 0.15 },      // Next ₦2,200,000 @ 15%
-    { upTo: 12000000, rate: 0.18 },     // Next ₦9,000,000 @ 18%
-    { upTo: 25000000, rate: 0.21 },     // Next ₦13,000,000 @ 21%
-    { upTo: 50000000, rate: 0.23 },     // Next ₦25,000,000 @ 23%
-    { upTo: Infinity, rate: 0.25 }      // Above ₦50,000,000 @ 25%
+    { upTo: 800000, rate: 0.00 },
+    { upTo: 3000000, rate: 0.15 },
+    { upTo: 12000000, rate: 0.18 },
+    { upTo: 25000000, rate: 0.21 },
+    { upTo: 50000000, rate: 0.23 },
+    { upTo: Infinity, rate: 0.25 }
   ];
-  
-  // CIT Turnover threshold options
-  const CIT_THRESHOLDS = {
-    NONE: 0,
-    MEDIUM: 50000000,   // ₦50,000,000
-    LARGE: 100000000    // ₦100,000,000
-  };
-  
-  // Individual-only account names (for UI filtering)
-  const INDIVIDUAL_ACCOUNTS = ['Salary', 'Benefit in kind', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
-  
-  // New accounts to add during migration
-  const NEW_DEFAULT_ACCOUNTS = [
-    'Share of profit', 'Benefit in kind', 'Dividend', 'Interest', 'Royalty',
-    'Rent', 'Shares', 'Options', 'Rights', 'Debt', 'Digital/Virtual Asset',
-    'Receivable', 'Payable', 'Capital', 'Accruals', 'Prepayment'
-  ];
+  const CIT_TURNOVER_THRESHOLD = 100000000; // 100,000,000
 
   // App state
   let state = {
@@ -621,7 +580,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   const bizVat = document.getElementById('bizVat');
   const bizWht = document.getElementById('bizWht');
   const bizCit = document.getElementById('bizCit');
-  const bizTurnoverThreshold = document.getElementById('bizTurnoverThreshold');
   const bizVatEnabled = document.getElementById('bizVatEnabled');
   const bizPitEnabled = document.getElementById('bizPitEnabled');
   const bizPayeEnabled = document.getElementById('bizPayeEnabled');
@@ -682,18 +640,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     state.attachments = state.attachments || {};
     state.audit = state.audit || [];
     state.auth = state.auth || { currentUserId: null };
-    
     state.businesses.forEach(b => {
-      // MIGRATION: Rename SoleProprietor to Enterprise
-      if (b.entity === 'SoleProprietor') {
-        b.entity = 'Enterprise';
-      }
-      
-      // MIGRATION: Add turnoverThreshold if missing (default 100M)
-      if (typeof b.turnoverThreshold === 'undefined') {
-        b.turnoverThreshold = DEFAULTS.turnoverThreshold;
-      }
-      
       b.vatRate = Number(b.vatRate || DEFAULTS.vatRate);
       b.whtRate = Number(b.whtRate || DEFAULTS.whtRate);
       b.citRate = Number(b.citRate || DEFAULTS.citRate);
@@ -711,66 +658,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       b.caCarryForward = Number(b.caCarryForward || 0);
       b.defaultExpenseDisallowable = !!b.defaultExpenseDisallowable;
       b.defaultRevenueNonTax = !!b.defaultRevenueNonTax;
-      
-      // MIGRATION: Add missing default accounts
-      const existingAccountNames = b.accounts.map(a => a.name);
-      const accountsToAdd = [
-        { name: 'Salary', category: 'Expense' },
-        { name: 'Benefit in kind', category: 'Expense' },
-        { name: 'Dividend', category: 'Revenue' },
-        { name: 'Interest', category: 'Revenue' },
-        { name: 'Royalty', category: 'Revenue' },
-        { name: 'Share of profit', category: 'Revenue' },
-        { name: 'Rent', category: 'Expense' },
-        { name: 'Shares', category: 'Asset' },
-        { name: 'Options', category: 'Asset' },
-        { name: 'Rights', category: 'Asset' },
-        { name: 'Debt', category: 'Liability' },
-        { name: 'Digital/Virtual Asset', category: 'Asset' },
-        { name: 'Receivable', category: 'Asset' },
-        { name: 'Payable', category: 'Liability' },
-        { name: 'Capital', category: 'Capital' },
-        { name: 'Accruals', category: 'Liability' },
-        { name: 'Prepayment', category: 'Asset' }
-      ];
-      
-      for (const acct of accountsToAdd) {
-        if (!existingAccountNames.includes(acct.name)) {
-          b.accounts.push({
-            id: uid('acct'),
-            name: acct.name,
-            category: acct.category,
-            disallowableDefault: false,
-            nonTaxableDefault: false,
-            openingBalance: 0,
-            closingBalance: 0
-          });
-        }
-      }
-      
-      // Ensure balance accounts have balance fields
-      b.accounts.forEach(a => {
-        if (['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'].includes(a.name)) {
-          a.openingBalance = a.openingBalance || 0;
-          a.closingBalance = a.closingBalance || 0;
-        }
-      });
     });
-    
-    // MIGRATION: Map Revenue action to Income in transactions
-    for (const u of state.users) {
-      state.transactions[u.id] = state.transactions[u.id] || {};
-      for (const b of state.businesses) {
-        state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || [];
-        // Convert Revenue → Income
-        state.transactions[u.id][b.id].forEach(txn => {
-          if (txn.action === 'Revenue') {
-            txn.action = 'Income';
-          }
-        });
-      }
-    }
-    
+    for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; for(const b of state.businesses){ state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || []; } }
     saveState();
   }
 
@@ -815,7 +704,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     };
     state.transactions[u] = {};
     state.transactions[u][b] = [
-      { id: uid('txn'), date: today(), action: 'Income', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', whtApplied:false, paye:false, contact:'', receiptId:null },
+      { id: uid('txn'), date: today(), action: 'Revenue', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', whtApplied:false, paye:false, contact:'', receiptId:null },
       { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', whtApplied:false, paye:true, contact:'John Employee', receiptId:null },
       { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
     ];
@@ -944,7 +833,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     businessModalTitle.textContent = 'Add Business';
     bizName.value = ''; bizOwnerSelect.value = state.users[0] ? state.users[0].id : '';
     bizEntity.value = 'Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate;
-    bizTurnoverThreshold.value = DEFAULTS.turnoverThreshold;
     bizVatEnabled.checked = true; bizPitEnabled.checked = true; bizPayeEnabled.checked = true; bizShowLines.checked = true; bizCitEnabled.checked = true;
     bizSave.dataset.edit = '';
     bizContactsList.innerHTML = '';
@@ -956,7 +844,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     businessModalTitle.textContent = 'Edit Business';
     bizName.value = b.name || ''; bizOwnerSelect.value = b.ownerId || (state.users[0] && state.users[0].id) || '';
     bizEntity.value = b.entity || 'Company'; bizVat.value = b.vatRate || DEFAULTS.vatRate; bizWht.value = b.whtRate || DEFAULTS.whtRate; bizCit.value = b.citRate || DEFAULTS.citRate;
-    bizTurnoverThreshold.value = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
     bizVatEnabled.checked = !!b.vatEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled;
     bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0;
     bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
@@ -975,7 +862,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       if(!b) return alert('Business not found');
       b.name = name; b.ownerId = bizOwnerSelect.value; b.entity = bizEntity.value;
       b.vatRate = Number(bizVat.value || DEFAULTS.vatRate); b.whtRate = Number(bizWht.value || DEFAULTS.whtRate); b.citRate = Number(bizCit.value || DEFAULTS.citRate);
-      b.turnoverThreshold = Number(bizTurnoverThreshold.value || DEFAULTS.turnoverThreshold);
       b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked;
       b.lossBroughtForward = Number(bizLossBF.value || 0); b.caCarryForward = Number(bizCACF.value || 0);
       b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
@@ -984,11 +870,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     } else {
       const newBiz = {
         id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
-        entity: bizEntity.value, 
-        vatRate: Number(bizVat.value||DEFAULTS.vatRate), 
-        whtRate: Number(bizWht.value||DEFAULTS.whtRate), 
-        citRate: Number(bizCit.value||DEFAULTS.citRate),
-        turnoverThreshold: Number(bizTurnoverThreshold.value||DEFAULTS.turnoverThreshold),
+        entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate),
         vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
         accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
         lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault
@@ -1035,39 +917,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     saveState();
     renderAccounts();
     populateAccountSelect();
-  }
-
-  function renderFeatureVisibility(){
-    // Handle Individual entity restrictions
-    const b = findBiz(selectedBizId);
-    if (!b) return;
-    
-    const isIndividual = b.entity === 'Individual';
-    
-    if (isIndividual) {
-      // Restrict actions - only show Income for Individuals
-      Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Income') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Income') {
-          opt.style.display = '';
-        }
-      });
-      
-      // Restrict accounts - only show individual-specific accounts
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (INDIVIDUAL_ACCOUNTS.includes(accountText)) {
-          opt.style.display = '';
-        } else {
-          opt.style.display = 'none';
-        }
-      });
-    } else {
-      // Show all actions and accounts for non-Individual entities
-      Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
-    }
   }
 
   function txnActionChanged(){
