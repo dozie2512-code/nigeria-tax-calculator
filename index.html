@@ -250,6 +250,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
             <select id="assetDisposeSelect"></select>
           </label>
           <label>Disposal date: <input type="date" id="assetDisposalDate" /></label>
+          <label>Quantity to dispose: <input type="number" id="assetDisposalQty" min="1" step="1" class="smallInput" value="1" /></label>
           <label>Disposal proceeds (₦): <input type="number" id="assetDisposalProceeds" min="0" step="0.01" /></label>
           <label>Disposal account:
             <select id="assetDisposalAccount"></select>
@@ -258,7 +259,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
           <label>Receipt: <input type="file" id="assetDisposalReceipt" /></label>
           <button id="btnDisposeAsset" class="small danger">Record Disposal</button>
         </div>
-        <small class="note">Chargeable gains and losses will be classified based on asset classification and included in tax calculations according to entity rules.</small>
+        <small class="note">Chargeable gains and losses will be classified based on asset classification and included in tax calculations according to entity rules. Profit/loss = proceeds - tax written down value (TWDV = ₦10 residual at end of life).</small>
       </div>
     </section>
 
@@ -583,6 +584,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   const assetLife = document.getElementById('assetLife');
   const assetCA = document.getElementById('assetCA');
   const assetDisposalDate = document.getElementById('assetDisposalDate');
+  const assetDisposalQty = document.getElementById('assetDisposalQty');
   const assetDisposalProceeds = document.getElementById('assetDisposalProceeds');
   const btnAddAsset = document.getElementById('btnAddAsset');
   const btnDisposeAsset = document.getElementById('btnDisposeAsset');
@@ -1089,13 +1091,21 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       assetDisposalSubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
-    } else if(val === 'AssetPurchase'){
+    } else if(val === 'AssetPurchase' || val === 'OpeningAssetBal'){
       mainTxnForm.style.display = 'none';
       assetPurchaseSubform.style.display = 'block';
       assetDisposalSubform.style.display = 'none';
       inventorySubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
+      // Update UI labels for opening asset balance
+      if(val === 'OpeningAssetBal') {
+        document.querySelector('#assetPurchaseSubform h3').textContent = 'Opening Asset Balance';
+        btnAddAsset.textContent = 'Record Opening Balance';
+      } else {
+        document.querySelector('#assetPurchaseSubform h3').textContent = 'Asset Purchase';
+        btnAddAsset.textContent = 'Record Asset Purchase';
+      }
     } else if(val === 'AssetDisposal'){
       mainTxnForm.style.display = 'none';
       assetDisposalSubform.style.display = 'block';
@@ -1364,14 +1374,20 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function handleAddAsset(){
     if(!selectedBizId) return alert('Select business');
     const b = findBiz(selectedBizId);
+    const isOpeningBalance = txnAction.value === 'OpeningAssetBal';
+    
+    // For opening balance: auto-compute opening cost from qty * unit price
+    let computedCost = Number(assetQty.value || 1) * Number(assetUnitPrice.value || 0);
+    let computedOpeningCost = isOpeningBalance ? computedCost : Number(assetOpeningCost.value || 0);
+    
     const item = {
       id: uid('asset'),
       name: assetName.value || 'Asset',
       category: assetCategory.value || 'Other Asset',
       qty: Number(assetQty.value || 1),
       unitPrice: Number(assetUnitPrice.value || 0),
-      cost: Number(assetCost.value || (Number(assetUnitPrice.value || 0) * Number(assetQty.value || 1))),
-      openingCost: Number(assetOpeningCost.value || 0),
+      cost: isOpeningBalance ? 0 : computedCost, // Opening balance sets cost to 0, openingCost holds value
+      openingCost: computedOpeningCost,
       openingAccDep: Number(assetOpeningAccDep.value || 0),
       purchaseDate: assetPurchaseDate.value || today(),
       lifeYears: Number(assetLife.value || 0),
@@ -1384,7 +1400,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     };
     b.assets = b.assets || [];
     b.assets.push(item);
-    const t = { id: uid('txn'), date: item.purchaseDate, action: 'AssetPurchase', accountId: assetPurchaseAccount.value, accountName: findAccount(b, assetPurchaseAccount.value)?.name || '', accountCategory: findAccount(b, assetPurchaseAccount.value)?.category || '', description: `Asset purchase ${item.name}`, amount: item.cost, qty: item.qty, unitPrice: item.unitPrice, vatType:'none', whtApplied:false, paye:false, contact: assetContact.value || '', receiptId:null };
+    
+    const actionType = isOpeningBalance ? 'OpeningAssetBal' : 'AssetPurchase';
+    const txnAmount = isOpeningBalance ? computedOpeningCost : computedCost;
+    const t = { 
+      id: uid('txn'), 
+      date: item.purchaseDate, 
+      action: actionType, 
+      accountId: assetPurchaseAccount.value, 
+      accountName: findAccount(b, assetPurchaseAccount.value)?.name || '', 
+      accountCategory: findAccount(b, assetPurchaseAccount.value)?.category || '', 
+      description: isOpeningBalance ? `Opening balance: ${item.name}` : `Asset purchase ${item.name}`, 
+      amount: txnAmount, 
+      qty: item.qty, 
+      unitPrice: item.unitPrice, 
+      vatType:'none', 
+      whtApplied:false, 
+      paye:false, 
+      contact: assetContact.value || '', 
+      receiptId:null 
+    };
     if(assetReceipt.files && assetReceipt.files[0]){
       const r = assetReceipt.files[0];
       const reader = new FileReader();
@@ -1413,13 +1448,39 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const aid = assetDisposeSelect.value;
     const asset = (b.assets||[]).find(a=>a.id===aid);
     if(!asset) return alert('Select asset to dispose');
-    asset.disposed = true;
-    asset.disposal = { date: assetDisposalDate.value || today(), proceeds: Number(assetDisposalProceeds.value || 0), accountId: assetDisposalAccount.value || '', accountName: findAccount(b, assetDisposalAccount.value)?.name || '' };
-    const netBook = (asset.cost || 0) - (asset.accumulatedDep || 0) - (asset.openingAccDep || 0);
-    const gain = (asset.disposal.proceeds || 0) - netBook;
+    
+    const qtyDisposed = Number(assetDisposalQty.value || 1);
+    if(qtyDisposed > (asset.qty || 1)) return alert('Cannot dispose more than available quantity');
+    
+    asset.disposed = qtyDisposed >= (asset.qty || 1); // Fully disposed if qty matches
+    asset.disposal = { 
+      date: assetDisposalDate.value || today(), 
+      proceeds: Number(assetDisposalProceeds.value || 0), 
+      qty: qtyDisposed,
+      accountId: assetDisposalAccount.value || '', 
+      accountName: findAccount(b, assetDisposalAccount.value)?.name || '' 
+    };
+    
+    // Compute Tax Written Down Value (TWDV)
+    // TWDV = cost - accumulated depreciation - capital allowances claimed
+    // Use residual value of ₦10 at end of useful life
+    const totalCost = (asset.cost || 0) + (asset.openingCost || 0);
+    const totalAccDep = (asset.accumulatedDep || 0) + (asset.openingAccDep || 0);
+    const residualValue = 10; // ₦10 residual
+    let twdv = Math.max(totalCost - totalAccDep, residualValue);
+    
+    // Chargeable gain/loss = proceeds - TWDV
+    const gain = (asset.disposal.proceeds || 0) - twdv;
     asset.disposal.gain = gain;
-    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} gain ${gain}`);
-    const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name}`, amount: asset.disposal.proceeds, gain: gain, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id };
+    asset.disposal.twdv = twdv;
+    
+    // Update asset qty if partial disposal
+    if(!asset.disposed) {
+      asset.qty = (asset.qty || 1) - qtyDisposed;
+    }
+    
+    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} qty ${qtyDisposed} gain ${gain}`);
+    const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name} (qty: ${qtyDisposed})`, amount: asset.disposal.proceeds, gain: gain, qty: qtyDisposed, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id };
     if(assetDisposalReceipt.files && assetDisposalReceipt.files[0]){
       const r = assetDisposalReceipt.files[0];
       const reader = new FileReader();
