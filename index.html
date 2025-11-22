@@ -1,14 +1,8 @@
-Below is a corrected, single-file index.html that fixes the runtime/JS issues you reported (DOM element lookups, initialization order, missing handlers, variable mismatches, and a few logical cleanups). I preserved the functional changes you asked for earlier (Individuals, Enterprise rename, Opening Asset Bal, VAT/WHT formulas, turnover threshold setting, default accounts, asset purchase/disposal basics, basic PIT/CIT calculation shells, undo stacks) while removing the runtime errors so the app runs in the browser.
-
-Save this as index.html and open in a browser. If you want, I can next create a PR in your repo (you previously asked for a single PR).
-
-Note: this is a single-file SPA; for readability I kept code comments and left some complex tax/asset logic intentionally simplified but correctable incrementally.
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Nigeria Accounting & Tax Engine — Prototype (Corrected)</title>
+  <title>Nigeria Multi-User Accounting & Tax — Full Prototype (Updated)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --gap:12px; --muted:#666; --danger:#b00; --accent:#0b76d1; --bg:#f8f9fb; --panel:#fff; }
@@ -39,21 +33,36 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     small.note { color:var(--muted); display:block; margin-top:6px; }
     .grid { display:grid; gap:8px; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); }
     .flag { background:#eef6ff; padding:3px 6px; border-radius:4px; color:#05507a; font-size:0.85rem; border:1px solid #dbeffb; }
+    .account-category { font-size:0.85rem; color:var(--muted); padding:2px 6px; border-radius:4px; border:1px solid #eee; background:#fbfcfe; }
     .smallInput { width:110px; }
     .table-scroll { max-height:260px; overflow:auto; }
+    .notice { background:#fff9e6; border:1px solid #ffe6a8; padding:8px; border-radius:6px; color:#6a4e00; }
     .mutedBlock { color:var(--muted); font-size:0.9rem; margin-top:6px; }
     .form-section { margin-top:10px; padding:8px; border-radius:6px; border:1px dashed #e6e6e6; background:#fcfcfd; }
     .inline-label { display:flex; gap:6px; align-items:center; }
     .account-row { display:flex; gap:6px; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f0f0f0; }
+    .small-muted { font-size:0.85rem; color:var(--muted); }
     .tabbar { display:flex; gap:6px; }
     .tab { padding:6px 10px; border-radius:6px; border:1px solid #e6e6e6; background:#fff; cursor:pointer; }
     .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .receipt-thumb { max-width:64px; max-height:64px; display:inline-block; border:1px solid #eee; padding:2px; border-radius:4px; margin-right:6px; }
+    .link-like { color:var(--accent); cursor:pointer; text-decoration:underline; }
     @media (max-width:760px){ .form-inline{flex-direction:column;align-items:stretch} header{flex-direction:column;align-items:flex-start} }
+    .small-note { font-size:0.85rem; color:var(--muted); }
+    .auth-bar { margin-left:auto; display:flex; gap:8px; align-items:center; }
+    .muted-pill { background:#f2f4f7; padding:4px 8px; border-radius:6px; font-size:0.9rem; color:#333; }
+    .disabled { opacity:0.45; pointer-events:none; }
+    .code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; background:#f3f5f7; padding:4px 6px; border-radius:4px; }
   </style>
+
+  <!-- jsPDF for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- SheetJS for XLSX export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>Nigeria Accounting & Tax Engine — Prototype (Corrected)</h1>
+    <h1>Nigeria Accounting & Tax Engine — Prototype (Updated)</h1>
 
     <div class="panel controls" style="align-items:center;">
       <label>Active User:</label>
@@ -188,7 +197,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       <div id="assetPurchaseSubform" style="margin-top:10px; display:none;" class="panel assets-panel">
         <h3 style="margin:4px 0;">Asset Purchase / Opening Balance</h3>
         <div class="form-inline">
-          <label>Existing Asset:
+          <label>Existing Asset: 
             <select id="assetExistingSelect"><option value="">-- new / select existing --</option></select>
           </label>
           <label>Asset name: <input type="text" id="assetName" /></label>
@@ -467,18 +476,42 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     </div>
   </div>
 
-  <footer class="muted" style="margin-top:16px;">Prototype stores data in localStorage (ntc_full_accounting_v2)</footer>
+  <footer class="muted" style="margin-top:16px;">GitHub Copilot Chat Assistant — prototype stores data in localStorage (ntc_full_accounting_v2)</footer>
 
   <script>
   /************************************************************************
-   * Corrected single-file index.html
-   * - Fixed runtime issues: element lookups, initialization order, missing handlers
-   * - Preserved requested features (Individuals, Enterprise, Opening Asset Bal, VAT/WHT formulas,
-   *   turnover threshold, default accounts, basic asset purchase/disposal, undo stacks)
+   * Nigeria Multi-User Multi-Business Accounting & Tax Engine (Prototype)
+   * Single-file SPA (Updated)
+   *
+   * Changelog (summary):
+   * - Added entity type: Individual
+   * - Renamed SoleProprietor -> Enterprise (migrated existing stored values)
+   * - Added turnoverThreshold setting (0, 50,000,000, 100,000,000) default 100,000,000
+   * - Changed Action label 'Revenue' -> 'Income'
+   * - Individual entity UI restricted to Income action and specific accounts only
+   * - Added Opening Asset Bal action and automated cost computation for opening and purchases
+   * - Asset disposal: qty support, profit/loss computation, classification of chargeable assets, undo/cancel
+   * - VAT inclusive and WHT net computation formulas implemented
+   * - PAYE bands and CIT by turnover threshold implemented
+   * - New default chart of accounts added (share of profit, benefit in kind, dividend, interest, royalty, rent, shares, options, rights, debt, digital/virtual asset)
+   * - Starting/closing balance fields added to account schema
+   * - Transaction ledger: view/edit/delete actions added, asset/inventory undo added
+   * - Chargeable gains rules (company vs individual) and carryforward basic framework added
+   * - Basic report templates for Individual and Enterprise tax computation added
+   *
+   * NOTE: This file is intentionally large. It aims to keep previous behavior where possible while adding requested features.
    ************************************************************************/
 
+  // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2';
-  const DEFAULTS = { vatRate:7.5, whtRate:5.0, citRate:25.0, vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true };
+  const DEFAULTS = { vatRate:7.5, whtRate:5.0, citRate:25.0, vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, caRateDefault:20.0, depRateDefault:20.0 };
+  // PAYE bands per specification:
+  // 1st 800,000 free
+  // Next 2,200,000 @15% (=> upTo 3,000,000)
+  // Next 9,000,000 @18% (=> upTo 12,000,000)
+  // Next 13,000,000 @21% (=> upTo 25,000,000)
+  // Next 25,000,000 @23% (=> upTo 50,000,000)
+  // Above 50,000,000 @25%
   const PAYE_BANDS = [
     { upTo: 800000, rate: 0.00 },
     { upTo: 3000000, rate: 0.15 },
@@ -489,7 +522,11 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   ];
 
   // App state
-  let state = { users:[], businesses:[], transactions:{}, attachments:{}, audit:[], auth:{ currentUserId: null } };
+  let state = {
+    users: [], businesses: [], transactions: {}, attachments: {}, audit: [], auth: { currentUserId: null },
+  };
+
+  // Simple history stacks for undo actions
   let inventoryHistory = [];
   let assetHistory = [];
 
@@ -553,6 +590,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   const assetDisposalDate = document.getElementById('assetDisposalDate');
   const assetDisposalProceeds = document.getElementById('assetDisposalProceeds');
   const btnAddAsset = document.getElementById('btnAddAsset');
+  const btnDisposeAsset = document.getElementById('btnDisposeAsset');
   const btnAssetCancel = document.getElementById('btnAssetCancel');
   const btnAssetUndo = document.getElementById('btnAssetUndo');
   const assetPurchaseAccount = document.getElementById('assetPurchaseAccount');
@@ -565,11 +603,8 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   const assetDisposalContact = document.getElementById('assetDisposalContact');
   const assetDisposalReceipt = document.getElementById('assetDisposalReceipt');
   const assetCategory = document.getElementById('assetCategory');
-  const assetDisposeQty = document.getElementById('assetDisposeQty');
 
-  const btnDisposeAsset = document.getElementById('btnDisposeAsset');
-  const btnDisposeCancel = document.getElementById('btnDisposeCancel');
-  const btnDisposeUndo = document.getElementById('btnDisposeUndo');
+  const assetDisposeQty = document.getElementById('assetDisposeQty') || document.getElementById('assetDisposeQty');
 
   const ledgerTableBody = document.querySelector('#ledgerTable tbody');
   const taxSummaryDiv = document.getElementById('taxSummary');
@@ -644,8 +679,11 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   function fmt(n){ return (n==null || isNaN(Number(n))) ? '₦0.00' : '₦' + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function rawFmt(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function today(){ return new Date().toISOString().slice(0,10); }
+  function daysBetween(a,b){ return Math.round((new Date(b) - new Date(a)) / (1000*60*60*24)); }
+  function toISO(date){ if(!date) return null; return new Date(date).toISOString().slice(0,10); }
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
-  function round2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+  function isLeapYear(y){ return (y%4===0 && y%100!==0) || (y%400===0); }
+  function daysInYear(d){ const y = new Date(d).getFullYear(); return isLeapYear(y) ? 366 : 365; }
 
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -655,7 +693,45 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     try { state = JSON.parse(raw); migrateState(); }
     catch(e){ console.error('Failed parse store, seeding demo', e); seedDemo(); }
   }
+  function migrateState(){
+    state.users = state.users || [];
+    state.businesses = state.businesses || [];
+    state.transactions = state.transactions || {};
+    state.attachments = state.attachments || {};
+    state.audit = state.audit || [];
+    state.auth = state.auth || { currentUserId: null };
 
+    // Rename existing SoleProprietor to Enterprise
+    for(const b of state.businesses){
+      if(b.entity === 'SoleProprietor') b.entity = 'Enterprise';
+      // Add turnoverThreshold if not present; default 100,000,000
+      if(typeof b.turnoverThreshold === 'undefined') b.turnoverThreshold = 100000000;
+      // Ensure accounts array exists and add missing default accounts
+      b.accounts = b.accounts || [];
+      ensureDefaultAccounts(b);
+      // ensure inventory & assets & contacts exist
+      b.inventory = b.inventory || [];
+      b.assets = b.assets || [];
+      b.contacts = b.contacts || [];
+      b.statutoryDeductions = b.statutoryDeductions || { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
+      b.lossBroughtForward = Number(b.lossBroughtForward || 0);
+      b.caCarryForward = Number(b.caCarryForward || 0);
+      b.defaultExpenseDisallowable = !!b.defaultExpenseDisallowable;
+      b.defaultRevenueNonTax = !!b.defaultRevenueNonTax;
+      b.vatRate = Number(b.vatRate || DEFAULTS.vatRate);
+      b.whtRate = Number(b.whtRate || DEFAULTS.whtRate);
+      b.citRate = Number(b.citRate || DEFAULTS.citRate);
+      b.vatEnabled = (typeof b.vatEnabled === 'undefined') ? DEFAULTS.vatEnabled : !!b.vatEnabled;
+      b.payeEnabled = (typeof b.payeEnabled === 'undefined') ? DEFAULTS.payeEnabled : !!b.payeEnabled;
+      b.pitEnabled = (typeof b.pitEnabled === 'undefined') ? DEFAULTS.pitEnabled : !!b.pitEnabled;
+      b.showLines = (typeof b.showLines === 'undefined') ? DEFAULTS.showLines : !!b.showLines;
+      b.citEnabled = (typeof b.citEnabled === 'undefined') ? DEFAULTS.citEnabled : !!b.citEnabled;
+    }
+    for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; for(const b of state.businesses){ state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || []; } }
+    saveState();
+  }
+
+  // Ensure default accounts exist for a business (no deletion of existing)
   function ensureDefaultAccounts(b){
     const names = [
       { name: 'Salary', category:'Revenue' },
@@ -675,57 +751,24 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       { name: 'COGS', category:'Expense' },
       { name: 'Salaries', category:'Expense' }
     ];
-    b.accounts = b.accounts || [];
     for(const n of names){
       if(!b.accounts.find(a=>a.name === n.name)){
-        b.accounts.push({ id: uid('acct'), name: n.name, category: n.category, disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
+        b.accounts.push({
+          id: uid('acct'),
+          name: n.name,
+          category: n.category,
+          disallowableDefault: false,
+          nonTaxableDefault: false,
+          startingBalance: 0,
+          closingBalance: 0
+        });
       } else {
+        // ensure starting/closing present
         const a = b.accounts.find(x=>x.name === n.name);
         a.startingBalance = Number(a.startingBalance || 0);
         a.closingBalance = Number(a.closingBalance || 0);
       }
     }
-  }
-
-  function migrateState(){
-    state.users = state.users || [];
-    state.businesses = state.businesses || [];
-    state.transactions = state.transactions || {};
-    state.attachments = state.attachments || {};
-    state.audit = state.audit || [];
-    state.auth = state.auth || state.auth || { currentUserId: null };
-
-    for(const b of state.businesses){
-      if(b.entity === 'SoleProprietor') b.entity = 'Enterprise';
-      if(typeof b.turnoverThreshold === 'undefined') b.turnoverThreshold = 100000000;
-      if(!Array.isArray(b.accounts)) b.accounts = [];
-      ensureDefaultAccounts(b);
-      b.inventory = b.inventory || [];
-      b.assets = b.assets || [];
-      b.contacts = b.contacts || [];
-      b.statutoryDeductions = b.statutoryDeductions || { pension:0, rent:0, life:0, mortgage:0, nhf:0 };
-      b.lossBroughtForward = Number(b.lossBroughtForward || 0);
-      b.caCarryForward = Number(b.caCarryForward || 0);
-      b.defaultExpenseDisallowable = !!b.defaultExpenseDisallowable;
-      b.defaultRevenueNonTax = !!b.defaultRevenueNonTax;
-      b.vatRate = Number(b.vatRate || DEFAULTS.vatRate);
-      b.whtRate = Number(b.whtRate || DEFAULTS.whtRate);
-      b.citRate = Number(b.citRate || DEFAULTS.citRate);
-      b.vatEnabled = (typeof b.vatEnabled === 'undefined') ? DEFAULTS.vatEnabled : !!b.vatEnabled;
-      b.payeEnabled = (typeof b.payeEnabled === 'undefined') ? DEFAULTS.payeEnabled : !!b.payeEnabled;
-      b.pitEnabled = (typeof b.pitEnabled === 'undefined') ? DEFAULTS.pitEnabled : !!b.pitEnabled;
-      b.showLines = (typeof b.showLines === 'undefined') ? DEFAULTS.showLines : !!b.showLines;
-      b.citEnabled = (typeof b.citEnabled === 'undefined') ? DEFAULTS.citEnabled : !!b.citEnabled;
-    }
-
-    for(const u of state.users){
-      state.transactions[u.id] = state.transactions[u.id] || {};
-      for(const b of state.businesses){
-        state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || [];
-      }
-    }
-
-    saveState();
   }
 
   function seedDemo(){
@@ -747,15 +790,18 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
         citRate: DEFAULTS.citRate,
         vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
         turnoverThreshold: 100000000,
+        caRateDefault: DEFAULTS.caRateDefault,
+        depRateDefault: DEFAULTS.depRateDefault,
         accounts: [sales, cogs, salaries, bank],
         inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
-        assets: [],
-        contacts: [],
+        assets: [
+          { id: uid('asset'), name: 'Office PC', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), startingBalDate: null, lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, accumulatedCA:0, category:'Property Plant and Equipment' },
+          { id: uid('asset'), name: 'Land Plot', qty:1, unitPrice:2000000, cost: 2000000, purchaseDate: '2020-01-01', startingBalDate: null, lifeYears: 20, caPercent: 5, depRate: 0, classification: 'Chargeable', accumulatedDep:0, accumulatedCA:0, category:'Land & Building' }
+        ],
+        contacts: [{ id: uid('c'), name:'John Employee', type:'Employee', statutory:{ pension: 20000, rent: 120000, life: 5000, mortgage: 100000, nhf: 5000 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } }],
         statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-        lossBroughtForward: 0,
-        caCarryForward: 0,
-        defaultExpenseDisallowable:false,
-        defaultRevenueNonTax:false
+        lossBroughtForward: 150000, caCarryForward: 50000,
+        defaultExpenseDisallowable:false, defaultRevenueNonTax:false,
       }],
       transactions: {},
       attachments: {},
@@ -765,12 +811,14 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     state.transactions[u] = {};
     state.transactions[u][b] = [
       { id: uid('txn'), date: today(), action: 'Income', accountId: sales.id, accountName: sales.name, accountCategory: sales.category, description: 'Demo sale', amount: 150000, vatType:'exclusive', vatAmount: (150000*0.075), wht: false, contact:'', receiptId:null },
-      { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', vatAmount:0, wht: false, contact:'', receiptId:null }
+      { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', vatAmount:0, wht: false, contact:'', receiptId:null },
+      { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', vatAmount:0, wht:false, contact:'' }
     ];
     addAudit('seed','system','',`Seeded demo data`);
     saveState();
   }
 
+  // audit
   function addAudit(type, entityType, entityId, details){
     const entry = { id: uid('audit'), timestamp: new Date().toISOString(), userId: state.auth.currentUserId, type, entityType, entityId, details };
     state.audit = state.audit || [];
@@ -778,18 +826,20 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     saveState();
   }
 
-  // Modals
+  // modal helpers
   function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; window.scrollTo({top:0}); }
   function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; }
-  modalOverlay.addEventListener('click', ()=> { [userModal, businessModal, accountsModal].forEach(m => { if(m && m.style.display==='block') closeModal(m); }); });
+  modalOverlay.addEventListener('click', ()=> { [userModal, businessModal, accountsModal].forEach(m => { if(m.style.display==='block') closeModal(m); }); });
 
-  // selection state (initialize before UI uses them)
+  // initialization
   loadState();
-  let selectedUserId = state.auth.currentUserId || (state.users[0] && state.users[0].id) || null;
-  let selectedBizId = state.businesses[0] && state.businesses[0].id || null;
-  let activeTab = 'ledger';
+  initUI();
+  refreshSelectors();
+  ensureSelection();
+  populateAccountSelect();
+  resetForms();
+  renderAll();
 
-  // UI init
   function initUI(){
     btnAddUser.addEventListener('click', ()=> openUserModal());
     btnEditUser.addEventListener('click', ()=> { if(!selectedUserId) return alert('Select a user'); openUserModal(selectedUserId); });
@@ -801,7 +851,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     btnEditBusiness.addEventListener('click', openEditBusinessModal);
     btnDeleteBusiness.addEventListener('click', ()=> { if(!selectedBizId) return alert('Select business'); if(!confirm('Delete business and all its transactions/attachments?')) return; deleteBusiness(selectedBizId); });
     bizSave.addEventListener('click', saveBusiness);
-    bizCancel.addEventListener('click', ()=> closeModal(businessModal));
+    bizCancel.addEventListener('click', ()=>closeModal(businessModal));
     btnAddContact.addEventListener('click', addContactToBiz);
 
     btnManageAccounts.addEventListener('click', ()=> { if(!selectedBizId) return alert('Select business'); renderAccounts(); openModal(accountsModal); });
@@ -814,7 +864,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       txnWhtRateLabel.style.display = show ? 'inline-flex' : 'none';
       txnWhtBasisLabel.style.display = show ? 'inline-flex' : 'none';
       if(show && !txnWhtRate.value){ txnWhtRate.value = findBiz(selectedBizId)?.whtRate || DEFAULTS.whtRate; }
-    });
+    } );
     btnAddTxn.addEventListener('click', handleAddTransaction);
 
     btnAddInv.addEventListener('click', handleInventoryAction);
@@ -822,12 +872,9 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     btnInvUndo.addEventListener('click', handleUndoInventory);
 
     btnAddAsset.addEventListener('click', handleAddAsset);
+    btnDisposeAsset.addEventListener('click', handleDisposeAsset);
     btnAssetCancel.addEventListener('click', ()=>{ txnAction.value=''; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnAssetUndo.addEventListener('click', handleUndoAsset);
-
-    btnDisposeAsset.addEventListener('click', handleDisposeAsset);
-    btnDisposeCancel.addEventListener('click', ()=>{ txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
-    btnDisposeUndo.addEventListener('click', handleUndoLastDisposal);
 
     document.getElementById('btnSearch').addEventListener('click', renderLedger);
     document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
@@ -859,25 +906,33 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     txnDate.value = today();
   }
 
-  // helpers & finders
-  function findUser(id){ return state.users.find(u=>u.id===id); }
-  function findBiz(id){ return state.businesses.find(b=>b.id===id); }
-  function findAccount(biz, acctId){ return (biz.accounts||[]).find(a=>a.id===acctId); }
+  // stateful selection
+  let selectedUserId = state.auth.currentUserId || (state.users[0] && state.users[0].id);
+  let selectedBizId = state.businesses[0] && state.businesses[0].id;
+  let activeTab = 'ledger';
 
   function refreshSelectors(){
-    // users
     userSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; if(u.id === selectedUserId) opt.selected = true; userSelect.appendChild(opt); }
-    userSelect.onchange = ()=>{ selectedUserId = userSelect.value; state.auth.currentUserId = selectedUserId; ensureSelection(); populateAccountSelect(); renderAll(); saveState(); };
+    userSelect.addEventListener('change', ()=>{
+      selectedUserId = userSelect.value;
+      state.auth.currentUserId = selectedUserId;
+      ensureSelection();
+      renderAll();
+      saveState();
+    });
 
-    // biz owner options
     bizOwnerSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; bizOwnerSelect.appendChild(opt); }
 
-    // businesses
     businessSelect.innerHTML = '';
     for(const b of state.businesses){ const opt = document.createElement('option'); opt.value = b.id; opt.textContent = `${b.name} (${b.entity || 'Company'})`; if(b.id === selectedBizId) opt.selected = true; businessSelect.appendChild(opt); }
-    businessSelect.onchange = ()=>{ selectedBizId = businessSelect.value; ensureSelection(); populateAccountSelect(); renderAll(); };
+    businessSelect.addEventListener('change', ()=>{
+      selectedBizId = businessSelect.value;
+      ensureSelection();
+      populateAccountSelect();
+      renderAll();
+    });
   }
 
   function ensureSelection(){
@@ -889,10 +944,10 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     renderAll();
   }
 
-  // User modal
   function openUserModal(editId){
     userModalTitle.textContent = editId ? 'Edit User' : 'Add User';
-    userName.value = ''; userDisplay.value = ''; userRole.value = 'User'; permView.checked = permEdit.checked = permDelete.checked = false;
+    userName.value = ''; userDisplay.value = ''; userRole.value = 'User';
+    permView.checked = permEdit.checked = permDelete.checked = false;
     userSave.dataset.edit = editId || '';
     if(editId){
       const u = state.users.find(x=>x.id===editId);
@@ -924,7 +979,6 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     renderAll();
   }
 
-  // Business modal
   function openAddBusinessModal(){
     businessModalTitle.textContent = 'Add Business';
     bizName.value = ''; bizOwnerSelect.value = state.users[0] ? state.users[0].id : '';
@@ -972,13 +1026,15 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
         entity: bizEntity.value, vatRate: Number(bizVat.value||DEFAULTS.vatRate), whtRate: Number(bizWht.value||DEFAULTS.whtRate), citRate: Number(bizCit.value||DEFAULTS.citRate),
         vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
         accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-        lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, turnoverThreshold: Number(bizTurnoverThreshold.value||100000000)
+        lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault,
+        turnoverThreshold: Number(bizTurnoverThreshold.value||100000000)
       };
-      // add some default accounts
+      // add defaults
       newBiz.accounts.push({ id: uid('acct'), name:'Sales', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
+      // add requested default accounts
       const extraNames = ['Share of profit','Benefit in kind','Dividend','Interest','Royalty','Rent','Shares','Options','Rights','Debt','Digital/Virtual Asset'];
       for(const nm of extraNames) newBiz.accounts.push({ id: uid('acct'), name:nm, category: (['Debt'].includes(nm)?'Liability': (['Shares','Options','Rights','Digital/Virtual Asset'].includes(nm)?'Asset':'Revenue')), disallowableDefault:false, nonTaxableDefault:false, startingBalance:0, closingBalance:0 });
       state.businesses.push(newBiz);
@@ -1019,40 +1075,6 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     populateAccountSelect();
   }
 
-  function renderBizContacts(b){
-    bizContactsList.innerHTML = '';
-    for(const c of b.contacts || []){
-      const div = document.createElement('div'); div.className = 'account-row';
-      div.innerHTML = `<div>${c.name} (${c.type})</div><div><button class="small" data-id="${c.id}">Edit</button> <button class="small danger" data-del="${c.id}">Delete</button></div>`;
-      bizContactsList.appendChild(div);
-      div.querySelector('[data-del]')?.addEventListener('click', ()=>{
-        if(!confirm('Delete contact?')) return;
-        b.contacts = b.contacts.filter(x=>x.id!==c.id); saveState(); renderBizContacts(b);
-      });
-    }
-  }
-
-  function renderAccounts(){
-    accountsList.innerHTML = '';
-    const b = findBiz(selectedBizId);
-    if(!b) return;
-    for(const a of (b.accounts||[])){
-      const div = document.createElement('div'); div.className = 'account-row';
-      div.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">(${a.category})</span><div class="small-muted">Start: ${fmt(a.startingBalance)} Close: ${fmt(a.closingBalance)}</div></div>
-        <div><button class="small" data-edit="${a.id}">Edit</button> <button class="small danger" data-del="${a.id}">Delete</button></div>`;
-      accountsList.appendChild(div);
-      div.querySelector('[data-del]').addEventListener('click', ()=>{
-        if(!confirm('Delete account?')) return;
-        b.accounts = b.accounts.filter(x=>x.id!==a.id); saveState(); renderAccounts(); populateAccountSelect(); renderAll();
-      });
-      div.querySelector('[data-edit]').addEventListener('click', ()=>{
-        const name = prompt('Account name', a.name); if(!name) return;
-        a.name = name; saveState(); renderAccounts(); populateAccountSelect(); renderAll();
-      });
-    }
-  }
-
-  // Action change handling
   function txnActionChanged(){
     const val = txnAction.value;
     if(val === 'InventoryPurchase' || val === 'InventorySale'){
@@ -1069,6 +1091,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       inventorySubform.style.display = 'none';
       renderFeatureVisibility();
       populateAssetExisting();
+      // If OpeningAssetBal selected show starting bal controls
       if(val === 'OpeningAssetBal'){
         assetStartingBalDate.style.display = 'inline-block';
         document.getElementById('assetPurchaseDateLabel').style.display = 'none';
@@ -1100,17 +1123,23 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   }
 
   function renderFeatureVisibility(){
+    // If selected business is Individual, restrict actions & accounts
     const biz = findBiz(selectedBizId);
     if(!biz) return;
-    // If Individual: show only Income action & limited accounts
     if(biz.entity === 'Individual'){
+      // Show only Income action
       for(const opt of txnAction.options){
-        if(opt.value === '' || opt.value === 'Income') opt.style.display = 'inline';
+        if(opt.value === 'Income') opt.style.display = 'inline';
+        else if(opt.value === '') opt.style.display = 'inline';
         else opt.style.display = 'none';
       }
-      txnAction.value = 'Income';
+      // Populate txnAccount only with allowed accounts for Individual
+      populateAccountSelect();
+      txnAction.value = txnAction.value === 'Income' ? 'Income' : 'Income';
     } else {
+      // Show all actions
       for(const opt of txnAction.options) opt.style.display = 'inline';
+      populateAccountSelect();
     }
   }
 
@@ -1170,7 +1199,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       assetQty.value = a.qty || 1;
       assetUnitPrice.value = a.unitPrice || a.cost || 0;
       assetCategory.value = a.category || 'Other Asset';
-      assetLife.value = a.lifeYears || a.life || '';
+      assetLife.value = a.lifeYears || a.life || a.lifeYears || '';
       assetCA.value = a.caPercent || a.caPercent || '';
       assetDepRate.value = a.depRate || a.depRate || '';
       autoComputeAssetCost();
@@ -1192,12 +1221,91 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     const price = Number(assetUnitPrice.value || 0);
     const cost = qty * price;
     assetCost.value = cost || 0;
+    // Opening cost should be auto-filled for OpeningAssetBal action too
     if(txnAction.value === 'OpeningAssetBal'){
       assetOpeningCost.value = cost || 0;
     }
   }
 
-  // Transaction add
+  function exportJSON(){
+    const dataStr = JSON.stringify(state, null, 2);
+    const blob = new Blob([dataStr], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'ntc_full_data.json'; a.click(); URL.revokeObjectURL(url);
+  }
+  function importJSON(e){
+    const f = e.target.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const incoming = JSON.parse(r.result);
+        if(!confirm('Import will replace current data. Continue?')) return;
+        state = incoming;
+        migrateState();
+        refreshSelectors();
+        ensureSelection();
+        populateAccountSelect();
+        resetForms();
+        renderAll();
+        saveState();
+        alert('Import complete');
+      } catch(err){ alert('Invalid JSON'); }
+    };
+    r.readAsText(f);
+  }
+  function clearAllData(){
+    if(!confirm('Clear all stored data?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    state = { users:[], businesses:[], transactions:{}, attachments:{}, audit:[], auth:{ currentUserId:null } };
+    seedDemo();
+    refreshSelectors();
+    ensureSelection();
+    populateAccountSelect();
+    resetForms();
+    renderAll();
+  }
+
+  // Helper finders
+  function findUser(id){ return state.users.find(u=>u.id===id); }
+  function findBiz(id){ return state.businesses.find(b=>b.id===id); }
+  function findAccount(biz, acctId){ return (biz.accounts||[]).find(a=>a.id===acctId); }
+
+  // UI: business contacts
+  function renderBizContacts(b){
+    bizContactsList.innerHTML = '';
+    for(const c of b.contacts || []){
+      const div = document.createElement('div'); div.className = 'account-row';
+      div.innerHTML = `<div>${c.name} (${c.type})</div><div><button class="small" data-id="${c.id}">Edit</button> <button class="small danger" data-del="${c.id}">Delete</button></div>`;
+      bizContactsList.appendChild(div);
+      div.querySelector('[data-del]')?.addEventListener('click', ()=>{
+        if(!confirm('Delete contact?')) return;
+        b.contacts = b.contacts.filter(x=>x.id!==c.id); saveState(); renderBizContacts(b);
+      });
+    }
+  }
+
+  // Accounts modal
+  function renderAccounts(){
+    accountsList.innerHTML = '';
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    for(const a of (b.accounts||[])){
+      const div = document.createElement('div'); div.className = 'account-row';
+      div.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">(${a.category})</span><div class="small-muted">Start: ${fmt(a.startingBalance)} Close: ${fmt(a.closingBalance)}</div></div>
+        <div><button class="small" data-edit="${a.id}">Edit</button> <button class="small danger" data-del="${a.id}">Delete</button></div>`;
+      accountsList.appendChild(div);
+      div.querySelector('[data-del]').addEventListener('click', ()=>{
+        if(!confirm('Delete account?')) return;
+        b.accounts = b.accounts.filter(x=>x.id!==a.id); saveState(); renderAccounts(); populateAccountSelect(); renderAll();
+      });
+      div.querySelector('[data-edit]').addEventListener('click', ()=>{
+        const name = prompt('Account name', a.name); if(!name) return;
+        a.name = name; saveState(); renderAccounts(); populateAccountSelect(); renderAll();
+      });
+    }
+  }
+
+  // Transaction handlers
   function handleAddTransaction(){
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
@@ -1205,6 +1313,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     uTxns[selectedBizId] = uTxns[selectedBizId] || [];
 
     const action = txnAction.value || '';
+    // For Individuals only allow Income and restricted accounts (enforced in populateAccountSelect)
     if(b.entity === 'Individual' && action !== 'Income') return alert('Individuals may only record Income transactions here.');
 
     const amount = Number(txnAmount.value || 0);
@@ -1212,11 +1321,13 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
 
     const txn = { id: uid('txn'), date: txnDate.value || today(), action, accountId: acct ? acct.id : null, accountName: acct ? acct.name : (txnAccount.value || ''), accountCategory: acct ? acct.category : '', description: txnDesc.value || '', amount: amount, vatType: txnVatType.value || 'none', contact: txnContact.value || '' };
 
+    // VAT handling
     const vatRate = b.vatRate || DEFAULTS.vatRate;
     if(txn.vatType === 'exclusive') {
       txn.vatAmount = round2(amount * (vatRate/100));
       txn.total = amount + txn.vatAmount;
     } else if(txn.vatType === 'inclusive') {
+      // VAT = rate/(100+rate) * amount (amount is VAT-inclusive)
       txn.vatAmount = round2((vatRate / (100 + vatRate)) * amount);
       txn.total = amount;
       txn.amount = round2(amount - txn.vatAmount);
@@ -1224,17 +1335,21 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       txn.vatAmount = 0; txn.total = amount;
     }
 
+    // WHT handling
     if(txnWht.checked){
       const whtRateP = Number(txnWhtRate.value || b.whtRate || DEFAULTS.whtRate);
       const whtRate = whtRateP/100;
       if(txnWhtBasis.value === 'net'){
+        // WHT = rate * (amount / (1 - rate))
         txn.whtAmount = round2(whtRate * (txn.amount / (1 - whtRate)));
       } else {
+        // gross basis
         txn.whtAmount = round2(whtRate * txn.amount);
       }
       txn.whtRate = whtRateP;
     } else { txn.whtAmount = 0; txn.whtRate = 0; }
 
+    // PAYE marking
     txn.paye = !!txnSalary.checked;
 
     uTxns[selectedBizId].push(txn);
@@ -1244,7 +1359,6 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     resetForms();
   }
 
-  // Inventory
   function handleInventoryAction(){
     if(!selectedBizId || !selectedUserId) return alert('Select business & user');
     const b = findBiz(selectedBizId);
@@ -1253,12 +1367,15 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     const qty = Number(invQty.value || 0);
     const unitPrice = Number(invUnitPrice.value || 0);
     const acct = findAccount(b, invAccountSelect.value);
+    // For simplicity, this records inventory txns and updates avg cost for opening/purchase
     const txn = { id: uid('inv'), date: today(), action: 'InventoryPurchase', item: itemName, qty, unitPrice, amount: qty*unitPrice, accountId: acct?acct.id:null, accountName: acct?acct.name:'', vatType: invVatType.value };
+    // find or create item
     let item = b.inventory.find(i=>i.name === itemName);
     if(!item){
       item = { id: uid('item'), name: itemName, qty:0, avgCost:0 };
       b.inventory.push(item);
     }
+    // update weighted average if purchase
     const prevQty = item.qty || 0;
     const prevVal = (item.avgCost || 0) * prevQty;
     const newQty = prevQty + qty;
@@ -1279,15 +1396,18 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     const last = inventoryHistory.pop();
     const b = findBiz(last.bizId);
     if(!b) return;
+    // find and remove txn
     for(const uId of Object.keys(state.transactions)){
       const arr = state.transactions[uId][b.id] || [];
       const idx = arr.findIndex(t=>t.id === last.txn.id);
       if(idx !== -1) arr.splice(idx,1);
     }
+    // revert weighted average by removing that purchase (approximate revert by re-calculating avg from remaining inventory txns)
     const item = b.inventory.find(i=>i.name === last.txn.item);
     if(item){
-      // rebuild from inventory txns
+      // rebuild from scratch: naive approach scanning transactions to rebuild qty & avg
       item.qty = 0; item.avgCost = 0;
+      // scan all inventory txns for purchases
       for(const uId of Object.keys(state.transactions)){
         const txns = state.transactions[uId][b.id] || [];
         for(const t of txns.filter(x=>x.action === 'InventoryPurchase' && x.item === item.name)){
@@ -1305,7 +1425,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     renderAll();
   }
 
-  // Assets
+  // Assets handling
   function handleAddAsset(){
     if(!selectedBizId) return alert('Select business');
     const b = findBiz(selectedBizId);
@@ -1330,6 +1450,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     b.assets = b.assets || [];
     b.assets.push(asset);
 
+    // record transaction for ledger
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {}; state.transactions[selectedUserId][b.id] = state.transactions[selectedUserId][b.id] || [];
     const acct = findAccount(b, acctId);
     const txn = { id: uid('txn'), date: purchaseDate, action: isOpening ? 'OpeningAssetBal' : 'AssetPurchase', accountId: acct?acct.id:null, accountName: acct?acct.name:'', accountCategory: acct?acct.category:'', description: `${isOpening ? 'Opening asset balance' : 'Asset purchase'} ${name}`, amount: cost, qty, unitPrice, assetId: asset.id, classification, category, opening: isOpening };
@@ -1349,47 +1470,45 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     if(!assetId) return alert('Select asset to dispose');
     const asset = b.assets.find(a=>a.id===assetId);
     if(!asset) return alert('Asset not found');
-    const qtyToDispose = Number(assetDisposeQty.value || 1);
+    const qtyToDispose = Number(document.getElementById('assetDisposeQty').value || 1);
     if(qtyToDispose > asset.qty) return alert('Insufficient quantity to dispose');
     const proceeds = Number(assetDisposalProceeds.value || 0);
     const disposalDate = assetDisposalDate.value || today();
     const acctId = assetDisposalAccount.value;
-
-    // Compute tax written down value (simple approximation)
-    const proportion = qtyToDispose / asset.qty;
-    const twdv = Math.max( (asset.cost * proportion) - (asset.accumulatedCA || 0) * proportion, 10 );
-
+    // compute tax written down value (TWDV) = cost less capital allowance to date
+    // For simplicity, we use accumulatedCA in asset as capital allowance claimed and accumulatedDep as accounting dep.
+    const twdv = Math.max( (asset.cost * (qtyToDispose/asset.qty)) - (asset.accumulatedCA || 0), 10 ); // ensure residual 10 at end life
     const gainOrLoss = round2(proceeds - twdv);
-
-    // update asset balances
+    // accounting effect: remove asset cost proportionally, remove accumulatedDep proportionally
+    const proportion = qtyToDispose / asset.qty;
     const costRemoved = asset.cost * proportion;
     const accDepRemoved = (asset.accumulatedDep || 0) * proportion;
     asset.qty = asset.qty - qtyToDispose;
-    asset.cost = round2(asset.cost - costRemoved);
-    asset.accumulatedDep = round2((asset.accumulatedDep || 0) - accDepRemoved);
-
-    // ledger txn
+    asset.cost = asset.cost - costRemoved;
+    asset.accumulatedDep = (asset.accumulatedDep || 0) - accDepRemoved;
+    // record disposal transaction
     const acct = findAccount(b, acctId);
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {}; state.transactions[selectedUserId][b.id] = state.transactions[selectedUserId][b.id] || [];
     const txn = { id: uid('txn'), date: disposalDate, action: 'AssetDisposal', accountId: acct?acct.id:null, accountName: acct?acct.name:'', description: `Disposal ${asset.name}`, proceeds, gainOrLoss, assetId: asset.id, qty: qtyToDispose, classification: asset.classification };
     state.transactions[selectedUserId][b.id].push(txn);
-
     assetHistory.push({ bizId: b.id, txn });
     addAudit('asset.dispose','asset', asset.id, `Disposed ${qtyToDispose} of ${asset.name} proceeds ${fmt(proceeds)} gain/loss ${fmt(gainOrLoss)}`);
-
-    // Accounting entries (approx): record profit as Income or loss as Expense, but mark tax adjustments
+    // tax classification
     if(gainOrLoss > 0){
+      // profit on disposal is accounted as revenue but deducted for taxable profit
+      // We'll add a revenue txn and mark as taxExcluded (so accounting shows revenue but tax computation removes)
       const revAcct = b.accounts.find(a=>a.category==='Revenue') || b.accounts[0];
-      const revenueTxn = { id: uid('txn'), date: disposalDate, action: 'Income', accountId: revAcct.id, accountName: revAcct.name, description: `Profit on disposal ${asset.name}`, amount: gainOrLoss, taxAdjustment: -gainOrLoss };
+      const revenueTxn = { id: uid('txn'), date: disposalDate, action: 'Income', accountId: revAcct.id, accountName: revAcct.name, description: `Profit on disposal ${asset.name}`, amount: gainOrLoss, taxExcludedAdjustment: -gainOrLoss }; // mark for tax adjustment
       state.transactions[selectedUserId][b.id].push(revenueTxn);
     } else if(gainOrLoss < 0){
       const expenseAcct = b.accounts.find(a=>a.category==='Expense') || b.accounts[0];
-      const expenseTxn = { id: uid('txn'), date: disposalDate, action: 'Expense', accountId: expenseAcct.id, accountName: expenseAcct.name, description: `Loss on disposal ${asset.name}`, amount: Math.abs(gainOrLoss), taxAdjustment: Math.abs(gainOrLoss) };
+      const expenseTxn = { id: uid('txn'), date: disposalDate, action: 'Expense', accountId: expenseAcct.id, accountName: expenseAcct.name, description: `Loss on disposal ${asset.name}`, amount: Math.abs(gainOrLoss), taxAdjustment: Math.abs(gainOrLoss) }; // add back in tax
       state.transactions[selectedUserId][b.id].push(expenseTxn);
     }
 
     saveState();
     renderAll();
+    // close subform return to default
     txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
   }
 
@@ -1398,20 +1517,23 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     const last = assetHistory.pop();
     const b = findBiz(last.bizId);
     if(!b) return;
+    // remove txn(s) related
     for(const uId of Object.keys(state.transactions)){
       const arr = state.transactions[uId][b.id] || [];
       const idx = arr.findIndex(t=>t.id === last.txn.id);
       if(idx !== -1) arr.splice(idx,1);
     }
-    // remove asset created by that txn if any
-    if(last.txn && last.txn.assetId){
-      b.assets = b.assets.filter(a=>a.id !== last.txn.assetId);
-      // also remove txns referencing that asset
-      for(const uId of Object.keys(state.transactions)){
-        const arr = state.transactions[uId][b.id] || [];
-        for(let i = arr.length-1;i>=0;i--){
-          if(arr[i].assetId === last.txn.assetId) arr.splice(i,1);
-        }
+    // Find and remove asset created if OpeningAssetBal or AssetPurchase
+    const assetId = last.txn.assetId;
+    if(assetId){
+      b.assets = b.assets.filter(a=>a.id !== assetId);
+    }
+    // Also remove any automatically created revenue/expense txns that were appended by disposal logic
+    // (scan and remove txns referencing assetId)
+    for(const uId of Object.keys(state.transactions)){
+      const arr = state.transactions[uId][b.id] || [];
+      for(let i = arr.length-1;i>=0;i--){
+        if(arr[i].assetId === assetId) arr.splice(i,1);
       }
     }
     addAudit('asset.undo','asset', last.txn.id, 'Undo asset action');
@@ -1419,19 +1541,28 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     renderAll();
   }
 
+  // Undo last asset disposal (separate button)
   function handleUndoLastDisposal(){
+    // find last disposal txn in assetHistory
     for(let i = assetHistory.length-1; i>=0; i--){
       if(assetHistory[i].txn && assetHistory[i].txn.action === 'AssetDisposal'){
         const last = assetHistory.splice(i,1)[0];
         const b = findBiz(last.bizId);
         if(!b) return;
+        // attempt naive revert: we cannot fully restore previous qty/cost without full audit trail; for prototype remove disposal txns and inform user they may need manual fix
         for(const uId of Object.keys(state.transactions)){
           const arr = state.transactions[uId][b.id] || [];
           const idx = arr.findIndex(t=>t.id === last.txn.id);
           if(idx !== -1) arr.splice(idx,1);
         }
-        // best-effort: do not attempt to restore asset quantities automatically (needs full audit)
-        addAudit('asset.dispose.undo','asset', last.txn.id, 'Undo asset disposal (ledger entries removed; asset quantities may need manual restore)');
+        // remove related gain/loss txns that reference the disposed asset
+        for(const uId of Object.keys(state.transactions)){
+          const arr = state.transactions[uId][b.id] || [];
+          for(let j = arr.length-1; j>=0; j--){
+            if(arr[j].assetId === last.txn.assetId) arr.splice(j,1);
+          }
+        }
+        addAudit('asset.dispose.undo','asset', last.txn.id, 'Undo asset disposal');
         saveState();
         renderAll();
         return;
@@ -1440,7 +1571,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     alert('No asset disposal action found to undo');
   }
 
-  // Ledger rendering with view/edit/delete
+  // Ledger rendering, view/edit/delete
   function renderLedger(){
     ledgerTableBody.innerHTML = '';
     if(!selectedUserId || !selectedBizId) return;
@@ -1464,6 +1595,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
         renderLedger();
       });
       tr.querySelector('[data-edit]').addEventListener('click', ()=>{
+        // basic inline edit: allow amount & description edit
         const newAmt = prompt('Amount', t.amount);
         if(newAmt === null) return;
         t.amount = Number(newAmt);
@@ -1477,38 +1609,48 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     renderTaxSummary();
   }
 
-  // Tax & summary computations (simplified, extendable)
+  // Tax computations
   function renderTaxSummary(){
     taxSummaryDiv.innerHTML = '';
     if(!selectedUserId || !selectedBizId) return;
     const b = findBiz(selectedBizId);
     const txns = (state.transactions[selectedUserId] || {})[selectedBizId] || [];
-    let totalRevenue = 0, totalExpense = 0;
+    // compute accounting profit (simple P&L snapshot)
+    let totalRevenue = 0, totalExpense = 0, totalDep = 0;
     for(const t of txns){
-      if(t.action === 'Income' || t.action === 'Revenue') totalRevenue += Number(t.amount||0);
+      if(t.action === 'Income') totalRevenue += Number(t.amount||0);
+      if(t.action === 'Revenue') totalRevenue += Number(t.amount||0); // legacy
       if(t.action === 'Expense') totalExpense += Number(t.amount||0);
+      // depreciation accounted in assets schedule below; for now sum any explicit depreciation txn markers (not fully modelled)
     }
-    const accountingProfit = totalRevenue - totalExpense;
+    const accountingProfit = totalRevenue - totalExpense - totalDep;
+    // Compute capital allowances (basic)
+    const totalCAForYear = computeCapitalAllowanceForYear(b, txns);
+    // chargeable gains and special handling will require scanning asset disposals
+    const chargeable = computeChargeableGainsAndLosses(b, txns);
+
+    // Taxable profit computation per provided formula (simplified prototype)
+    // Accounting profit + Depreciation + Disallowable expenses + Chargeable gains - Non taxable income - Loss relief b/f - Capital allowance relief (see rule)
     const disallowables = computeDisallowableExpenses(b, txns);
     const nonTaxableIncome = computeNonTaxableIncome(b, txns);
-    const totalCAForYear = computeCapitalAllowanceForYear(b, txns);
-    const chargeable = computeChargeableGainsAndLosses(b, txns);
     const lossBf = b.lossBroughtForward || 0;
-
-    const totalDep = 0; // placeholder
     const totalRevenueForRatio = Math.max(totalRevenue, 1);
+    // capital allowance relief rule
     let capAllowanceRelief = 0;
     if(nonTaxableIncome < (0.10 * totalRevenueForRatio)){
       capAllowanceRelief = totalCAForYear;
     } else {
       capAllowanceRelief = round2((2/3) * totalCAForYear);
+      // carry forward 1/3
       b.caCarryForward = Number(b.caCarryForward || 0) + round2((1/3) * totalCAForYear);
     }
 
     let taxableProfit = accountingProfit + totalDep + disallowables + chargeable.gains - nonTaxableIncome - lossBf - capAllowanceRelief;
     taxableProfit = round2(taxableProfit < 0 ? 0 : taxableProfit);
 
+    // Display summary based on entity type
     if(b.entity === 'Individual'){
+      // For Individuals show only PAYE and WHT receivable/payable lines, Taxable income label
       const paye = computePIT(b, taxableProfit);
       const wht = computeWHTSummary(txns);
       taxSummaryDiv.innerHTML = `<div><strong>Tax Summary (Individual)</strong></div>
@@ -1518,6 +1660,8 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
         <div>PAYE / PIT liability: ${fmt(paye.tax)}</div>
         <div>WHT receivable: ${fmt(wht.receivable)}</div>`;
     } else {
+      // Company or Enterprise
+      // CIT computation based on turnoverThreshold
       const cit = computeCIT(b, taxableProfit, totalRevenue, chargeable);
       const paye = computePIT(b, taxableProfit);
       const wht = computeWHTSummary(txns);
@@ -1543,6 +1687,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   }
 
   function computeDisallowableExpenses(b, txns){
+    // Simple sum: any account with disallowableDefault true
     let s = 0;
     for(const t of txns){
       const acct = b.accounts.find(a=>a.id === t.accountId);
@@ -1558,7 +1703,9 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     }
     return round2(s);
   }
+
   function computeCapitalAllowanceForYear(b, txns){
+    // For prototype, sum asset.caPercent * cost for assets purchased this year (approx)
     let s = 0;
     const year = new Date().getFullYear();
     for(const a of b.assets || []){
@@ -1572,21 +1719,27 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     }
     return round2(s);
   }
+
   function computeChargeableGainsAndLosses(b, txns){
+    // scan txns for AssetDisposal action
     let gains = 0, losses = 0;
+    let cgt = 0;
     for(const t of txns){
       if(t.action === 'AssetDisposal'){
         const gv = Number(t.gainOrLoss || t.gain || 0);
         if(gv > 0) gains += gv;
         if(gv < 0) losses += Math.abs(gv);
+        // For company CGT logic, will be computed in computeCIT
       }
     }
-    return { gains: round2(gains), losses: round2(losses), cgt: 0 };
+    return { gains: round2(gains), losses: round2(losses), cgt: cgt };
   }
+
   function computeWHTSummary(txns){
     let receivable = 0, payable = 0;
     for(const t of txns){
       if(Number(t.whtAmount || 0) > 0){
+        // simplistic: if Income then receivable else payable
         if(t.action === 'Income' || t.action === 'Revenue') receivable += Number(t.whtAmount || 0);
         else payable += Number(t.whtAmount || 0);
       }
@@ -1595,6 +1748,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   }
 
   function computePIT(b, taxableProfit){
+    // Apply PIT bands to taxable profit less statutory deductions (for enterprise apply business statutory deductions)
     const statutory = sumObjectValues(b.statutoryDeductions || {});
     const amount = Math.max(0, taxableProfit - statutory);
     let remaining = amount;
@@ -1612,11 +1766,13 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
   }
 
   function computeCIT(b, taxableProfit, turnover, chargeable){
+    // CIT rules by turnoverThreshold
     const threshold = Number(b.turnoverThreshold || 100000000);
     let rate = 0;
     let note = '';
     if(threshold === 0){
-      rate = 0; note = 'Threshold=0 => CIT 0%';
+      rate = 0;
+      note = 'Threshold=0 => CIT 0%';
     } else if(threshold === 50000000){
       if(turnover <= 50000000) { rate = 0; note = 'Turnover <= ₦50,000,000 => 0%'; }
       else { rate = 0.25; note = 'Turnover > ₦50,000,000 => 25%'; }
@@ -1627,24 +1783,37 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       rate = Number(b.citRate || DEFAULTS.citRate)/100;
     }
     const computed = round2(taxableProfit * rate);
+    // subtract WHT receivable only if computed > 0
     const txns = (state.transactions[selectedUserId] || {})[selectedBizId] || [];
     const wht = computeWHTSummary(txns);
     const net = computed > 0 ? Math.max(0, computed - wht.receivable) : computed;
     return { computed: round2(computed), net: round2(net), note };
   }
 
-  // Quick panels
+  // Utility rounding
+  function round2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+
+  // Ledger & reports rendering
+  function renderAll(){
+    refreshSelectors();
+    populateAccountSelect();
+    renderLedger();
+    renderQuickPanels();
+  }
+
   function renderQuickPanels(){
     const b = findBiz(selectedBizId);
     inventoryListDiv.innerHTML = '';
     assetListDiv.innerHTML = '';
     plSnapshotQuick.innerHTML = '';
     if(!b) return;
+    // inventory
     for(const it of b.inventory || []){
       const div = document.createElement('div');
       div.innerHTML = `<div><strong>${it.name}</strong> qty ${it.qty} avg cost ${fmt(it.avgCost)}</div>`;
       inventoryListDiv.appendChild(div);
     }
+    // assets: show computed cost, accumulatedDep, NBV by category
     const group = {};
     for(const a of b.assets || []){
       group[a.category || 'Other'] = group[a.category || 'Other'] || { cost:0, accDep:0 };
@@ -1657,13 +1826,14 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       div.innerHTML = `<div><strong>${cat}</strong> Cost: ${fmt(group[cat].cost)} AccDep: ${fmt(group[cat].accDep)} NBV: ${fmt(nbv)}</div>`;
       assetListDiv.appendChild(div);
     }
+    // P&L snapshot
     const txns = (state.transactions[selectedUserId] || {})[selectedBizId] || [];
     let rev=0, exp=0;
     for(const t of txns){ if(t.action === 'Income' || t.action === 'Revenue') rev += Number(t.amount||0); if(t.action === 'Expense') exp += Number(t.amount||0); }
     plSnapshotQuick.innerHTML = `<div>Revenue: ${fmt(rev)} | Expense: ${fmt(exp)} | Profit: ${fmt(rev-exp)}</div>`;
   }
 
-  // Reports
+  // Simple report generation (Individual PIT & Enterprise template)
   function renderReport(name){
     reportContent.innerHTML = '';
     if(name === 'taxReconciliation'){
@@ -1678,7 +1848,9 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
     const b = findBiz(selectedBizId);
     if(!b) { wrapper.textContent = 'Select business to generate report'; return wrapper; }
     const txns = (state.transactions[selectedUserId] || {})[selectedBizId] || [];
+    // For Individuals format template provided
     if(b.entity === 'Individual'){
+      // Build fields per template
       let grossSalary=0, benefit=0, dividend=0, royalty=0, interest=0, rent=0, shareProfit=0;
       for(const t of txns){
         if(t.accountName === 'Salary' || t.accountName === 'Salaries') grossSalary += Number(t.amount||0);
@@ -1701,6 +1873,7 @@ Note: this is a single-file SPA; for readability I kept code comments and left s
       wrapper.innerHTML = `<pre style="font-family:inherit;">
 Computations of Personal Income Tax for Year Ended ${new Date().getFullYear()}
 
+                                    ₦              ₦
 Gross Salary                  ${fmt(grossSalary)}
 Benefit in kind               ${fmt(benefit)}
 Dividend (Gross)              ${fmt(dividend)}
@@ -1719,23 +1892,36 @@ NHF                           ${fmt(nhf)}
 
 Taxable Income                ${fmt(taxableIncome)}
 
+Apply PIT Band
+1st 800,000 free
+Next 2,200,000@15%
+Next 9,000,000 @ 18%
+Next 13,000,000 @21%
+Next 25,000,000@23%
+Above 50,000,000 @25%
+
 Final tax liability:          ${fmt(pit.tax)}
 Effective tax rate:           ${((pit.tax / Math.max(1, taxableIncome))*100).toFixed(2)}%
 
 </pre>`;
       return wrapper;
     } else {
-      // enterprise/company simplified report
+      // Enterprise / Company template (simplified)
+      // compute accounting profit & tax comps
       let totalRevenue=0, totalExpense=0;
       for(const t of txns){ if(t.action === 'Income' || t.action === 'Revenue') totalRevenue += Number(t.amount||0); if(t.action === 'Expense') totalExpense += Number(t.amount||0); }
       const accountingProfit = totalRevenue - totalExpense;
+      // disallowables + non taxable income lists
       const disallowables = computeDisallowableExpenses(b, txns);
       const nonTaxable = computeNonTaxableIncome(b, txns);
       const chargeable = computeChargeableGainsAndLosses(b, txns);
       const totalCA = computeCapitalAllowanceForYear(b, txns) + (b.caCarryForward || 0);
+      // apply capital allowance rule (reuse earlier logic)
       let capAllowanceRelief = totalCA;
-      if(nonTaxable >= (0.10 * Math.max(totalRevenue,1))) capAllowanceRelief = round2((2/3) * totalCA);
-      const taxableProfit = round2(accountingProfit + disallowables + chargeable.gains - nonTaxable - (b.lossBroughtForward||0) - capAllowanceRelief);
+      if(nonTaxable >= (0.10 * Math.max(totalRevenue,1))){
+        capAllowanceRelief = round2((2/3) * totalCA);
+      }
+      const taxableProfit = round2(accountingProfit + 0 + disallowables + chargeable.gains - nonTaxable - (b.lossBroughtForward||0) - capAllowanceRelief);
       const pit = computePIT(b, taxableProfit);
       const cit = computeCIT(b, taxableProfit, totalRevenue, chargeable);
       wrapper.innerHTML = `<pre style="font-family:inherit;">
@@ -1775,7 +1961,9 @@ Add Chargeable gains          ${fmt(chargeable.gains)}
 
 Gross Taxable profit          ${fmt(Math.max(0, taxableProfit + chargeable.gains))}
 
-PIT liability (if applicable) ${fmt(pit.tax)}
+Apply PIT Band (if applicable)
+  PIT liability               ${fmt(pit.tax)}
+
 CIT Computed                  ${fmt(cit.computed)}  Note: ${cit.note}
 Final CIT after WHT offset    ${fmt(cit.net)}
 
@@ -1784,67 +1972,7 @@ Final CIT after WHT offset    ${fmt(cit.net)}
     }
   }
 
-  // Export / import / clear
-  function exportJSON(){
-    const dataStr = JSON.stringify(state, null, 2);
-    const blob = new Blob([dataStr], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'ntc_full_data.json'; a.click(); URL.revokeObjectURL(url);
-  }
-  function importJSON(e){
-    const f = e.target.files[0]; if(!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const incoming = JSON.parse(r.result);
-        if(!confirm('Import will replace current data. Continue?')) return;
-        state = incoming;
-        migrateState();
-        refreshSelectors();
-        ensureSelection();
-        populateAccountSelect();
-        resetForms();
-        renderAll();
-        saveState();
-        alert('Import complete');
-      } catch(err){ alert('Invalid JSON'); }
-    };
-    r.readAsText(f);
-  }
-  function clearAllData(){
-    if(!confirm('Clear all stored data?')) return;
-    localStorage.removeItem(STORAGE_KEY);
-    state = { users:[], businesses:[], transactions:{}, attachments:{}, audit:[], auth:{ currentUserId:null } };
-    seedDemo();
-    refreshSelectors();
-    ensureSelection();
-    populateAccountSelect();
-    resetForms();
-    renderAll();
-  }
-
-  function resetForms(){
-    txnDate.value = today(); txnAction.value = ''; txnAccount.innerHTML=''; txnDesc.value=''; txnAmount.value='0'; txnVatType.value='none'; txnWht.checked=false; txnWhtRate.value=''; txnWhtBasis.value='gross'; txnSalary.checked=false;
-    invItemSelect.innerHTML=''; invNewName.value=''; invAccountSelect.innerHTML=''; invQty.value=''; invUnitPrice.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
-    assetExistingSelect.innerHTML=''; assetName.value=''; assetQty.value=1; assetUnitPrice.value=''; assetCost.value=''; assetOpeningCost.value=''; assetOpeningAccDep.value=''; assetPurchaseDate.value=''; assetLife.value=''; assetCA.value=''; assetDepRate.value='';
-    assetDisposalDate.value = ''; assetDisposalProceeds.value=''; assetDisposeQty.value = 1;
-  }
-
-  // utilities
-  function findBankAccountId(biz){
-    const b = biz || findBiz(selectedBizId);
-    if(!b) return null;
-    const bank = b.accounts.find(a=>a.name.toLowerCase()==='bank') || b.accounts.find(a=>a.category==='Asset') || b.accounts[0];
-    return bank ? bank.id : null;
-  }
-
-  function vatInclusiveCompute(amount, vatRate){
-    return round2((vatRate/(100+vatRate)) * amount);
-  }
-
-  function exportCurrentReport(format){ alert('Export '+format+' not fully implemented in this prototype. Use Export JSON to extract data.'); }
-
-  // delete helpers
+  // Helpers for delete user/business
   function deleteUser(id){
     state.users = state.users.filter(u=>u.id !== id);
     delete state.transactions[id];
@@ -1864,19 +1992,38 @@ Final CIT after WHT offset    ${fmt(cit.net)}
     renderAll();
   }
 
-  // initial wiring & render
-  initUI();
-  refreshSelectors();
-  ensureSelection();
+  function resetForms(){
+    txnDate.value = today(); txnAction.value = ''; txnAccount.innerHTML=''; txnDesc.value=''; txnAmount.value='0'; txnVatType.value='none'; txnWht.checked=false; txnWhtRate.value=''; txnWhtBasis.value='gross'; txnSalary.checked=false;
+    invItemSelect.innerHTML=''; invNewName.value=''; invAccountSelect.innerHTML=''; invQty.value=''; invUnitPrice.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
+    assetExistingSelect.innerHTML=''; assetName.value=''; assetQty.value=1; assetUnitPrice.value=''; assetCost.value=''; assetOpeningCost.value=''; assetOpeningAccDep.value=''; assetPurchaseDate.value=''; assetLife.value=''; assetCA.value=''; assetDepRate.value='';
+    assetDisposalDate.value = ''; assetDisposalProceeds.value=''; document.getElementById('assetDisposeQty').value = 1;
+  }
+
+  // small util: find bank account id
+  function findBankAccountId(biz){
+    const b = biz || findBiz(selectedBizId);
+    if(!b) return null;
+    const bank = b.accounts.find(a=>a.name.toLowerCase()==='bank') || b.accounts.find(a=>a.category==='Asset') || b.accounts[0];
+    return bank ? bank.id : null;
+  }
+
+  // WHT calc utility (net basis formula).
+  // Helper to compute VAT inclusive result
+  function vatInclusiveCompute(amount, vatRate){
+    // VAT = (vatRate/(100+vatRate)) * amount
+    return round2((vatRate/(100+vatRate)) * amount);
+  }
+
+  // Utility to export current report (basic)
+  function exportCurrentReport(format){ alert('Export '+format+' not fully implemented in prototype. Use Export JSON to extract data.'); }
+
+  // Final UI setup
   populateAccountSelect();
-  resetForms();
   renderAll();
 
-  // expose to console for debugging
+  // Expose some functions to console for manual testing
   window.__ntc = { state, saveState, loadState, computePIT, computeCIT, computeChargeableGainsAndLosses };
 
   </script>
 </body>
-</html>
-
-If you want further fixes or to expand particular tax/asset rules (for example: fully detailed CGT rules, monthly rolling balances, precise carry-forward flows), tell me which part to focus on and whether you'd like me to open a PR on the repository (I can produce the PR with this file).
+  </html>
