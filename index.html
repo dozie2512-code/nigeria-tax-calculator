@@ -485,7 +485,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
   const DEFAULTS = { 
-    vatRate:7.5, whtRate:5.0, citRate:25.0, citRate50M:25.0, citRate100M:30.0,
+    vatRate:7.5, whtRate:5.0, citRate:25.0,
     vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, 
     caRateDefault:20.0, depRateDefault:20.0, turnoverThreshold:100000000 
   };
@@ -507,15 +507,14 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     LARGE: 100000000    // ₦100,000,000
   };
   
+  // Tax calculation constants
+  const ASSET_RESIDUAL_VALUE = 10; // ₦10 residual at end of useful life
+  const NON_TAXABLE_INCOME_CA_THRESHOLD = 0.10; // 10% threshold for CA relief
+  const CGT_EXEMPTION_PROCEEDS = 150000000; // ₦150,000,000
+  const CGT_EXEMPTION_GAIN = 10000000; // ₦10,000,000
+  
   // Individual-only account names (for UI filtering)
   const INDIVIDUAL_ACCOUNTS = ['Salary', 'Benefit in kind', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
-  
-  // New accounts to add during migration
-  const NEW_DEFAULT_ACCOUNTS = [
-    'Share of profit', 'Benefit in kind', 'Dividend', 'Interest', 'Royalty',
-    'Rent', 'Shares', 'Options', 'Rights', 'Debt', 'Digital/Virtual Asset',
-    'Receivable', 'Payable', 'Capital', 'Accruals', 'Prepayment'
-  ];
 
   // App state
   let state = {
@@ -1466,8 +1465,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     // Use residual value of ₦10 at end of useful life
     const totalCost = (asset.cost || 0) + (asset.openingCost || 0);
     const totalAccDep = (asset.accumulatedDep || 0) + (asset.openingAccDep || 0);
-    const residualValue = 10; // ₦10 residual
-    let twdv = Math.max(totalCost - totalAccDep, residualValue);
+    let twdv = Math.max(totalCost - totalAccDep, ASSET_RESIDUAL_VALUE);
     
     // Chargeable gain/loss = proceeds - TWDV
     const gain = (asset.disposal.proceeds || 0) - twdv;
@@ -1911,7 +1909,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     let allowedCA = totalCA;
     let carriedForwardCA = 0;
     
-    if(revenue > 0 && (nonTaxableIncome / revenue) >= 0.10) {
+    if(revenue > 0 && (nonTaxableIncome / revenue) >= NON_TAXABLE_INCOME_CA_THRESHOLD) {
       // Non-taxable >= 10% of revenue: only allow 2/3
       allowedCA = (2/3) * totalCA;
       carriedForwardCA = (1/3) * totalCA;
@@ -1929,7 +1927,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       if(turnover > threshold && threshold > 0){
         // Above threshold: charge CGT, exclude from CIT base
         for(const g of chargeableGains){
-          if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
+          if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
             // Exempt
             cgtExcludedFromTaxable += g.gain;
           } else {
@@ -1941,7 +1939,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       } else {
         // Below threshold: no CGT, exclude gains from profit
         for(const g of chargeableGains){
-          if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
+          if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
             taxableProfit -= g.gain;
           } else {
             // No CGT below threshold, but still exclude
@@ -1952,7 +1950,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     } else {
       // Individual or Enterprise: include in taxable profit unless exempt
       for(const g of chargeableGains){
-        if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
+        if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
           // Exempt: exclude from taxable profit
           taxableProfit -= g.gain;
         } else {
@@ -1974,17 +1972,17 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     let citCharge = 0;
     if(b.entity === 'Company' && b.citEnabled){
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-      if(threshold === 0) {
+      if(threshold === CIT_THRESHOLDS.NONE) {
         // No CIT
         citCharge = 0;
-      } else if(threshold === 50000000) {
+      } else if(threshold === CIT_THRESHOLDS.MEDIUM) {
         // 50M threshold: 0% if ≤50M, 25% if >50M
-        if(turnover > 50000000) {
+        if(turnover > CIT_THRESHOLDS.MEDIUM) {
           citCharge = 0.25 * Math.max(0, taxableProfit);
         }
-      } else if(threshold === 100000000) {
+      } else if(threshold === CIT_THRESHOLDS.LARGE) {
         // 100M threshold: 0% if ≤100M, 30% if >100M
-        if(turnover > 100000000) {
+        if(turnover > CIT_THRESHOLDS.LARGE) {
           citCharge = 0.30 * Math.max(0, taxableProfit);
         }
       }
@@ -2112,10 +2110,10 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         for(const g of gains){
           let treatment = '';
           if(b.entity === 'Company'){
-            if((g.proceeds <= 150000000) || (g.gain <= 10000000)){ treatment = 'Exempt from CGT (excluded from taxable profit)'; }
+            if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)){ treatment = 'Exempt from CGT (excluded from taxable profit)'; }
             else { treatment = 'Subject to CGT @30% and excluded from taxable profit'; }
           } else {
-            if((g.proceeds <= 150000000) || (g.gain <= 10000000)){ treatment = 'Exempt from taxable profit (no PIT effect)'; }
+            if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)){ treatment = 'Exempt from taxable profit (no PIT effect)'; }
             else { treatment = 'Included in taxable profit (sole proprietor)'; }
           }
           html += `<tr><td>${g.name}</td><td>${fmt(g.proceeds)}</td><td>${fmt(g.gain)}</td><td>${treatment}</td></tr>`;
