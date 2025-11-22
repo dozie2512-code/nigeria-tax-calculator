@@ -1714,13 +1714,47 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         inventoryListDiv.appendChild(d);
       }
     }
+    
+    // Group assets by category and compute totals
     if(b.assets && b.assets.length){
+      const assetsByCategory = {};
       for(const a of b.assets){
-        const d = document.createElement('div'); d.className='account-row';
-        d.innerHTML = `<div><strong>${a.name}</strong><div class="small-muted">Qty: ${a.qty||1} | Unit price: ${fmt(a.unitPrice||0)} | Cost: ${fmt(a.cost||0)} | Acc dep: ${fmt(a.accumulatedDep||0)}</div></div>`;
-        assetListDiv.appendChild(d);
+        const cat = a.category || 'Other Asset';
+        if(!assetsByCategory[cat]) {
+          assetsByCategory[cat] = { assets: [], totalCost: 0, totalAccDep: 0, totalNBV: 0 };
+        }
+        const totalCost = (a.cost || 0) + (a.openingCost || 0);
+        const totalAccDep = (a.accumulatedDep || 0) + (a.openingAccDep || 0);
+        const nbv = totalCost - totalAccDep;
+        
+        assetsByCategory[cat].assets.push(a);
+        assetsByCategory[cat].totalCost += totalCost;
+        assetsByCategory[cat].totalAccDep += totalAccDep;
+        assetsByCategory[cat].totalNBV += nbv;
+      }
+      
+      // Display by category
+      for(const cat in assetsByCategory){
+        const catData = assetsByCategory[cat];
+        const catDiv = document.createElement('div');
+        catDiv.className = 'account-row';
+        catDiv.innerHTML = `<div><strong>${cat}</strong> (${catData.assets.length} assets)<div class="small-muted">Cost: ${fmt(catData.totalCost)} | Acc Dep: ${fmt(catData.totalAccDep)} | NBV: ${fmt(catData.totalNBV)}</div></div>`;
+        assetListDiv.appendChild(catDiv);
+        
+        // List individual assets in this category
+        for(const a of catData.assets){
+          const totalCost = (a.cost || 0) + (a.openingCost || 0);
+          const totalAccDep = (a.accumulatedDep || 0) + (a.openingAccDep || 0);
+          const nbv = totalCost - totalAccDep;
+          const d = document.createElement('div');
+          d.className = 'small-muted';
+          d.style.paddingLeft = '16px';
+          d.innerHTML = `${a.name} - Qty: ${a.qty||1} | Cost: ${fmt(totalCost)} | Acc Dep: ${fmt(totalAccDep)} | NBV: ${fmt(nbv)}`;
+          assetListDiv.appendChild(d);
+        }
       }
     }
+    
     const pl = computePLSnapshot();
     plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
   }
@@ -1857,8 +1891,33 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
     const accountingProfit = revenue - expenses;
+    
+    // Calculate non-taxable income for CA relief rule
+    let nonTaxableIncome = 0;
+    for(const t of arr){
+      if(t.accountCategory === 'Revenue'){
+        const acct = findAccount(b, t.accountId);
+        if(acct && acct.nonTaxableDefault) {
+          nonTaxableIncome += Number(t.amount || 0);
+        }
+      }
+    }
+    
+    // Capital Allowance Relief Rule:
+    // If non-taxable income < 10% of total revenue: allow 100% of CA
+    // Otherwise: allow 2/3 of CA, carry forward 1/3
     const capitalAllowanceDaily = computeTotalCapitalAllowance();
-    let taxableProfit = accountingProfit - capitalAllowanceDaily - (b.caCarryForward || 0) + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
+    const totalCA = capitalAllowanceDaily + (b.caCarryForward || 0);
+    let allowedCA = totalCA;
+    let carriedForwardCA = 0;
+    
+    if(revenue > 0 && (nonTaxableIncome / revenue) >= 0.10) {
+      // Non-taxable >= 10% of revenue: only allow 2/3
+      allowedCA = (2/3) * totalCA;
+      carriedForwardCA = (1/3) * totalCA;
+    }
+    
+    let taxableProfit = accountingProfit - allowedCA + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
     const chargeableGains = computeChargeableGainsForBiz();
     const turnover = revenue;
     let cgtCharge = 0;
@@ -1954,7 +2013,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     if(isIndividual){
       // For Individual: don't show Accounting Profit, show "Taxable income" instead of "Taxable profit"
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
+      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
+      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)}</div>`;
       html += `<hr/>`;
       // For Individual: show only PAYE and WHT
       html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
@@ -1963,7 +2023,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       // For Company/Enterprise: show full summary
       html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
       html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
+      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
+      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
       html += `<hr/>`;
       html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
       html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
@@ -1980,6 +2041,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     
     if(b.showLines){
       html += `<div style="margin-top:8px;"><strong>Notes:</strong> PAYE shown as totals (monthly & annual). Full PAYE contact breakdown is in Reports & PAYE Report.</div>`;
+      if(carriedForwardCA > 0) {
+        html += `<div class="notice" style="margin-top:6px;"><strong>CA Carryforward:</strong> ${fmt(carriedForwardCA)} will be carried forward to next period (non-taxable income ≥ 10% of revenue).</div>`;
+      }
     }
 
     taxSummaryDiv.innerHTML = html;
