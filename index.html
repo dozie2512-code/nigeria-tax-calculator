@@ -200,6 +200,15 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         <h3 style="margin:4px 0;">Asset Purchase</h3>
         <div class="form-inline">
           <label>Asset name: <input type="text" id="assetName" /></label>
+          <label>Category:
+            <select id="assetCategory">
+              <option value="Property Plant and Equipment">Property Plant and Equipment</option>
+              <option value="Furniture & Fittings">Furniture & Fittings</option>
+              <option value="Motor Vehicles">Motor Vehicles</option>
+              <option value="Land & Building">Land & Building</option>
+              <option value="Other Asset">Other Asset</option>
+            </select>
+          </label>
           <label>Qty: <input type="number" id="assetQty" min="1" step="1" class="smallInput" value="1" /></label>
           <label>Unit Price (₦): <input type="number" id="assetUnitPrice" min="0" step="0.01" /></label>
           <label>Cost (₦): <input type="number" id="assetCost" min="0" step="0.01" /></label>
@@ -564,6 +573,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   const assetPurchaseSubform = document.getElementById('assetPurchaseSubform');
   const assetDisposalSubform = document.getElementById('assetDisposalSubform');
   const assetName = document.getElementById('assetName');
+  const assetCategory = document.getElementById('assetCategory');
   const assetQty = document.getElementById('assetQty');
   const assetUnitPrice = document.getElementById('assetUnitPrice');
   const assetCost = document.getElementById('assetCost');
@@ -1357,6 +1367,7 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const item = {
       id: uid('asset'),
       name: assetName.value || 'Asset',
+      category: assetCategory.value || 'Other Asset',
       qty: Number(assetQty.value || 1),
       unitPrice: Number(assetUnitPrice.value || 0),
       cost: Number(assetCost.value || (Number(assetUnitPrice.value || 0) * Number(assetQty.value || 1))),
@@ -1738,17 +1749,50 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0;
     const payeByContact = {};
+    
     for(const t of arr){
       if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
-      if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') vatCollected += (Number(t.amount||0) * (b.vatRate/100));
-      if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') vatPaid += (Number(t.amount||0) * (b.vatRate/100));
-      if(t.whtApplied && t.accountCategory === 'Expense') whtPayable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
-      if(t.whtApplied && t.accountCategory === 'Revenue') whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+      
+      // VAT calculation with inclusive option
+      if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') {
+        vatCollected += (Number(t.amount||0) * (b.vatRate/100));
+      } else if(t.vatType === 'inclusive' && t.accountCategory === 'Revenue') {
+        // VAT inclusive: VAT = (vatRate / (100 + vatRate)) * amount
+        vatCollected += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+      }
+      
+      if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') {
+        vatPaid += (Number(t.amount||0) * (b.vatRate/100));
+      } else if(t.vatType === 'inclusive' && t.accountCategory === 'Expense') {
+        vatPaid += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+      }
+      
+      // WHT calculation with net basis option
+      if(t.whtApplied && t.accountCategory === 'Expense') {
+        if(t.whtBasis === 'net') {
+          // WHT net basis: WHT = rate * (amount / (1 - rate))
+          const rate = (t.whtRate || b.whtRate) / 100;
+          whtPayable += Number(t.amount||0) * (rate / (1 - rate));
+        } else {
+          whtPayable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+        }
+      }
+      
+      if(t.whtApplied && t.accountCategory === 'Revenue') {
+        if(t.whtBasis === 'net') {
+          const rate = (t.whtRate || b.whtRate) / 100;
+          whtReceivable += Number(t.amount||0) * (rate / (1 - rate));
+        } else {
+          whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+        }
+      }
+      
       if(t.paye && t.contact){
         payeByContact[t.contact] = (payeByContact[t.contact]||0) + Number(t.amount||0);
       }
     }
+    
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
     const accountingProfit = revenue - expenses;
@@ -1758,10 +1802,15 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const turnover = revenue;
     let cgtCharge = 0;
     let cgtExcludedFromTaxable = 0;
+    
+    // Chargeable gains treatment based on entity type and turnover threshold
     if(b.entity === 'Company'){
-      if(turnover > CIT_TURNOVER_THRESHOLD){
+      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+      if(turnover > threshold && threshold > 0){
+        // Above threshold: charge CGT, exclude from CIT base
         for(const g of chargeableGains){
           if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
+            // Exempt
             cgtExcludedFromTaxable += g.gain;
           } else {
             cgtCharge += g.gain * 0.30;
@@ -1770,21 +1819,24 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         }
         taxableProfit -= cgtExcludedFromTaxable;
       } else {
+        // Below threshold: no CGT, exclude gains from profit
         for(const g of chargeableGains){
           if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
             taxableProfit -= g.gain;
           } else {
-            cgtCharge += g.gain * 0.30;
+            // No CGT below threshold, but still exclude
             taxableProfit -= g.gain;
           }
         }
       }
     } else {
+      // Individual or Enterprise: include in taxable profit unless exempt
       for(const g of chargeableGains){
         if((g.proceeds <= 150000000) || (g.gain <= 10000000)) {
+          // Exempt: exclude from taxable profit
           taxableProfit -= g.gain;
         } else {
-          // leaves in taxable profit (per instructions)
+          // Not exempt: leave in taxable profit
         }
       }
     }
@@ -1798,35 +1850,73 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       payeMonthlyTotal += computedTax / 12;
     }
 
+    // CIT calculation with turnover threshold
     let citCharge = 0;
     if(b.entity === 'Company' && b.citEnabled){
-      if(taxableProfit > 0){
-        citCharge = (b.citRate || DEFAULTS.citRate)/100 * taxableProfit;
+      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+      if(threshold === 0) {
+        // No CIT
+        citCharge = 0;
+      } else if(threshold === 50000000) {
+        // 50M threshold: 0% if ≤50M, 25% if >50M
+        if(turnover > 50000000) {
+          citCharge = 0.25 * Math.max(0, taxableProfit);
+        }
+      } else if(threshold === 100000000) {
+        // 100M threshold: 0% if ≤100M, 30% if >100M
+        if(turnover > 100000000) {
+          citCharge = 0.30 * Math.max(0, taxableProfit);
+        }
       }
+      
+      // Deduct WHT receivable only if CIT > 0
+      if(citCharge > 0) {
+        citCharge = Math.max(0, citCharge - whtReceivable);
+      }
+      // If CIT not computed, WHT receivable carries forward (note for user)
     }
 
+    // PIT for Enterprise (renamed from SoleProprietor)
     let pitCharge = 0;
-    if(b.entity === 'SoleProprietor' && b.pitEnabled){
+    if(b.entity === 'Enterprise' && b.pitEnabled){
       if(taxableProfit > 0){
-        pitCharge = 0.20 * taxableProfit;
+        pitCharge = computePAYEOnAnnualIncome(taxableProfit);
       }
     }
 
     const vatNet = vatCollected - vatPaid;
-
-    let html = `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
-    html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
-    html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
-    html += `<hr/>`;
-    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
-    if(b.entity === 'Company'){
-      html += `<div><strong>CIT Charge:</strong> ${fmt(citCharge)}</div>`;
-      html += `<div><strong>CGT Charge (30% where applicable):</strong> ${fmt(cgtCharge)}</div>`;
+    
+    // INDIVIDUAL ENTITY: Special display
+    const isIndividual = b.entity === 'Individual';
+    
+    let html = '';
+    if(isIndividual){
+      // For Individual: don't show Accounting Profit, show "Taxable income" instead of "Taxable profit"
+      html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
+      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
+      html += `<hr/>`;
+      // For Individual: show only PAYE and WHT
+      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
     } else {
-      html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      // For Company/Enterprise: show full summary
+      html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
+      html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
+      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)}) | Capital Allowance (daily) ${fmt(capitalAllowanceDaily)}</div>`;
+      html += `<hr/>`;
+      html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
+      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+      if(b.entity === 'Company'){
+        html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+        html += `<div><strong>CGT Charge (30% where applicable):</strong> ${fmt(cgtCharge)}</div>`;
+        const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+        html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover: ${fmt(turnover)}</div>`;
+      } else {
+        html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      }
     }
+    
     if(b.showLines){
       html += `<div style="margin-top:8px;"><strong>Notes:</strong> PAYE shown as totals (monthly & annual). Full PAYE contact breakdown is in Reports & PAYE Report.</div>`;
     }
