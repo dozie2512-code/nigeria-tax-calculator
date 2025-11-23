@@ -1238,7 +1238,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     if(!name) return alert('Account name required');
     const b = findBiz(selectedBizId);
     b.accounts = b.accounts || [];
-    b.accounts.push({ id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq });
+    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq };
+    b.accounts.push(newAcct);
+    addAudit('account.add','account', newAcct.id, `Added account: ${name}`);
     saveState();
     renderAccounts();
     populateAccountSelect();
@@ -2196,8 +2198,13 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     expenses += depreciationDaily;
     const accountingProfit = revenue - expenses;
     
+    // Get adjustment values from P&L snapshot
+    const plSnapshot = computePLSnapshot();
+    const disallowableExpense = plSnapshot.disallowableExpense || 0;
+    const nonTaxableIncomeAdjustment = plSnapshot.nonTaxableIncome || 0;
+    
     // Calculate non-taxable income for CA relief rule
-    let nonTaxableIncome = 0;
+    let nonTaxableIncome = nonTaxableIncomeAdjustment;
     for(const t of arr){
       if(t.accountCategory === 'Revenue'){
         const acct = findAccount(b, t.accountId);
@@ -2221,7 +2228,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       carriedForwardCA = (1/3) * totalCA;
     }
     
-    let taxableProfit = accountingProfit - allowedCA + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
+    // Taxable profit calculation: Add back depreciation for tax, deduct CA
+    // Also add disallowable expenses and deduct non-taxable income adjustments
+    let taxableProfit = accountingProfit + depreciationDaily - allowedCA + disallowableExpense - nonTaxableIncomeAdjustment + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
     const chargeableGains = computeChargeableGainsForBiz();
     const turnover = revenue;
     let cgtCharge = 0;
@@ -2414,6 +2423,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function renderReport(name){
     const b = findBiz(selectedBizId);
     if(!b) { reportContent.innerHTML = '<div>Select a business to view reports</div>'; return; }
+    
+    // Add audit for report generation
+    addAudit('report.view', 'report', name, `Viewed report: ${name}`);
     
     if(name === 'vatReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
