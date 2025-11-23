@@ -1077,6 +1077,10 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       txnAdjustmentAmountLabel.style.display = show ? 'inline-flex' : 'none';
     });
 
+    // Asset qty/unitPrice auto-computation handlers
+    assetQty.addEventListener('input', autoComputeAssetCost);
+    assetUnitPrice.addEventListener('input', autoComputeAssetCost);
+
     document.getElementById('btnSearch').addEventListener('click', renderLedger);
     document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
 
@@ -1242,6 +1246,14 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const isIndividual = b.entity === 'Individual';
     
     if (isIndividual) {
+      // Hide panels and elements for Individual
+      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
+      if(inventoryQuick) inventoryQuick.style.display = 'none';
+      if(assetsQuick) assetsQuick.style.display = 'none';
+      if(plQuick) plQuick.style.display = 'none';
+      
       // Restrict actions - only show Income for Individuals
       Array.from(txnAction.options).forEach(opt => {
         if (opt.value && opt.value !== 'Income') {
@@ -1251,16 +1263,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         }
       });
       
-      // Restrict accounts - only show individual-specific accounts
+      // Restrict accounts - show Individual income accounts, hide Salary
       Array.from(txnAccount.options).forEach(opt => {
         const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (INDIVIDUAL_ACCOUNTS.includes(accountText)) {
-          opt.style.display = '';
+        if (accountText === 'Salary') {
+          opt.style.display = 'none';  // Hide Salary for Individual
+        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
+          opt.style.display = '';  // Show Individual income accounts
         } else {
           opt.style.display = 'none';
         }
       });
     } else {
+      // Show all panels for non-Individual entities
+      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
+      if(inventoryQuick) inventoryQuick.style.display = 'block';
+      if(assetsQuick) assetsQuick.style.display = 'block';
+      if(plQuick) plQuick.style.display = 'block';
+      
       // Show all actions and accounts for non-Individual entities
       Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
       Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
@@ -1283,14 +1305,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       inventorySubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
-      // Update UI labels for opening asset balance
+      
+      // Update UI labels and field behavior for asset actions
       if(val === 'OpeningAssetBal') {
         document.querySelector('#assetPurchaseSubform h3').textContent = 'Opening Asset Balance';
         btnAddAsset.textContent = 'Record Opening Balance';
+        // For Opening Asset Bal: disable Cost, auto-compute Opening Cost
+        assetCost.disabled = true;
+        assetOpeningCost.disabled = false;
+        assetOpeningAccDep.disabled = false;
       } else {
         document.querySelector('#assetPurchaseSubform h3').textContent = 'Asset Purchase';
         btnAddAsset.textContent = 'Record Asset Purchase';
+        // For Asset Purchase: disable Opening Cost/Acc Dep, auto-compute Cost
+        assetCost.disabled = false;
+        assetOpeningCost.disabled = true;
+        assetOpeningAccDep.disabled = true;
       }
+      
+      // Set default account to Bank if available
+      setDefaultAssetAccount();
     } else if(val === 'AssetDisposal'){
       mainTxnForm.style.display = 'none';
       assetDisposalSubform.style.display = 'block';
@@ -1298,12 +1332,39 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       inventorySubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
+      // Set default account to Bank if available
+      setDefaultAssetAccount();
     } else {
       mainTxnForm.style.display = 'flex';
       inventorySubform.style.display = 'none';
       assetPurchaseSubform.style.display = 'none';
       assetDisposalSubform.style.display = 'none';
       renderFeatureVisibility();
+    }
+  }
+
+  function setDefaultAssetAccount(){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    const bankAccount = b.accounts.find(a => a.name === 'Bank' && a.category === 'Asset');
+    if(bankAccount){
+      if(assetPurchaseAccount) assetPurchaseAccount.value = bankAccount.id;
+      if(assetDisposalAccount) assetDisposalAccount.value = bankAccount.id;
+    }
+  }
+
+  function autoComputeAssetCost(){
+    const action = txnAction.value;
+    const qty = Number(assetQty.value || 0);
+    const unitPrice = Number(assetUnitPrice.value || 0);
+    const computed = qty * unitPrice;
+    
+    if(action === 'AssetPurchase'){
+      // Auto-compute Cost
+      assetCost.value = computed;
+    } else if(action === 'OpeningAssetBal'){
+      // Auto-compute Opening Cost
+      assetOpeningCost.value = computed;
     }
   }
 
@@ -2193,16 +2254,28 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     // INDIVIDUAL ENTITY: Special display
     const isIndividual = b.entity === 'Individual';
     
+    // PIT for Individual (gross values, deduct WHT receivable)
+    let pitCharge = 0;
+    if(isIndividual && b.pitEnabled){
+      // Use gross income (revenue) for PIT computation
+      if(revenue > 0){
+        pitCharge = computePAYEOnAnnualIncome(revenue);
+        // Deduct WHT receivable from PIT
+        pitCharge = Math.max(0, pitCharge - whtReceivable);
+      }
+    }
+    
     let html = '';
     if(isIndividual){
-      // For Individual: don't show Accounting Profit, show "Taxable income" instead of "Taxable profit"
+      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
+      html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
-      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)}</div>`;
+      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
       html += `<hr/>`;
-      // For Individual: show only PAYE and WHT
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+      // For Individual: show only WHT Receivable and PIT
+      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
+      html += `<div class="small-note">PIT is computed on gross income less WHT receivable</div>`;
     } else {
       // For Company/Enterprise: show full summary
       html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
