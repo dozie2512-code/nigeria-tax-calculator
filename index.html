@@ -93,6 +93,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
 
       <div class="auth-bar">
         <span id="authInfo" class="small-muted"></span>
+        <button id="btnLogin" class="small primary">Login</button>
+        <button id="btnLogout" class="small" style="display:none;">Logout</button>
         <button id="btnExport" class="small">Export JSON</button>
         <button id="btnImport" class="small">Import JSON</button>
         <button id="btnClearAll" class="small danger">Clear All</button>
@@ -118,8 +120,6 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
-            <option value="BankPayment">Bank Payment</option>
-            <option value="BankReceipt">Bank Receipt</option>
           </select>
         </label>
 
@@ -153,6 +153,17 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         <label class="inline-label" id="txnPayeLabel">
           <input type="checkbox" id="txnSalary" /> Salary (PAYE)
         </label>
+
+        <div style="width:1px;height:28px;background:#e6e6e6;margin:0 8px;"></div>
+
+        <label>Adjustment:
+          <select id="txnAdjustmentType">
+            <option value="">None</option>
+            <option value="disallowable">Disallowable expense</option>
+            <option value="nontaxable">Non-taxable income</option>
+          </select>
+        </label>
+        <label id="txnAdjustmentAmountLabel" style="display:none;">Amt (₦): <input type="number" id="txnAdjustmentAmount" class="smallInput" min="0" step="0.01" /></label>
 
         <label>Contact: <input type="text" id="txnContact" placeholder="Contact name" /></label>
 
@@ -199,7 +210,10 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       <div id="assetPurchaseSubform" style="margin-top:10px; display:none;" class="panel assets-panel">
         <h3 style="margin:4px 0;">Asset Purchase</h3>
         <div class="form-inline">
-          <label>Asset name: <input type="text" id="assetName" /></label>
+          <label>Asset name: <input type="text" id="assetName" list="assetNameSuggestions" /></label>
+          <datalist id="assetNameSuggestions">
+            <!-- Populated dynamically based on category selection -->
+          </datalist>
           <label>Category:
             <select id="assetCategory">
               <option value="Property Plant and Equipment">Property Plant and Equipment</option>
@@ -258,6 +272,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
           <label>Contact: <input type="text" id="assetDisposalContact" placeholder="Contact name" /></label>
           <label>Receipt: <input type="file" id="assetDisposalReceipt" /></label>
           <button id="btnDisposeAsset" class="small danger">Record Disposal</button>
+          <button id="btnAssetDisposalCancel" class="small">Cancel</button>
+          <button id="btnAssetDisposalUndo" class="small danger">Undo last asset action</button>
         </div>
         <small class="note">Chargeable gains and losses will be classified based on asset classification and included in tax calculations according to entity rules. Profit/loss = proceeds - tax written down value (TWDV = ₦10 residual at end of life).</small>
       </div>
@@ -291,12 +307,15 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       <h2 style="margin:0 0 8px 0;">Reports</h2>
 
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-        <button class="small tab active" data-report="taxReconciliation">Taxable Income Reconciliation</button>
-        <button class="small tab" data-report="vatReport">VAT Report</button>
-        <button class="small tab" data-report="whtPayable">WHT Payable/Receivable</button>
+        <button class="small tab active" data-report="vatReport">VAT Report</button>
+        <button class="small tab" data-report="whtPayable">WHT Payable</button>
+        <button class="small tab" data-report="whtReceivable">WHT Receivable</button>
         <button class="small tab" data-report="payeReport">PAYE Report</button>
         <button class="small tab" data-report="inventoryReport">Inventory Report</button>
         <button class="small tab" data-report="assetsReport">Assets Report</button>
+        <button class="small tab" data-report="pitIndividual">PIT (Individual)</button>
+        <button class="small tab" data-report="pitEnterprise">PIT (Enterprise)</button>
+        <button class="small tab" data-report="companyAccounts">Company Accounts</button>
         <button class="small tab" data-report="auditTrail">Audit Trail</button>
         <button class="small tab" data-report="receiptsFolder">Receipts Folder</button>
       </div>
@@ -372,14 +391,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       </label>
       <label>VAT rate %: <input type="number" id="bizVat" class="smallInput" min="0" step="0.01" /></label>
       <label>WHT rate %: <input type="number" id="bizWht" class="smallInput" min="0" step="0.01" /></label>
-      <label>CIT rate %: <input type="number" id="bizCit" class="smallInput" min="0" step="0.01" /></label>
-      <label>CIT Turnover Threshold:
-        <select id="bizTurnoverThreshold" class="smallInput">
-          <option value="0">No CIT</option>
-          <option value="50000000">₦50M</option>
-          <option value="100000000">₦100M</option>
-        </select>
-      </label>
+      <!-- CIT fields hidden but preserved in data via hidden inputs -->
+      <input type="hidden" id="bizCit" />
+      <input type="hidden" id="bizTurnoverThreshold" />
     </div>
 
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
@@ -387,7 +401,8 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       <label><input type="checkbox" id="bizPitEnabled" /> Enable PIT (sole prop)</label>
       <label><input type="checkbox" id="bizPayeEnabled" /> Enable PAYE</label>
       <label style="margin-left:8px;"><input type="checkbox" id="bizShowLines" /> Show detailed tax summary</label>
-      <label style="margin-left:8px;"><input type="checkbox" id="bizCitEnabled" /> Enable CIT</label>
+      <!-- CIT enabled checkbox hidden but preserved -->
+      <input type="hidden" id="bizCitEnabled" />
     </div>
 
     <div class="form-section">
@@ -461,6 +476,20 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
       <button id="closeAccountsBtn">Close</button>
+    </div>
+  </div>
+
+  <!-- Login modal -->
+  <div id="loginModal" class="modal">
+    <h3>Login</h3>
+    <div class="row">
+      <label>Username: <input type="text" id="loginUsername" /></label>
+      <label>Password: <input type="password" id="loginPassword" placeholder="(optional)" /></label>
+    </div>
+    <small class="note">Note: This is a prototype-only login system. Passwords are not stored.</small>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+      <button id="loginCancel">Cancel</button>
+      <button class="primary" id="loginSubmit">Login</button>
     </div>
   </div>
 
@@ -667,6 +696,23 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   const btnLedgerTab = document.getElementById('btnLedgerTab');
   const btnReportsTab = document.getElementById('btnReportsTab');
 
+  // New DOM refs for added features
+  const btnLogin = document.getElementById('btnLogin');
+  const btnLogout = document.getElementById('btnLogout');
+  const loginModal = document.getElementById('loginModal');
+  const loginUsername = document.getElementById('loginUsername');
+  const loginPassword = document.getElementById('loginPassword');
+  const loginSubmit = document.getElementById('loginSubmit');
+  const loginCancel = document.getElementById('loginCancel');
+  const authInfo = document.getElementById('authInfo');
+  
+  const txnAdjustmentType = document.getElementById('txnAdjustmentType');
+  const txnAdjustmentAmount = document.getElementById('txnAdjustmentAmount');
+  const txnAdjustmentAmountLabel = document.getElementById('txnAdjustmentAmountLabel');
+  
+  const btnAssetDisposalCancel = document.getElementById('btnAssetDisposalCancel');
+  const btnAssetDisposalUndo = document.getElementById('btnAssetDisposalUndo');
+
   // utilities
   function uid(prefix = 'id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
   function fmt(n){ return (n==null || isNaN(Number(n))) ? '₦0.00' : '₦' + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -726,24 +772,25 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       // MIGRATION: Add missing default accounts
       const existingAccountNames = b.accounts.map(a => a.name);
       const accountsToAdd = [
+        { name: 'Purchases', category: 'Expense' },
         { name: 'Salary', category: 'Expense' },
         { name: 'Benefit in kind', category: 'Expense' },
         { name: 'Dividend', category: 'Revenue' },
         { name: 'Interest', category: 'Revenue' },
         { name: 'Royalty', category: 'Revenue' },
         { name: 'Share of profit', category: 'Revenue' },
-        { name: 'Rent', category: 'Expense' },
-        { name: 'Shares', category: 'Asset' },
-        { name: 'Options', category: 'Asset' },
-        { name: 'Rights', category: 'Asset' },
-        { name: 'Debt', category: 'Liability' },
-        { name: 'Digital/Virtual Asset', category: 'Asset' },
         { name: 'Receivable', category: 'Asset' },
         { name: 'Payable', category: 'Liability' },
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
-        { name: 'Prepayment', category: 'Asset' }
+        { name: 'Prepayment', category: 'Asset' },
+        { name: 'Sales Revenue', category: 'Revenue' }  // Added for Individual
       ];
+      
+      // Add Rent as Revenue for Individual entities only
+      if(b.entity === 'Individual'){
+        accountsToAdd.push({ name: 'Rent', category: 'Revenue' });
+      }
       
       for (const acct of accountsToAdd) {
         if (!existingAccountNames.includes(acct.name)) {
@@ -789,9 +836,10 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const u = uid('user'), b = uid('biz');
     const sales = { id: uid('acct'), name: 'Sales', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
     const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
+    const purchases = { id: uid('acct'), name: 'Purchases', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
     const salaries = { id: uid('acct'), name: 'Salaries', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const rent = { id: uid('acct'), name: 'Rent', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false, rentFreq:'monthly' };
-    const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false };
+    const rent = { id: uid('acct'), name: 'Rent', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false, rentFreq:'monthly' };
+    const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
     const chargeInc = { id: uid('acct'), name: 'Chargeable asset income', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
     const chargeCost = { id: uid('acct'), name: 'Chargeable asset cost', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
 
@@ -805,10 +853,11 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         vatRate: DEFAULTS.vatRate,
         whtRate: DEFAULTS.whtRate,
         citRate: DEFAULTS.citRate,
+        turnoverThreshold: DEFAULTS.turnoverThreshold,
         vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
         caRateDefault: DEFAULTS.caRateDefault,
         depRateDefault: DEFAULTS.depRateDefault,
-        accounts: [sales, cogs, salaries, rent, bank, chargeInc, chargeCost],
+        accounts: [sales, cogs, purchases, salaries, rent, bank, chargeInc, chargeCost],
         inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
         assets: [
           { id: uid('asset'), name: 'Office PC', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, disposed:false, disposal:{}, openingAccDep:0 },
@@ -845,11 +894,140 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   // modal helpers
   function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; window.scrollTo({top:0}); }
   function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; }
-  modalOverlay.addEventListener('click', ()=> { [userModal, businessModal, accountsModal].forEach(m => { if(m.style.display==='block') closeModal(m); }); });
+  modalOverlay.addEventListener('click', ()=> { [userModal, businessModal, accountsModal, loginModal].forEach(m => { if(m.style.display==='block') closeModal(m); }); });
+
+  // Login/Logout functions
+  function handleLogin(){
+    const username = (loginUsername.value || '').trim();
+    if(!username) return alert('Username required');
+    const user = state.users.find(u => u.username === username);
+    if(!user) return alert('User not found');
+    
+    state.auth.currentUserId = user.id;
+    saveState();
+    addAudit('auth.login', 'user', user.id, 'User logged in');
+    closeModal(loginModal);
+    loginUsername.value = '';
+    loginPassword.value = '';
+    updateAuthUI();
+    renderAll();
+  }
+
+  function handleLogout(){
+    if(!state.auth.currentUserId) return;
+    addAudit('auth.logout', 'user', state.auth.currentUserId, 'User logged out');
+    state.auth.currentUserId = null;
+    saveState();
+    updateAuthUI();
+    renderAll();
+  }
+
+  function updateAuthUI(){
+    if(state.auth.currentUserId){
+      const user = state.users.find(u => u.id === state.auth.currentUserId);
+      if(user){
+        authInfo.textContent = `Logged in as: ${user.display || user.username}`;
+        btnLogin.style.display = 'none';
+        btnLogout.style.display = 'inline-block';
+      }
+    } else {
+      authInfo.textContent = 'Not logged in';
+      btnLogin.style.display = 'inline-block';
+      btnLogout.style.display = 'none';
+    }
+    enforcePermissions();
+  }
+
+  function enforcePermissions(){
+    const user = state.users.find(u => u.id === state.auth.currentUserId);
+    const isAdmin = user && user.isAdmin;
+    
+    // Disable business management buttons for non-admins
+    btnAddBusiness.disabled = !isAdmin;
+    btnEditBusiness.disabled = !isAdmin;
+    btnDeleteBusiness.disabled = !isAdmin;
+    btnManageAccounts.disabled = !isAdmin;
+    
+    if(!isAdmin){
+      btnAddBusiness.classList.add('disabled');
+      btnEditBusiness.classList.add('disabled');
+      btnDeleteBusiness.classList.add('disabled');
+      btnManageAccounts.classList.add('disabled');
+    } else {
+      btnAddBusiness.classList.remove('disabled');
+      btnEditBusiness.classList.remove('disabled');
+      btnDeleteBusiness.classList.remove('disabled');
+      btnManageAccounts.classList.remove('disabled');
+    }
+  }
+
+  // Helper functions for asset and inventory deletion
+  function deleteAssetIfCurrentYear(assetId){
+    const b = findBiz(selectedBizId);
+    if(!b) return false;
+    
+    const asset = b.assets.find(a => a.id === assetId);
+    if(!asset) return false;
+    
+    const currentYear = new Date().getFullYear();
+    const purchaseYear = new Date(asset.purchaseDate).getFullYear();
+    const disposalYear = asset.disposed && asset.disposal.date ? new Date(asset.disposal.date).getFullYear() : null;
+    
+    // Check if purchase or disposal occurred in current year
+    if(purchaseYear !== currentYear && (!disposalYear || disposalYear !== currentYear)){
+      alert(`Cannot delete asset. Purchase/disposal must have occurred in ${currentYear}.`);
+      return false;
+    }
+    
+    // Delete the asset
+    b.assets = b.assets.filter(a => a.id !== assetId);
+    
+    // Delete related transactions (depreciation, capital allowance, purchase, disposal)
+    const txns = state.transactions[selectedUserId][selectedBizId];
+    state.transactions[selectedUserId][selectedBizId] = txns.filter(t => 
+      !(t.assetId === assetId || (t.description && t.description.includes(asset.name)))
+    );
+    
+    addAudit('asset.delete', 'asset', assetId, `Deleted asset: ${asset.name}`);
+    saveState();
+    return true;
+  }
+
+  function deleteInventoryIfCurrentYear(itemId){
+    const b = findBiz(selectedBizId);
+    if(!b) return false;
+    
+    const item = b.inventory.find(i => i.id === itemId);
+    if(!item) return false;
+    
+    const currentYear = new Date().getFullYear();
+    const txns = state.transactions[selectedUserId][selectedBizId];
+    
+    // Check if any inventory transactions for this item occurred in current year
+    const itemTxns = txns.filter(t => t.itemId === itemId);
+    const hasCurrentYearTxn = itemTxns.some(t => new Date(t.date).getFullYear() === currentYear);
+    
+    if(!hasCurrentYearTxn && itemTxns.length > 0){
+      const firstTxnYear = new Date(itemTxns[0].date).getFullYear();
+      alert(`Cannot delete inventory item. Transactions must have occurred in ${currentYear}.`);
+      return false;
+    }
+    
+    // Delete the inventory item
+    b.inventory = b.inventory.filter(i => i.id !== itemId);
+    
+    // Delete related transactions
+    state.transactions[selectedUserId][selectedBizId] = txns.filter(t => t.itemId !== itemId);
+    
+    addAudit('inventory.delete', 'inventory', itemId, `Deleted inventory: ${item.name}`);
+    saveState();
+    return true;
+  }
 
   // initialization
   loadState();
   initUI();
+  updateAuthUI();
   refreshSelectors();
   ensureSelection();
   populateAccountSelect();
@@ -891,6 +1069,27 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     btnDisposeAsset.addEventListener('click', handleDisposeAsset);
     btnAssetCancel.addEventListener('click', ()=>{ txnAction.value=''; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnAssetUndo.addEventListener('click', handleUndoAsset);
+    btnAssetDisposalCancel.addEventListener('click', ()=>{ txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
+    btnAssetDisposalUndo.addEventListener('click', handleUndoAsset);
+
+    // Login/Logout handlers
+    btnLogin.addEventListener('click', ()=> openModal(loginModal));
+    btnLogout.addEventListener('click', handleLogout);
+    loginSubmit.addEventListener('click', handleLogin);
+    loginCancel.addEventListener('click', ()=> closeModal(loginModal));
+
+    // Adjustment type handler
+    txnAdjustmentType.addEventListener('change', ()=> {
+      const show = txnAdjustmentType.value !== '';
+      txnAdjustmentAmountLabel.style.display = show ? 'inline-flex' : 'none';
+    });
+
+    // Asset qty/unitPrice auto-computation handlers
+    assetQty.addEventListener('input', autoComputeAssetCost);
+    assetUnitPrice.addEventListener('input', autoComputeAssetCost);
+    
+    // Asset category change handler
+    assetCategory.addEventListener('change', updateAssetNameSuggestions);
 
     document.getElementById('btnSearch').addEventListener('click', renderLedger);
     document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
@@ -1006,8 +1205,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       };
       newBiz.accounts.push({ id: uid('acct'), name:'Sales', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
@@ -1042,7 +1242,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     if(!name) return alert('Account name required');
     const b = findBiz(selectedBizId);
     b.accounts = b.accounts || [];
-    b.accounts.push({ id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq });
+    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq };
+    b.accounts.push(newAcct);
+    addAudit('account.add','account', newAcct.id, `Added account: ${name}`);
     saveState();
     renderAccounts();
     populateAccountSelect();
@@ -1056,6 +1258,14 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     const isIndividual = b.entity === 'Individual';
     
     if (isIndividual) {
+      // Hide panels and elements for Individual
+      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
+      if(inventoryQuick) inventoryQuick.style.display = 'none';
+      if(assetsQuick) assetsQuick.style.display = 'none';
+      if(plQuick) plQuick.style.display = 'none';
+      
       // Restrict actions - only show Income for Individuals
       Array.from(txnAction.options).forEach(opt => {
         if (opt.value && opt.value !== 'Income') {
@@ -1065,16 +1275,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         }
       });
       
-      // Restrict accounts - only show individual-specific accounts
+      // Restrict accounts - show Individual income accounts, hide Salary
       Array.from(txnAccount.options).forEach(opt => {
         const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (INDIVIDUAL_ACCOUNTS.includes(accountText)) {
-          opt.style.display = '';
+        if (accountText === 'Salary') {
+          opt.style.display = 'none';  // Hide Salary for Individual
+        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
+          opt.style.display = '';  // Show Individual income accounts
         } else {
           opt.style.display = 'none';
         }
       });
     } else {
+      // Show all panels for non-Individual entities
+      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
+      if(inventoryQuick) inventoryQuick.style.display = 'block';
+      if(assetsQuick) assetsQuick.style.display = 'block';
+      if(plQuick) plQuick.style.display = 'block';
+      
       // Show all actions and accounts for non-Individual entities
       Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
       Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
@@ -1097,14 +1317,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       inventorySubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
-      // Update UI labels for opening asset balance
+      
+      // Update UI labels and field behavior for asset actions
       if(val === 'OpeningAssetBal') {
         document.querySelector('#assetPurchaseSubform h3').textContent = 'Opening Asset Balance';
         btnAddAsset.textContent = 'Record Opening Balance';
+        // For Opening Asset Bal: disable Cost, auto-compute Opening Cost
+        assetCost.disabled = true;
+        assetOpeningCost.disabled = false;
+        assetOpeningAccDep.disabled = false;
       } else {
         document.querySelector('#assetPurchaseSubform h3').textContent = 'Asset Purchase';
         btnAddAsset.textContent = 'Record Asset Purchase';
+        // For Asset Purchase: disable Opening Cost/Acc Dep, auto-compute Cost
+        assetCost.disabled = false;
+        assetOpeningCost.disabled = true;
+        assetOpeningAccDep.disabled = true;
       }
+      
+      // Set default account to Bank if available
+      setDefaultAssetAccount();
     } else if(val === 'AssetDisposal'){
       mainTxnForm.style.display = 'none';
       assetDisposalSubform.style.display = 'block';
@@ -1112,12 +1344,55 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       inventorySubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
+      // Set default account to Bank if available
+      setDefaultAssetAccount();
     } else {
       mainTxnForm.style.display = 'flex';
       inventorySubform.style.display = 'none';
       assetPurchaseSubform.style.display = 'none';
       assetDisposalSubform.style.display = 'none';
       renderFeatureVisibility();
+    }
+  }
+
+  function setDefaultAssetAccount(){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    const bankAccount = b.accounts.find(a => a.name === 'Bank' && a.category === 'Asset');
+    if(bankAccount){
+      if(assetPurchaseAccount) assetPurchaseAccount.value = bankAccount.id;
+      if(assetDisposalAccount) assetDisposalAccount.value = bankAccount.id;
+    }
+  }
+
+  function autoComputeAssetCost(){
+    const action = txnAction.value;
+    const qty = Number(assetQty.value || 0);
+    const unitPrice = Number(assetUnitPrice.value || 0);
+    const computed = qty * unitPrice;
+    
+    if(action === 'AssetPurchase'){
+      // Auto-compute Cost
+      assetCost.value = computed;
+    } else if(action === 'OpeningAssetBal'){
+      // Auto-compute Opening Cost
+      assetOpeningCost.value = computed;
+    }
+  }
+
+  function updateAssetNameSuggestions(){
+    const category = assetCategory.value;
+    const datalist = document.getElementById('assetNameSuggestions');
+    datalist.innerHTML = '';
+    
+    // For "Other Asset" category, provide the removed asset names as suggestions
+    if(category === 'Other Asset'){
+      const otherAssetNames = ['Shares', 'Options', 'Rights', 'Debt', 'Digital/Virtual Asset'];
+      for(const name of otherAssetNames){
+        const option = document.createElement('option');
+        option.value = name;
+        datalist.appendChild(option);
+      }
     }
   }
 
@@ -1257,6 +1532,32 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function handleAddTransaction(){
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
+    
+    // Handle adjustment transactions
+    if(txnAdjustmentType.value && txnAdjustmentType.value !== ''){
+      const adjustmentAmount = Number(txnAdjustmentAmount.value || 0);
+      if(adjustmentAmount <= 0) return alert('Adjustment amount required');
+      
+      const adjTxn = {
+        id: uid('txn'),
+        date: txnDate.value || today(),
+        action: 'Adjustment',
+        accountId: txnAccount.value,
+        accountName: findAccount(b, txnAccount.value)?.name || '',
+        accountCategory: findAccount(b, txnAccount.value)?.category || '',
+        description: `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
+        amount: adjustmentAmount,
+        adjustmentType: txnAdjustmentType.value,
+        vatType: 'none',
+        whtApplied: false,
+        paye: false,
+        contact: '',
+        receiptId: null
+      };
+      pushTransaction(adjTxn);
+      return;
+    }
+    
     const t = {
       id: uid('txn'),
       date: txnDate.value || today(),
@@ -1761,15 +2062,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function computePLSnapshot(){
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     let revenue=0, expenses=0, depreciation=0;
+    let disallowableExpense=0, nonTaxableIncome=0;
+    
     for(const t of arr){
       if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      
+      // Handle adjustment transactions
+      if(t.action === 'Adjustment' && t.adjustmentType){
+        if(t.adjustmentType === 'disallowable'){
+          disallowableExpense += Number(t.amount||0);
+        } else if(t.adjustmentType === 'nontaxable'){
+          nonTaxableIncome += Number(t.amount||0);
+        }
+      }
     }
     const dep = computeTotalDepreciation();
     depreciation = dep;
     expenses += depreciation;
     const accountingProfit = revenue - expenses;
-    return { revenue, expenses, depreciation, accountingProfit };
+    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome };
   }
 
   // compute daily depreciation for all assets
@@ -1890,8 +2202,13 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     expenses += depreciationDaily;
     const accountingProfit = revenue - expenses;
     
+    // Get adjustment values from P&L snapshot
+    const plSnapshot = computePLSnapshot();
+    const disallowableExpense = plSnapshot.disallowableExpense || 0;
+    const nonTaxableIncomeAdjustment = plSnapshot.nonTaxableIncome || 0;
+    
     // Calculate non-taxable income for CA relief rule
-    let nonTaxableIncome = 0;
+    let nonTaxableIncome = nonTaxableIncomeAdjustment;
     for(const t of arr){
       if(t.accountCategory === 'Revenue'){
         const acct = findAccount(b, t.accountId);
@@ -1915,7 +2232,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       carriedForwardCA = (1/3) * totalCA;
     }
     
-    let taxableProfit = accountingProfit - allowedCA + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
+    // Taxable profit calculation: Add back depreciation for tax, deduct CA
+    // Also add disallowable expenses and deduct non-taxable income adjustments
+    let taxableProfit = accountingProfit + depreciationDaily - allowedCA + disallowableExpense - nonTaxableIncomeAdjustment + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
     const chargeableGains = computeChargeableGainsForBiz();
     const turnover = revenue;
     let cgtCharge = 0;
@@ -2007,16 +2326,28 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     // INDIVIDUAL ENTITY: Special display
     const isIndividual = b.entity === 'Individual';
     
+    // PIT for Individual (gross values, deduct WHT receivable)
+    let pitCharge = 0;
+    if(isIndividual && b.pitEnabled){
+      // Use gross income (revenue) for PIT computation
+      if(revenue > 0){
+        pitCharge = computePAYEOnAnnualIncome(revenue);
+        // Deduct WHT receivable from PIT
+        pitCharge = Math.max(0, pitCharge - whtReceivable);
+      }
+    }
+    
     let html = '';
     if(isIndividual){
-      // For Individual: don't show Accounting Profit, show "Taxable income" instead of "Taxable profit"
+      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
+      html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
-      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)}</div>`;
+      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
       html += `<hr/>`;
-      // For Individual: show only PAYE and WHT
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+      // For Individual: show only WHT Receivable and PIT
+      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
+      html += `<div class="small-note">PIT is computed on gross income less WHT receivable</div>`;
     } else {
       // For Company/Enterprise: show full summary
       html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
@@ -2075,9 +2406,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       quickPanels.style.display = 'none';
       btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active');
       document.querySelectorAll('#reportsSection .tab').forEach(t=>t.classList.remove('active'));
-      const tb = document.querySelector('#reportsSection .tab[data-report="taxReconciliation"]');
+      const tb = document.querySelector('#reportsSection .tab[data-report="vatReport"]');
       if(tb) tb.classList.add('active');
-      renderReport('taxReconciliation');
+      renderReport('vatReport');
     }
   }
 
@@ -2096,40 +2427,87 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function renderReport(name){
     const b = findBiz(selectedBizId);
     if(!b) { reportContent.innerHTML = '<div>Select a business to view reports</div>'; return; }
-    if(name === 'taxReconciliation'){
-      const pl = computePLSnapshot();
-      const ca = computeTotalCapitalAllowance();
-      const gains = computeChargeableGainsForBiz();
-      let html = `<h3>Taxable Income Reconciliation</h3>`;
-      html += `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div>`;
-      html += `<div><strong>Capital allowance (daily total):</strong> ${fmt(ca)}</div>`;
-      html += `<div><strong>Chargeable gains:</strong> ${gains.length ? '' : 'None'}</div>`;
-      if(gains.length){
-        html += `<table style="width:100%;border-collapse:collapse;margin-top:8px;"><thead><tr><th>Asset</th><th>Proceeds</th><th>Gain</th><th>Treatment</th></tr></thead><tbody>`;
-        const turnover = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId] || []).filter(t=>t.accountCategory==='Revenue').reduce((s,x)=>s+Number(x.amount||0),0);
-        for(const g of gains){
-          let treatment = '';
-          if(b.entity === 'Company'){
-            if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)){ treatment = 'Exempt from CGT (excluded from taxable profit)'; }
-            else { treatment = 'Subject to CGT @30% and excluded from taxable profit'; }
-          } else {
-            if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)){ treatment = 'Exempt from taxable profit (no PIT effect)'; }
-            else { treatment = 'Included in taxable profit (sole proprietor)'; }
-          }
-          html += `<tr><td>${g.name}</td><td>${fmt(g.proceeds)}</td><td>${fmt(g.gain)}</td><td>${treatment}</td></tr>`;
+    
+    // Add audit for report generation
+    addAudit('report.view', 'report', name, `Viewed report: ${name}`);
+    
+    if(name === 'vatReport'){
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let html = `<h3>VAT Report</h3>`;
+      html += `<h4>Sales (VAT Collected)</h4>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
+      let totalVATCollected = 0;
+      for(const t of arr){
+        if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Revenue'){
+          const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
+          totalVATCollected += vat;
+          html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
         }
-        html += `</tbody></table>`;
       }
+      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Collected</th><th>${fmt(totalVATCollected)}</th></tr></tfoot></table>`;
+      
+      html += `<h4 style="margin-top:16px;">Purchases (VAT Paid)</h4>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
+      let totalVATPaid = 0;
+      for(const t of arr){
+        if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Expense'){
+          const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
+          totalVATPaid += vat;
+          html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
+        }
+      }
+      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Paid</th><th>${fmt(totalVATPaid)}</th></tr></tfoot></table>`;
+      html += `<div style="margin-top:16px;"><strong>VAT Net (Collected - Paid):</strong> ${fmt(totalVATCollected - totalVATPaid)}</div>`;
       reportContent.innerHTML = html;
+      
+    } else if(name === 'whtPayable'){
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let html = `<h3>WHT Payable Report</h3>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT Payable</th></tr></thead><tbody>`;
+      let totalWHT = 0;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Expense'){
+          const rate = Number(t.whtRate || b.whtRate);
+          const basis = t.whtBasis || 'gross';
+          const wht = computeWHT(Number(t.amount||0), basis, rate);
+          totalWHT += wht;
+          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
+        }
+      }
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Payable</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
+      reportContent.innerHTML = html;
+      
+    } else if(name === 'whtReceivable'){
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let html = `<h3>WHT Receivable Report</h3>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Contact</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT Receivable</th></tr></thead><tbody>`;
+      let totalWHT = 0;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Revenue'){
+          const rate = Number(t.whtRate || b.whtRate);
+          const basis = t.whtBasis || 'gross';
+          const wht = computeWHT(Number(t.amount||0), basis, rate);
+          totalWHT += wht;
+          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
+        }
+      }
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Receivable</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
+      reportContent.innerHTML = html;
+      
     } else if(name === 'payeReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const payeByContact = {};
+      // Exclude sole traders from PAYE report
       for(const t of arr){
         if(t.paye && t.contact){
-          payeByContact[t.contact] = (payeByContact[t.contact] || 0) + Number(t.amount || 0);
+          // Check if contact is a sole trader
+          const contact = b.contacts.find(c => c.name === t.contact);
+          if(!contact || contact.type !== 'SoleTrader'){
+            payeByContact[t.contact] = (payeByContact[t.contact] || 0) + Number(t.amount || 0);
+          }
         }
       }
-      let html = `<h3>PAYE Report - detailed (per contact)</h3>`;
+      let html = `<h3>PAYE Report</h3>`;
       if(Object.keys(payeByContact).length===0) html += '<div>No PAYE records found</div>';
       else {
         html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Contact</th><th>Annual Salary</th><th>PAYE Annual</th><th>PAYE Monthly</th></tr></thead><tbody>`;
@@ -2141,19 +2519,34 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         html += `</tbody></table>`;
       }
       reportContent.innerHTML = html;
+      
+    } else if(name === 'inventoryReport'){
+      let html = `<h3>Inventory Report</h3>`;
+      if(b.inventory && b.inventory.length){
+        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Item</th><th>Quantity</th><th>Avg Cost</th><th>Total Value</th></tr></thead><tbody>`;
+        for(const item of b.inventory){
+          const value = (item.qty || 0) * (item.avgCost || 0);
+          html += `<tr><td>${item.name}</td><td>${item.qty||0}</td><td>${fmt(item.avgCost||0)}</td><td>${fmt(value)}</td></tr>`;
+        }
+        html += `</tbody></table>`;
+      } else {
+        html += '<div>No inventory items</div>';
+      }
+      reportContent.innerHTML = html;
+      
     } else if(name === 'assetsReport'){
       const gains = computeChargeableGainsForBiz();
-      let html = `<h3>Assets Report</h3>`;
-      html += `<div><strong>Assets</strong></div>`;
+      let html = `<h3>Fixed Assets Schedule</h3>`;
       if(b.assets && b.assets.length){
-        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Name</th><th>Qty</th><th>Unit Price</th><th>Cost</th><th>Acc Dep</th><th>Classification</th><th>Disposed</th></tr></thead><tbody>`;
+        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Name</th><th>Qty</th><th>Unit Price</th><th>Cost</th><th>Acc Dep</th><th>NBV</th><th>Life (yrs)</th><th>Purchase Date</th><th>Classification</th><th>Disposed</th></tr></thead><tbody>`;
         for(const a of b.assets){
-          html += `<tr><td>${a.name}</td><td>${a.qty||1}</td><td>${fmt(a.unitPrice||0)}</td><td>${fmt(a.cost||0)}</td><td>${fmt(a.accumulatedDep||0)}</td><td>${a.classification}</td><td>${a.disposed ? 'Yes' : 'No'}</td></tr>`;
+          const nbv = (a.cost || 0) - (a.accumulatedDep || 0);
+          html += `<tr><td>${a.name}</td><td>${a.qty||1}</td><td>${fmt(a.unitPrice||0)}</td><td>${fmt(a.cost||0)}</td><td>${fmt(a.accumulatedDep||0)}</td><td>${fmt(nbv)}</td><td>${a.lifeYears||0}</td><td>${a.purchaseDate||''}</td><td>${a.classification}</td><td>${a.disposed ? 'Yes' : 'No'}</td></tr>`;
         }
         html += `</tbody></table>`;
       } else html += '<div>No assets</div>';
       if(gains.length){
-        html += `<h4 style="margin-top:10px;">Chargeable gains</h4><table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Proceeds</th><th>Gain</th><th>CGT@30%</th></tr></thead><tbody>`;
+        html += `<h4 style="margin-top:16px;">Disposal & Chargeable Gains</h4><table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Proceeds</th><th>Gain/Loss</th><th>CGT@30%</th></tr></thead><tbody>`;
         for(const g of gains){
           const cgt = (g.gain > 0) ? g.gain * 0.30 : 0;
           html += `<tr><td>${g.name}</td><td>${fmt(g.proceeds)}</td><td>${fmt(g.gain)}</td><td>${fmt(cgt)}</td></tr>`;
@@ -2161,6 +2554,86 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
         html += `</tbody></table>`;
       }
       reportContent.innerHTML = html;
+      
+    } else if(name === 'pitIndividual'){
+      const currentYear = new Date().getFullYear();
+      let html = `<h3>Personal Income Tax Computation (Individual) - ${currentYear}</h3>`;
+      html += `<p><strong>Name:</strong> [Taxpayer Name]</p>`;
+      html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
+      html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th>Description</th><th>Amount (₦)</th></tr></thead><tbody>`;
+      html += `<tr><td colspan="2"><strong>Gross Income</strong></td></tr>`;
+      html += `<tr><td>Sales Revenue</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Dividend</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Interest</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Royalty</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Rent</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Benefit in kind</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Share of profit</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Total Gross Income</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `<tr><td colspan="2"><strong>Less: Statutory Deductions</strong></td></tr>`;
+      html += `<tr><td>Pension</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Rent relief</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Life assurance</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Mortgage interest</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>NHF</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `<tr><td colspan="2"><strong>PIT Computation</strong></td></tr>`;
+      html += `<tr><td>PIT as per bands</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Less: WHT Receivable</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `</tbody></table>`;
+      html += `<p style="margin-top:16px;"><em>Note: This is a template. Actual values should be filled based on transactions.</em></p>`;
+      reportContent.innerHTML = html;
+      
+    } else if(name === 'pitEnterprise'){
+      const currentYear = new Date().getFullYear();
+      let html = `<h3>Personal Income Tax Computation (Enterprise) - ${currentYear}</h3>`;
+      html += `<p><strong>Business Name:</strong> [Enterprise Name]</p>`;
+      html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
+      html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th>Description</th><th>Amount (₦)</th></tr></thead><tbody>`;
+      html += `<tr><td><strong>Accounting Profit</strong></td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Add: Depreciation</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Less: Capital Allowance</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Add: Chargeable Gains (if applicable)</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Adjusted Profit</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `<tr><td colspan="2"><strong>Less: Statutory Deductions</strong></td></tr>`;
+      html += `<tr><td>Pension</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Rent relief</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Life assurance</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>Mortgage interest</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td>NHF</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `<tr><td colspan="2"><strong>PIT Computation</strong></td></tr>`;
+      html += `<tr><td>PIT as per bands</td><td style="text-align:right;">-</td></tr>`;
+      html += `<tr><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>-</strong></td></tr>`;
+      html += `</tbody></table>`;
+      html += `<p style="margin-top:16px;"><em>Note: This is a template. Actual values should be filled based on transactions.</em></p>`;
+      reportContent.innerHTML = html;
+      
+    } else if(name === 'companyAccounts'){
+      const currentYear = new Date().getFullYear();
+      let html = `<h3>Company Accounts - ${currentYear}</h3>`;
+      html += `<p><strong>Company Name:</strong> [Company Name]</p>`;
+      html += `<p><strong>Financial Year Ended:</strong> ${currentYear}</p>`;
+      html += `<h4>Statement of Profit or Loss</h4>`;
+      html += `<p><em>[Profit and loss statement to be generated from transactions]</em></p>`;
+      html += `<h4>Statement of Financial Position</h4>`;
+      html += `<p><em>[Balance sheet to be generated from accounts]</em></p>`;
+      html += `<h4>Fixed Assets Schedule</h4>`;
+      html += `<p><em>[See Assets Report for details]</em></p>`;
+      html += `<h4>Tax Computations</h4>`;
+      html += `<p><em>[Tax computation summary]</em></p>`;
+      html += `<hr style="margin:24px 0;"/>`;
+      html += `<h4>Management Attestation</h4>`;
+      html += `<p>I certify that the accounts presented herein are a true and fair representation of the financial position of [Company Name] as at the date stated, and have been prepared in accordance with applicable accounting standards.</p>`;
+      html += `<p style="margin-top:24px;">`;
+      html += `<strong>Signed:</strong> _______________________<br/>`;
+      html += `<strong>Name:</strong> [Director Name]<br/>`;
+      html += `<strong>Position:</strong> Director<br/>`;
+      html += `<strong>Date:</strong> [Date]`;
+      html += `</p>`;
+      reportContent.innerHTML = html;
+      
     } else {
       reportContent.innerHTML = '<div>Report not implemented</div>';
     }
@@ -2191,14 +2664,68 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     accountsList.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
+    
+    const balanceAccounts = ['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'];
+    
     for(const a of b.accounts){
-      const div = document.createElement('div'); div.className='account-row';
-      const delBtn = document.createElement('button'); delBtn.className='small'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=> deleteAccount(a.id));
-      div.innerHTML = `<div><strong>${a.name}</strong> <div class="small-muted">${a.category}</div></div>`;
-      div.appendChild(delBtn);
+      const div = document.createElement('div'); 
+      div.className='account-row';
+      div.style.flexDirection = 'column';
+      div.style.alignItems = 'flex-start';
+      div.style.gap = '6px';
+      
+      const headerDiv = document.createElement('div');
+      headerDiv.style.display = 'flex';
+      headerDiv.style.justifyContent = 'space-between';
+      headerDiv.style.width = '100%';
+      
+      const delBtn = document.createElement('button'); 
+      delBtn.className='small'; 
+      delBtn.textContent='Delete'; 
+      delBtn.addEventListener('click', ()=> deleteAccount(a.id));
+      
+      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span></div>`;
+      headerDiv.appendChild(delBtn);
+      div.appendChild(headerDiv);
+      
+      // Show balance fields for eligible accounts
+      if(balanceAccounts.includes(a.name)){
+        const balDiv = document.createElement('div');
+        balDiv.style.display = 'flex';
+        balDiv.style.gap = '8px';
+        balDiv.innerHTML = `
+          <label class="small-note">Opening: 
+            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
+          </label>
+          <label class="small-note">Closing: 
+            <input type="number" class="smallInput" value="${a.closingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
+          </label>
+        `;
+        div.appendChild(balDiv);
+      }
+      
       accountsList.appendChild(div);
     }
   }
+  
+  function updateAccountBalance(accountId, type, value){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    const account = b.accounts.find(a => a.id === accountId);
+    if(!account) return;
+    
+    if(type === 'opening'){
+      account.openingBalance = Number(value || 0);
+    } else if(type === 'closing'){
+      account.closingBalance = Number(value || 0);
+    }
+    saveState();
+  }
+  
+  // Make updateAccountBalance available globally for inline onchange handlers
+  window.updateAccountBalance = updateAccountBalance;
   function deleteAccount(id){
     const b = findBiz(selectedBizId);
     if(!b) return;
