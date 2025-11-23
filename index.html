@@ -210,7 +210,10 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
       <div id="assetPurchaseSubform" style="margin-top:10px; display:none;" class="panel assets-panel">
         <h3 style="margin:4px 0;">Asset Purchase</h3>
         <div class="form-inline">
-          <label>Asset name: <input type="text" id="assetName" /></label>
+          <label>Asset name: <input type="text" id="assetName" list="assetNameSuggestions" /></label>
+          <datalist id="assetNameSuggestions">
+            <!-- Populated dynamically based on category selection -->
+          </datalist>
           <label>Category:
             <select id="assetCategory">
               <option value="Property Plant and Equipment">Property Plant and Equipment</option>
@@ -1080,6 +1083,9 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     // Asset qty/unitPrice auto-computation handlers
     assetQty.addEventListener('input', autoComputeAssetCost);
     assetUnitPrice.addEventListener('input', autoComputeAssetCost);
+    
+    // Asset category change handler
+    assetCategory.addEventListener('change', updateAssetNameSuggestions);
 
     document.getElementById('btnSearch').addEventListener('click', renderLedger);
     document.getElementById('btnClearSearch').addEventListener('click', ()=>{ document.getElementById('ledgerSearch').value=''; renderLedger(); });
@@ -1368,6 +1374,22 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     }
   }
 
+  function updateAssetNameSuggestions(){
+    const category = assetCategory.value;
+    const datalist = document.getElementById('assetNameSuggestions');
+    datalist.innerHTML = '';
+    
+    // For "Other Asset" category, provide the removed asset names as suggestions
+    if(category === 'Other Asset'){
+      const otherAssetNames = ['Shares', 'Options', 'Rights', 'Debt', 'Digital/Virtual Asset'];
+      for(const name of otherAssetNames){
+        const option = document.createElement('option');
+        option.value = name;
+        datalist.appendChild(option);
+      }
+    }
+  }
+
   function exportJSON(){
     const dataStr = JSON.stringify(state, null, 2);
     const blob = new Blob([dataStr], { type:'application/json' });
@@ -1504,6 +1526,32 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function handleAddTransaction(){
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
+    
+    // Handle adjustment transactions
+    if(txnAdjustmentType.value && txnAdjustmentType.value !== ''){
+      const adjustmentAmount = Number(txnAdjustmentAmount.value || 0);
+      if(adjustmentAmount <= 0) return alert('Adjustment amount required');
+      
+      const adjTxn = {
+        id: uid('txn'),
+        date: txnDate.value || today(),
+        action: 'Adjustment',
+        accountId: txnAccount.value,
+        accountName: findAccount(b, txnAccount.value)?.name || '',
+        accountCategory: findAccount(b, txnAccount.value)?.category || '',
+        description: `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
+        amount: adjustmentAmount,
+        adjustmentType: txnAdjustmentType.value,
+        vatType: 'none',
+        whtApplied: false,
+        paye: false,
+        contact: '',
+        receiptId: null
+      };
+      pushTransaction(adjTxn);
+      return;
+    }
+    
     const t = {
       id: uid('txn'),
       date: txnDate.value || today(),
@@ -2008,15 +2056,26 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
   function computePLSnapshot(){
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     let revenue=0, expenses=0, depreciation=0;
+    let disallowableExpense=0, nonTaxableIncome=0;
+    
     for(const t of arr){
       if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      
+      // Handle adjustment transactions
+      if(t.action === 'Adjustment' && t.adjustmentType){
+        if(t.adjustmentType === 'disallowable'){
+          disallowableExpense += Number(t.amount||0);
+        } else if(t.adjustmentType === 'nontaxable'){
+          nonTaxableIncome += Number(t.amount||0);
+        }
+      }
     }
     const dep = computeTotalDepreciation();
     depreciation = dep;
     expenses += depreciation;
     const accountingProfit = revenue - expenses;
-    return { revenue, expenses, depreciation, accountingProfit };
+    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome };
   }
 
   // compute daily depreciation for all assets
@@ -2589,14 +2648,68 @@ Below is a corrected, complete index.html with the runtime/JS errors fixed (nota
     accountsList.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
+    
+    const balanceAccounts = ['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'];
+    
     for(const a of b.accounts){
-      const div = document.createElement('div'); div.className='account-row';
-      const delBtn = document.createElement('button'); delBtn.className='small'; delBtn.textContent='Delete'; delBtn.addEventListener('click', ()=> deleteAccount(a.id));
-      div.innerHTML = `<div><strong>${a.name}</strong> <div class="small-muted">${a.category}</div></div>`;
-      div.appendChild(delBtn);
+      const div = document.createElement('div'); 
+      div.className='account-row';
+      div.style.flexDirection = 'column';
+      div.style.alignItems = 'flex-start';
+      div.style.gap = '6px';
+      
+      const headerDiv = document.createElement('div');
+      headerDiv.style.display = 'flex';
+      headerDiv.style.justifyContent = 'space-between';
+      headerDiv.style.width = '100%';
+      
+      const delBtn = document.createElement('button'); 
+      delBtn.className='small'; 
+      delBtn.textContent='Delete'; 
+      delBtn.addEventListener('click', ()=> deleteAccount(a.id));
+      
+      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span></div>`;
+      headerDiv.appendChild(delBtn);
+      div.appendChild(headerDiv);
+      
+      // Show balance fields for eligible accounts
+      if(balanceAccounts.includes(a.name)){
+        const balDiv = document.createElement('div');
+        balDiv.style.display = 'flex';
+        balDiv.style.gap = '8px';
+        balDiv.innerHTML = `
+          <label class="small-note">Opening: 
+            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
+          </label>
+          <label class="small-note">Closing: 
+            <input type="number" class="smallInput" value="${a.closingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
+          </label>
+        `;
+        div.appendChild(balDiv);
+      }
+      
       accountsList.appendChild(div);
     }
   }
+  
+  function updateAccountBalance(accountId, type, value){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    const account = b.accounts.find(a => a.id === accountId);
+    if(!account) return;
+    
+    if(type === 'opening'){
+      account.openingBalance = Number(value || 0);
+    } else if(type === 'closing'){
+      account.closingBalance = Number(value || 0);
+    }
+    saveState();
+  }
+  
+  // Make updateAccountBalance available globally for inline onchange handlers
+  window.updateAccountBalance = updateAccountBalance;
   function deleteAccount(id){
     const b = findBiz(selectedBizId);
     if(!b) return;
