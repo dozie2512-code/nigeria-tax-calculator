@@ -53,6 +53,18 @@
     .muted-pill { background:#f2f4f7; padding:4px 8px; border-radius:6px; font-size:0.9rem; color:#333; }
     .disabled { opacity:0.45; pointer-events:none; }
     .code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; background:#f3f5f7; padding:4px 6px; border-radius:4px; }
+    /* Pre-login overlay styles */
+    .prelogin-overlay { position:fixed; inset:0; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index:9999; display:flex; align-items:center; justify-content:center; }
+    .prelogin-overlay.hidden { display:none; }
+    .prelogin-card { background:#fff; padding:40px 48px; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; max-width:400px; width:90%; }
+    .prelogin-card h2 { margin:0 0 8px 0; font-size:1.5rem; color:#222; }
+    .prelogin-subtitle { color:var(--muted); margin:0 0 24px 0; font-size:0.95rem; }
+    .prelogin-form { display:flex; flex-direction:column; gap:16px; }
+    .prelogin-form label { display:flex; flex-direction:column; text-align:left; font-size:0.9rem; color:var(--muted); gap:6px; }
+    .prelogin-form input { padding:10px 12px; border:1px solid #cfcfcf; border-radius:8px; font-size:1rem; }
+    .prelogin-form input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(11,118,209,0.15); }
+    .prelogin-btn { padding:12px 24px; font-size:1rem; margin-top:8px; }
+    .prelogin-note { color:var(--muted); font-size:0.8rem; margin:20px 0 0 0; }
   </style>
 
   <!-- jsPDF for PDF export -->
@@ -61,6 +73,24 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
+  <!-- Pre-login overlay - blocks access until user signs in -->
+  <div id="preLoginOverlay" class="prelogin-overlay">
+    <div class="prelogin-card">
+      <h2>Nigeria Accounting & Tax Engine</h2>
+      <p class="prelogin-subtitle">Please sign in to continue</p>
+      <div class="prelogin-form">
+        <label>Username:
+          <input type="text" id="preLoginUsername" placeholder="Enter username" />
+        </label>
+        <label>Password:
+          <input type="password" id="preLoginPassword" placeholder="(optional)" />
+        </label>
+        <button class="primary prelogin-btn" id="preLoginSubmit">Sign In</button>
+      </div>
+      <p class="prelogin-note">Note: This is a prototype-only login system. Passwords are not stored.</p>
+    </div>
+  </div>
+
   <header>
     <h1>Nigeria Accounting & Tax Engine — Prototype</h1>
 
@@ -739,6 +769,12 @@
   const loginCancel = document.getElementById('loginCancel');
   const authInfo = document.getElementById('authInfo');
   
+  // Pre-login overlay DOM refs
+  const preLoginOverlay = document.getElementById('preLoginOverlay');
+  const preLoginUsername = document.getElementById('preLoginUsername');
+  const preLoginPassword = document.getElementById('preLoginPassword');
+  const preLoginSubmit = document.getElementById('preLoginSubmit');
+  
   const txnAdjustmentType = document.getElementById('txnAdjustmentType');
   const txnAdjustmentAmount = document.getElementById('txnAdjustmentAmount');
   const txnAdjustmentAmountLabel = document.getElementById('txnAdjustmentAmountLabel');
@@ -904,7 +940,7 @@
       transactions: {},
       attachments: {},
       audit: [],
-      auth: { currentUserId: u }
+      auth: { currentUserId: null }  // Not logged in by default - user must sign in via pre-login overlay
     };
     state.transactions[u] = {};
     state.transactions[u][b] = [
@@ -955,6 +991,22 @@
     renderAll();
   }
 
+  // Pre-login overlay handler - authenticates user from the blocking overlay form
+  function handlePreLogin(){
+    const username = (preLoginUsername.value || '').trim();
+    if(!username) return alert('Username required');
+    const user = state.users.find(u => u.username === username);
+    if(!user) return alert('User not found');
+    
+    state.auth.currentUserId = user.id;
+    saveState();
+    addAudit('auth.login', 'user', user.id, 'User logged in via pre-login overlay');
+    preLoginUsername.value = '';
+    preLoginPassword.value = '';
+    updateAuthUI();
+    renderAll();
+  }
+
   function updateAuthUI(){
     if(state.auth.currentUserId){
       const user = state.users.find(u => u.id === state.auth.currentUserId);
@@ -962,11 +1014,15 @@
         authInfo.textContent = `Logged in as: ${user.display || user.username}`;
         btnLogin.style.display = 'none';
         btnLogout.style.display = 'inline-block';
+        // Hide pre-login overlay when logged in
+        if(preLoginOverlay) preLoginOverlay.classList.add('hidden');
       }
     } else {
       authInfo.textContent = 'Not logged in';
       btnLogin.style.display = 'inline-block';
       btnLogout.style.display = 'none';
+      // Show pre-login overlay when not logged in
+      if(preLoginOverlay) preLoginOverlay.classList.remove('hidden');
     }
     enforcePermissions();
   }
@@ -1110,6 +1166,17 @@
     btnLogout.addEventListener('click', handleLogout);
     loginSubmit.addEventListener('click', handleLogin);
     loginCancel.addEventListener('click', ()=> closeModal(loginModal));
+
+    // Pre-login overlay handler - authenticates user from overlay form
+    if(preLoginSubmit){
+      preLoginSubmit.addEventListener('click', handlePreLogin);
+    }
+    if(preLoginUsername){
+      preLoginUsername.addEventListener('keypress', (e)=> { if(e.key === 'Enter') handlePreLogin(); });
+    }
+    if(preLoginPassword){
+      preLoginPassword.addEventListener('keypress', (e)=> { if(e.key === 'Enter') handlePreLogin(); });
+    }
 
     // Adjustment type handler
     txnAdjustmentType.addEventListener('change', ()=> {
