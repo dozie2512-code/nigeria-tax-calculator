@@ -10,7 +10,8 @@ async function sha256Hex(str){
   const enc = new TextEncoder();
   const data = enc.encode(str);
   const hashBuf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const hashArray = Array.from(new Uint8Array(hashBuf));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // Helpers for modal
@@ -20,13 +21,20 @@ function closeModal(el){ if(!el) return; el.setAttribute('aria-hidden','true'); 
 function showMessage(el, msg, isError){ if(!el) return; el.textContent = msg; el.style.color = isError? '#b00020' : ''; }
 
 async function postJson(path, payload){
-  const url = (API_BASE_URL || '').replace(/\/$/, '') + path;
+  // Use URL constructor for safer URL building
+  const baseUrl = (API_BASE_URL || '').replace(/\/$/, '');
+  let url;
+  try {
+    url = new URL(path, baseUrl + '/').href;
+  } catch (e) {
+    url = baseUrl + path;
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const json = await res.json().catch(()=>({ success:false, message:'Invalid JSON response' }));
+  const json = await res.json().catch(() => ({ success: false, message: 'Invalid JSON response' }));
   return { status: res.status, ok: res.ok, body: json };
 }
 
@@ -42,15 +50,22 @@ const loginMsg = document.getElementById('loginMsg');
 const signupMsg = document.getElementById('signupMsg');
 
 // Wire UI
-[openLogin, document.querySelectorAll('[data-open-login]')].flat().forEach(btn=>{ if(btn) btn.addEventListener('click', ()=>openModal(loginModal)); });
-if(openSignup) openSignup.addEventListener('click', ()=>openModal(signupModal));
-if(heroSignup) heroSignup.addEventListener('click', ()=>openModal(signupModal));
+[openLogin, ...document.querySelectorAll('[data-open-login]')].forEach(btn => {
+  if (btn && loginModal) btn.addEventListener('click', () => openModal(loginModal));
+});
+if (openSignup && signupModal) openSignup.addEventListener('click', () => openModal(signupModal));
+if (heroSignup && signupModal) heroSignup.addEventListener('click', () => openModal(signupModal));
 
 // Close buttons inside modals
-document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', (e)=>{ const modal = e.target.closest('.modal'); closeModal(modal); }));
+document.querySelectorAll('[data-close]').forEach(b => {
+  b.addEventListener('click', (e) => {
+    const modal = e.target.closest('.modal');
+    closeModal(modal);
+  });
+});
 
 // Signup flow
-signupForm.addEventListener('submit', async (e)=>{
+if (signupForm) signupForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   signupMsg.textContent = '';
   const name = signupForm.signupName.value.trim();
@@ -77,11 +92,11 @@ signupForm.addEventListener('submit', async (e)=>{
       const msg = (body && (body.message || body.error)) || 'Signup failed';
       showMessage(signupMsg, msg, true);
     }
-  }catch(err){ showMessage(signupMsg, 'Network error: '+err.message, true); }
+  } catch (err) { showMessage(signupMsg, 'Network error: ' + err.message, true); }
 });
 
 // Login flow
-loginForm.addEventListener('submit', async (e)=>{
+if (loginForm) loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   loginMsg.textContent = '';
   const username = loginForm.username.value.trim();
@@ -101,7 +116,7 @@ loginForm.addEventListener('submit', async (e)=>{
       const msg = (body && (body.message || body.error)) || 'Login failed';
       showMessage(loginMsg, msg, true);
     }
-  }catch(err){ showMessage(loginMsg, 'Network error: '+err.message, true); }
+  } catch (err) { showMessage(loginMsg, 'Network error: ' + err.message, true); }
 });
 
 // Simple auth state
