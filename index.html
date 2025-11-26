@@ -65,6 +65,13 @@
     .prelogin-form input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(11,118,209,0.15); }
     .prelogin-btn { padding:12px 24px; font-size:1rem; margin-top:8px; }
     .prelogin-note { color:var(--muted); font-size:0.8rem; margin:20px 0 0 0; }
+    /* Auth tabs styles (merged from auth.css) */
+    .auth-tabs { display:flex; gap:8px; margin-bottom:12px; justify-content:center; }
+    .auth-tabs .tab { padding:8px 12px; border-radius:8px; border:1px solid #e6e9ef; background:#fff; cursor:pointer; }
+    .auth-tabs .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .auth-panel { display:block; }
+    .auth-panel.hidden { display:none; }
+    .auth-msg { color:var(--muted); margin-top:8px; font-size:0.9rem; }
   </style>
 
   <!-- jsPDF for PDF export -->
@@ -77,17 +84,53 @@
   <div id="preLoginOverlay" class="prelogin-overlay">
     <div class="prelogin-card">
       <h2>Nigeria Accounting & Tax Engine</h2>
-      <p class="prelogin-subtitle">Please sign in to continue</p>
-      <div class="prelogin-form">
-        <label>Username:
-          <input type="text" id="preLoginUsername" placeholder="Enter username" />
+      <p class="prelogin-subtitle">Sign in or create an account to continue</p>
+
+      <!-- Auth tabs (merged from auth.html) -->
+      <div class="auth-tabs">
+        <button id="authTabLogin" class="tab active">Login</button>
+        <button id="authTabSignup" class="tab">Sign up</button>
+      </div>
+
+      <!-- Login panel -->
+      <div id="authLoginPanel" class="auth-panel prelogin-form">
+        <label>Username or Email:
+          <input type="text" id="preLoginUsername" placeholder="Enter username or email" autocomplete="username" />
         </label>
         <label>Password:
-          <input type="password" id="preLoginPassword" placeholder="Enter password" />
+          <input type="password" id="preLoginPassword" placeholder="Enter password" autocomplete="current-password" />
         </label>
-        <button class="primary prelogin-btn" id="preLoginSubmit">Sign In</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="primary prelogin-btn" id="preLoginSubmit">Sign In</button>
+          <button class="prelogin-btn" id="preLoginDemo" type="button">Demo Account</button>
+        </div>
+        <p id="authLoginMsg" class="auth-msg"></p>
       </div>
-      <p class="prelogin-note" style="margin-top:16px;">Don't have an account? <span id="preLoginSignupLink" class="link-like" style="cursor:pointer;color:var(--accent);">Sign up here</span></p>
+
+      <!-- Signup panel (merged from auth.html) -->
+      <div id="authSignupPanel" class="auth-panel prelogin-form hidden">
+        <label>Full Name:
+          <input type="text" id="authSignupName" placeholder="Enter your full name" autocomplete="name" required />
+        </label>
+        <label>Username:
+          <input type="text" id="authSignupUsername" placeholder="Choose a username" autocomplete="username" required />
+        </label>
+        <label>Email:
+          <input type="email" id="authSignupEmail" placeholder="your@email.com" autocomplete="email" required />
+        </label>
+        <label>Password (min 6 chars):
+          <input type="password" id="authSignupPassword" placeholder="Choose a password" autocomplete="new-password" minlength="6" required />
+        </label>
+        <label>Confirm Password:
+          <input type="password" id="authSignupPassword2" placeholder="Confirm password" minlength="6" required />
+        </label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="primary prelogin-btn" id="authSignupSubmit">Create Account</button>
+          <button class="prelogin-btn" id="authSignupCancel" type="button">Cancel</button>
+        </div>
+        <p id="authSignupMsg" class="auth-msg"></p>
+      </div>
+
       <p class="prelogin-note">Note: This is a prototype. Credentials stored locally. Passwords hashed with SHA-256.</p>
     </div>
   </div>
@@ -997,6 +1040,22 @@
   const preLoginPassword = document.getElementById('preLoginPassword');
   const preLoginSubmit = document.getElementById('preLoginSubmit');
   
+  // Auth tabs and panels DOM refs (merged from auth.js)
+  const authTabLogin = document.getElementById('authTabLogin');
+  const authTabSignup = document.getElementById('authTabSignup');
+  const authLoginPanel = document.getElementById('authLoginPanel');
+  const authSignupPanel = document.getElementById('authSignupPanel');
+  const authLoginMsg = document.getElementById('authLoginMsg');
+  const authSignupMsg = document.getElementById('authSignupMsg');
+  const authSignupName = document.getElementById('authSignupName');
+  const authSignupUsername = document.getElementById('authSignupUsername');
+  const authSignupEmail = document.getElementById('authSignupEmail');
+  const authSignupPassword = document.getElementById('authSignupPassword');
+  const authSignupPassword2 = document.getElementById('authSignupPassword2');
+  const authSignupSubmit = document.getElementById('authSignupSubmit');
+  const authSignupCancel = document.getElementById('authSignupCancel');
+  const preLoginDemo = document.getElementById('preLoginDemo');
+  
   const txnAdjustmentType = document.getElementById('txnAdjustmentType');
   const txnAdjustmentAmount = document.getElementById('txnAdjustmentAmount');
   const txnAdjustmentAmountLabel = document.getElementById('txnAdjustmentAmountLabel');
@@ -1244,20 +1303,32 @@
 
   // Pre-login overlay handler - authenticates user from the blocking overlay form
   async function handlePreLogin(){
-    const username = (preLoginUsername.value || '').trim();
+    const loginInput = (preLoginUsername.value || '').trim();
     const password = (preLoginPassword.value || '');
     
-    if(!username) return alert('Username required');
-    const user = state.users.find(u => u.username === username);
-    if(!user) return alert('User not found');
+    if(!loginInput) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Username or email required'; authLoginMsg.style.color = '#b00'; }
+      return;
+    }
+    // Support login by username or email (merged from auth.js)
+    const loginLower = loginInput.toLowerCase();
+    const user = state.users.find(u => u.username === loginInput || u.username === loginLower || u.email === loginLower);
+    if(!user) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'No matching user found'; authLoginMsg.style.color = '#b00'; }
+      return;
+    }
     
     // Check password if user has passwordHash (new users)
     // Otherwise allow login for backward compatibility (demo users)
     if(user.passwordHash) {
-      if(!password) return alert('Password required');
+      if(!password) {
+        if(authLoginMsg) { authLoginMsg.textContent = 'Password required'; authLoginMsg.style.color = '#b00'; }
+        return;
+      }
       const inputHash = await sha256Hex(password);
       if(inputHash !== user.passwordHash) {
-        return alert('Invalid password');
+        if(authLoginMsg) { authLoginMsg.textContent = 'Invalid credentials'; authLoginMsg.style.color = '#b00'; }
+        return;
       }
     }
     
@@ -1266,13 +1337,17 @@
     addAudit('auth.login', 'user', user.id, 'User logged in via pre-login overlay');
     preLoginUsername.value = '';
     preLoginPassword.value = '';
-    updateAuthUI();
-    renderAll();
+    if(authLoginMsg) { authLoginMsg.textContent = 'Signed in — loading...'; authLoginMsg.style.color = 'green'; }
     
-    // Check if user needs to see video tour (first time after signup)
-    if(user.tourSeen !== true) {
-      showTourModal(user.id);
-    }
+    setTimeout(() => {
+      updateAuthUI();
+      renderAll();
+      
+      // Check if user needs to see video tour (first time after signup)
+      if(user.tourSeen !== true) {
+        showTourModal(user.id);
+      }
+    }, 400);
   }
 
   function updateAuthUI(){
@@ -1446,14 +1521,161 @@
       preLoginPassword.addEventListener('keypress', (e)=> { if(e.key === 'Enter') handlePreLogin(); });
     }
     
-    // Pre-login signup link handler - opens signup modal from pre-login overlay
-    const preLoginSignupLink = document.getElementById('preLoginSignupLink');
-    if(preLoginSignupLink){
-      preLoginSignupLink.addEventListener('click', function() {
-        const signupModal = document.getElementById('signupModal');
-        // Hide pre-login overlay so signup modal is clickable
-        if(preLoginOverlay) preLoginOverlay.classList.add('hidden');
-        if(signupModal) openModal(signupModal);
+    // Auth tabs switching logic (merged from auth.js)
+    function switchAuthTab(panel) {
+      if (panel === 'login') {
+        if (authTabLogin) authTabLogin.classList.add('active');
+        if (authTabSignup) authTabSignup.classList.remove('active');
+        if (authLoginPanel) authLoginPanel.classList.remove('hidden');
+        if (authSignupPanel) authSignupPanel.classList.add('hidden');
+      } else {
+        if (authTabSignup) authTabSignup.classList.add('active');
+        if (authTabLogin) authTabLogin.classList.remove('active');
+        if (authSignupPanel) authSignupPanel.classList.remove('hidden');
+        if (authLoginPanel) authLoginPanel.classList.add('hidden');
+      }
+    }
+    
+    if (authTabLogin) authTabLogin.addEventListener('click', () => switchAuthTab('login'));
+    if (authTabSignup) authTabSignup.addEventListener('click', () => switchAuthTab('signup'));
+    if (authSignupCancel) authSignupCancel.addEventListener('click', () => {
+      // Clear form and switch back to login
+      if (authSignupName) authSignupName.value = '';
+      if (authSignupUsername) authSignupUsername.value = '';
+      if (authSignupEmail) authSignupEmail.value = '';
+      if (authSignupPassword) authSignupPassword.value = '';
+      if (authSignupPassword2) authSignupPassword2.value = '';
+      if (authSignupMsg) authSignupMsg.textContent = '';
+      switchAuthTab('login');
+    });
+    
+    // Auth signup form handler (merged from auth.js)
+    if (authSignupSubmit) {
+      authSignupSubmit.addEventListener('click', async function(e) {
+        e.preventDefault();
+        if (authSignupMsg) authSignupMsg.textContent = '';
+        
+        const name = authSignupName ? authSignupName.value.trim() : '';
+        const username = authSignupUsername ? authSignupUsername.value.trim() : '';
+        const email = authSignupEmail ? authSignupEmail.value.trim().toLowerCase() : '';
+        const pass = authSignupPassword ? authSignupPassword.value : '';
+        const pass2 = authSignupPassword2 ? authSignupPassword2.value : '';
+        
+        if (!name || !username || !email || !pass) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Please fill all fields'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        if (pass !== pass2) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Passwords do not match'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        if (pass.length < 6) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Password must be at least 6 characters'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        if (!isValidEmail(email)) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Please enter a valid email address'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        
+        // Check username and email uniqueness
+        const existingUsername = state.users.find(u => u.username === username);
+        if (existingUsername) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Username already exists'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        const existingEmail = state.users.find(u => u.email === email);
+        if (existingEmail) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Email already registered'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        
+        // Hash password
+        const passwordHash = await sha256Hex(pass);
+        
+        // Create user
+        const userId = uid('user');
+        const newUser = {
+          id: userId,
+          username: username,
+          display: name,
+          email: email,
+          passwordHash: passwordHash,
+          role: 'User',
+          isAdmin: false,
+          permissions: { view: true, edit: true, delete: false },
+          plan: 'Individual',
+          createdAt: new Date().toISOString(),
+          trialStart: new Date().toISOString(),
+          tourSeen: false
+        };
+        
+        state.users.push(newUser);
+        state.auth.currentUserId = userId;
+        saveState();
+        addAudit('user.signup', 'user', userId, 'User signed up via auth panel: ' + username);
+        
+        // Clear form
+        if (authSignupName) authSignupName.value = '';
+        if (authSignupUsername) authSignupUsername.value = '';
+        if (authSignupEmail) authSignupEmail.value = '';
+        if (authSignupPassword) authSignupPassword.value = '';
+        if (authSignupPassword2) authSignupPassword2.value = '';
+        
+        if (authSignupMsg) { authSignupMsg.textContent = 'Account created — loading...'; authSignupMsg.style.color = 'green'; }
+        
+        // Show entity selection modal for new user
+        setTimeout(() => {
+          if (preLoginOverlay) preLoginOverlay.classList.add('hidden');
+          showEntitySelectModal(userId, 'Individual');
+        }, 500);
+      });
+    }
+    
+    // Demo account handler (merged from auth.js)
+    if (preLoginDemo) {
+      preLoginDemo.addEventListener('click', async function() {
+        // Find or create demo user
+        let demoUser = state.users.find(u => u.username === 'demo');
+        if (!demoUser) {
+          const passwordHash = await sha256Hex('demo123');
+          const userId = uid('user');
+          demoUser = {
+            id: userId,
+            username: 'demo',
+            display: 'Demo User',
+            email: 'demo@example.com',
+            passwordHash: passwordHash,
+            role: 'User',
+            isAdmin: false,
+            permissions: { view: true, edit: true, delete: false },
+            plan: 'Individual',
+            createdAt: new Date().toISOString(),
+            trialStart: new Date().toISOString(),
+            tourSeen: true
+          };
+          state.users.push(demoUser);
+          saveState();
+          addAudit('user.demo_created', 'user', userId, 'Demo user created');
+          
+          // Create default business for demo user
+          createBusinessForUser(userId, 'Individual');
+        }
+        
+        // Log in as demo user
+        state.auth.currentUserId = demoUser.id;
+        saveState();
+        addAudit('user.login', 'user', demoUser.id, 'Demo user login');
+        
+        if (authLoginMsg) { authLoginMsg.textContent = 'Signed in as demo — loading...'; authLoginMsg.style.color = 'green'; }
+        
+        setTimeout(() => {
+          if (preLoginOverlay) preLoginOverlay.classList.add('hidden');
+          updateAuthUI();
+          refreshSelectors();
+          ensureSelection();
+          renderAll();
+        }, 400);
       });
     }
 
@@ -3684,4 +3906,4 @@
 
   </script>
 </body>
-           </html>
+          </html>
