@@ -30,6 +30,8 @@ Edit `app.js` and set the `API_BASE_URL` constant to your backend URL:
 const API_BASE_URL = "https://api.example.com"; // Your backend URL
 ```
 
+Note: When `API_BASE_URL` is empty (default), requests will be made relative to the current origin.
+
 ## localStorage Token
 
 The auth token is stored under the key `ntc_auth_token`. To retrieve it:

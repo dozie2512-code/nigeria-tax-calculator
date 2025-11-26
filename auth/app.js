@@ -4,8 +4,8 @@
  * Stores auth token in localStorage and redirects on success
  */
 
-// Configuration
-const API_BASE_URL = "API_BASE_URL"; // Replace with your backend URL (e.g., "https://api.example.com")
+// Configuration - Replace API_BASE_URL with your backend URL
+const API_BASE_URL = ""; // e.g., "https://api.example.com"
 const SIGNUP_ENDPOINT = "/api/auth/signup";
 const LOGIN_ENDPOINT = "/api/auth/login";
 const TOKEN_KEY = "ntc_auth_token";
@@ -138,13 +138,6 @@ const signupForm = document.getElementById("signupForm");
 const loginMsg = document.getElementById("loginMsg");
 const signupMsg = document.getElementById("signupMsg");
 
-// Modal elements (for modal-based UI)
-const openLoginBtn = document.getElementById("openLogin");
-const openSignupBtn = document.getElementById("openSignup");
-const heroSignupBtn = document.getElementById("heroSignup");
-const loginModal = document.getElementById("loginModal");
-const signupModal = document.getElementById("signupModal");
-
 /**
  * Switches to the specified tab.
  * @param {string} tabId - Tab ID to switch to ('login' or 'signup')
@@ -156,26 +149,6 @@ function switchTab(tabId) {
   tabContents.forEach((content) => {
     content.classList.toggle("active", content.id === tabId + "Tab");
   });
-}
-
-/**
- * Opens a modal.
- * @param {HTMLElement} modal - Modal element
- */
-function openModal(modal) {
-  if (modal) {
-    modal.setAttribute("aria-hidden", "false");
-  }
-}
-
-/**
- * Closes a modal.
- * @param {HTMLElement} modal - Modal element
- */
-function closeModal(modal) {
-  if (modal) {
-    modal.setAttribute("aria-hidden", "true");
-  }
 }
 
 /**
@@ -313,36 +286,6 @@ function init() {
   if (loginForm) {
     loginForm.addEventListener("submit", handleLogin);
   }
-
-  // Modal open buttons (for modal-based UI)
-  if (openLoginBtn && loginModal) {
-    openLoginBtn.addEventListener("click", () => openModal(loginModal));
-  }
-
-  if (openSignupBtn && signupModal) {
-    openSignupBtn.addEventListener("click", () => openModal(signupModal));
-  }
-
-  if (heroSignupBtn && signupModal) {
-    heroSignupBtn.addEventListener("click", () => openModal(signupModal));
-  }
-
-  // Modal close buttons
-  document.querySelectorAll("[data-close]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const modal = e.target.closest(".modal");
-      closeModal(modal);
-    });
-  });
-
-  // Close modal on overlay click
-  document.querySelectorAll(".modal").forEach((modal) => {
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) {
-        closeModal(modal);
-      }
-    });
-  });
 }
 
 // Initialize on DOM ready
