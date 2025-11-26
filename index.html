@@ -1191,7 +1191,18 @@
   // modal helpers
   function openModal(modal){ modalOverlay.style.display='block'; modal.style.display='block'; window.scrollTo({top:0}); }
   function closeModal(modal){ modalOverlay.style.display='none'; modal.style.display='none'; }
-  modalOverlay.addEventListener('click', ()=> { [userModal, businessModal, accountsModal, loginModal, document.getElementById('signupModal'), document.getElementById('forgotModal'), document.getElementById('entitySelectModal'), document.getElementById('videoTourModal')].forEach(m => { if(m && m.style.display==='block') closeModal(m); }); });
+  modalOverlay.addEventListener('click', ()=> { 
+    const signupModalEl = document.getElementById('signupModal');
+    const preLoginOverlayEl = document.getElementById('preLoginOverlay');
+    const wasSignupModalOpen = signupModalEl && signupModalEl.style.display === 'block';
+    
+    [userModal, businessModal, accountsModal, loginModal, signupModalEl, document.getElementById('forgotModal'), document.getElementById('entitySelectModal'), document.getElementById('videoTourModal')].forEach(m => { if(m && m.style.display==='block') closeModal(m); }); 
+    
+    // Show pre-login overlay if signup modal was closed and user is not logged in
+    if (wasSignupModalOpen && preLoginOverlayEl && (!state || !state.auth || !state.auth.currentUserId)) {
+      preLoginOverlayEl.classList.remove('hidden');
+    }
+  });
 
   // Login/Logout functions - Updated to use password hashing
   async function handleLogin(){
@@ -1440,9 +1451,317 @@
     if(preLoginSignupLink){
       preLoginSignupLink.addEventListener('click', function() {
         const signupModal = document.getElementById('signupModal');
+        // Hide pre-login overlay so signup modal is clickable
+        if(preLoginOverlay) preLoginOverlay.classList.add('hidden');
         if(signupModal) openModal(signupModal);
       });
     }
+
+    // Defensive signup handler - attaches to #signupSubmit button with fallbacks
+    (function initDefensiveSignupHandler() {
+      try {
+        var signupSubmitBtn = document.getElementById('signupSubmit');
+        if (!signupSubmitBtn) return;
+
+        signupSubmitBtn.addEventListener('click', async function(e) {
+          try {
+            e.preventDefault();
+
+            // Get storage key once for use in fallbacks
+            var storageKey = (typeof STORAGE_KEY !== 'undefined') ? STORAGE_KEY : 'ntc_full_accounting_v2';
+
+            // Get form field references defensively
+            var nameEl = document.getElementById('signupName');
+            var usernameEl = document.getElementById('signupUsername');
+            var emailEl = document.getElementById('signupEmail');
+            var phoneEl = document.getElementById('signupPhone');
+            var passwordEl = document.getElementById('signupPassword');
+            var planEl = document.getElementById('signupPlan');
+
+            var name = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
+            var username = (usernameEl && usernameEl.value) ? usernameEl.value.trim() : '';
+            var email = (emailEl && emailEl.value) ? emailEl.value.trim() : '';
+            var phone = (phoneEl && phoneEl.value) ? phoneEl.value.trim() : '';
+            var password = (passwordEl && passwordEl.value) ? passwordEl.value : '';
+            var plan = (planEl && planEl.value) ? planEl.value : 'Individual';
+
+            // Validate required fields
+            if (!name || !username || !email || !password) {
+              alert('Name, Username, Email, and Password are required.');
+              return;
+            }
+
+            // Validate email format
+            var emailValid = false;
+            if (typeof isValidEmail === 'function') {
+              emailValid = isValidEmail(email);
+            } else {
+              // Fallback email validation
+              var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              emailValid = emailRegex.test(email);
+            }
+            if (!emailValid) {
+              alert('Please enter a valid email address.');
+              return;
+            }
+
+            // Validate password minimum length
+            if (password.length < 6) {
+              alert('Password must be at least 6 characters long.');
+              return;
+            }
+
+            // Check username uniqueness against state.users
+            if (typeof state !== 'undefined' && state.users && Array.isArray(state.users)) {
+              var existingUserByUsername = state.users.find(function(u) { return u.username === username; });
+              if (existingUserByUsername) {
+                alert('Username already exists. Please choose a different username.');
+                return;
+              }
+
+              // Check email uniqueness
+              var existingUserByEmail = state.users.find(function(u) { return u.email === email; });
+              if (existingUserByEmail) {
+                alert('This email address is already registered. Please use a different email or login with your existing account.');
+                return;
+              }
+            }
+
+            // Hash password using sha256Hex if available, otherwise store plain (prototype only)
+            var passwordHash = password;
+            if (typeof sha256Hex === 'function') {
+              try {
+                passwordHash = await sha256Hex(password);
+              } catch (hashErr) {
+                console.warn('Password hashing failed, using plain password:', hashErr);
+              }
+            }
+
+            // Generate user ID using uid() or fallback
+            var userId;
+            if (typeof uid === 'function') {
+              userId = uid('user');
+            } else {
+              // Fallback: generate ID similar to uid() function pattern
+              userId = 'user_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+            }
+
+            // Create user object
+            var newUser = {
+              id: userId,
+              username: username,
+              display: name,
+              email: email,
+              phone: phone,
+              passwordHash: passwordHash,
+              role: 'User',
+              isAdmin: false,
+              permissions: { view: true, edit: true, delete: false },
+              plan: plan,
+              createdAt: new Date().toISOString(),
+              trialStart: new Date().toISOString(),
+              tourSeen: false
+            };
+
+            // Add user to state
+            if (typeof state !== 'undefined') {
+              state.users = state.users || [];
+              state.users.push(newUser);
+              state.auth = state.auth || {};
+              state.auth.currentUserId = userId;
+            }
+
+            // Persist state via saveState() or fallback to localStorage
+            if (typeof saveState === 'function') {
+              try {
+                saveState();
+              } catch (saveErr) {
+                console.warn('saveState() failed, using localStorage fallback:', saveErr);
+                try {
+                  localStorage.setItem(storageKey, JSON.stringify(state));
+                } catch (lsErr) {
+                  console.error('localStorage fallback also failed:', lsErr);
+                }
+              }
+            } else {
+              // Fallback to localStorage directly
+              try {
+                localStorage.setItem(storageKey, JSON.stringify(state));
+              } catch (lsErr) {
+                console.error('localStorage save failed:', lsErr);
+              }
+            }
+
+            // Log audit entry via addAudit() if available
+            if (typeof addAudit === 'function') {
+              try {
+                addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ', Email: ' + email + ')');
+              } catch (auditErr) {
+                console.warn('addAudit() failed:', auditErr);
+              }
+            }
+
+            // Clear form fields
+            if (nameEl) nameEl.value = '';
+            if (usernameEl) usernameEl.value = '';
+            if (emailEl) emailEl.value = '';
+            if (phoneEl) phoneEl.value = '';
+            if (passwordEl) passwordEl.value = '';
+            if (planEl) planEl.value = 'Individual';
+
+            // Close signup modal
+            var signupModalEl = document.getElementById('signupModal');
+            if (signupModalEl) {
+              if (typeof closeModal === 'function') {
+                try {
+                  closeModal(signupModalEl);
+                } catch (closeErr) {
+                  signupModalEl.style.display = 'none';
+                  var overlay = document.getElementById('modalOverlay');
+                  if (overlay) overlay.style.display = 'none';
+                }
+              } else {
+                signupModalEl.style.display = 'none';
+                var overlay = document.getElementById('modalOverlay');
+                if (overlay) overlay.style.display = 'none';
+              }
+            }
+
+            // Create default business via createBusinessForUser() if available
+            var bizId = null;
+            if (typeof createBusinessForUser === 'function') {
+              try {
+                bizId = createBusinessForUser(userId, plan);
+              } catch (bizErr) {
+                console.warn('createBusinessForUser() failed:', bizErr);
+              }
+            }
+
+            // Set selected user and business
+            if (typeof selectedUserId !== 'undefined') {
+              selectedUserId = userId;
+            }
+            if (bizId && typeof selectedBizId !== 'undefined') {
+              selectedBizId = bizId;
+            }
+
+            // Open entity selection modal if present (and createBusinessForUser wasn't called or failed)
+            var entitySelectModal = document.getElementById('entitySelectModal');
+            if (entitySelectModal && !bizId) {
+              if (typeof pendingSignupUserId !== 'undefined') {
+                pendingSignupUserId = userId;
+              }
+              var entitySelectType = document.getElementById('entitySelectType');
+              if (entitySelectType) entitySelectType.value = plan;
+              if (typeof openModal === 'function') {
+                try {
+                  openModal(entitySelectModal);
+                } catch (openErr) {
+                  entitySelectModal.style.display = 'block';
+                  var overlay = document.getElementById('modalOverlay');
+                  if (overlay) overlay.style.display = 'block';
+                }
+              } else {
+                entitySelectModal.style.display = 'block';
+                var overlay = document.getElementById('modalOverlay');
+                if (overlay) overlay.style.display = 'block';
+              }
+            }
+
+            // Trigger video tour for new user if available
+            if (typeof showTourModal === 'function' && bizId) {
+              try {
+                showTourModal(userId);
+              } catch (tourErr) {
+                console.warn('showTourModal() failed:', tourErr);
+              }
+            }
+
+            // Refresh UI selects - try multiple approaches
+            var uiRefreshed = false;
+
+            // Try populateUserBusinessSelects() if available
+            if (typeof populateUserBusinessSelects === 'function') {
+              try {
+                populateUserBusinessSelects();
+                uiRefreshed = true;
+              } catch (popErr) {
+                console.warn('populateUserBusinessSelects() failed:', popErr);
+              }
+            }
+
+            // Try populateUsers() if available
+            if (typeof populateUsers === 'function') {
+              try {
+                populateUsers();
+                uiRefreshed = true;
+              } catch (popErr) {
+                console.warn('populateUsers() failed:', popErr);
+              }
+            }
+
+            // Try refreshSelectors() if available
+            if (typeof refreshSelectors === 'function') {
+              try {
+                refreshSelectors();
+                uiRefreshed = true;
+              } catch (refErr) {
+                console.warn('refreshSelectors() failed:', refErr);
+              }
+            }
+
+            // Try ensureSelection() if available
+            if (typeof ensureSelection === 'function') {
+              try {
+                ensureSelection();
+              } catch (ensErr) {
+                console.warn('ensureSelection() failed:', ensErr);
+              }
+            }
+
+            // Try renderUI() or renderAll() if available
+            if (typeof renderUI === 'function') {
+              try {
+                renderUI();
+                uiRefreshed = true;
+              } catch (renErr) {
+                console.warn('renderUI() failed:', renErr);
+              }
+            } else if (typeof renderAll === 'function') {
+              try {
+                renderAll();
+                uiRefreshed = true;
+              } catch (renErr) {
+                console.warn('renderAll() failed:', renErr);
+              }
+            }
+
+            // Try updateAuthUI() if available
+            if (typeof updateAuthUI === 'function') {
+              try {
+                updateAuthUI();
+              } catch (authErr) {
+                console.warn('updateAuthUI() failed:', authErr);
+              }
+            }
+
+            // Last resort: reload the page if UI refresh failed and entity select modal is not open
+            // The entity select modal would be handling the rest of the signup flow if open
+            var entityModalIsOpen = entitySelectModal && entitySelectModal.style.display === 'block';
+            if (!uiRefreshed && !entityModalIsOpen) {
+              console.log('UI refresh methods unavailable, reloading page...');
+              window.location.reload();
+            }
+
+          } catch (handlerErr) {
+            console.error('Signup handler error:', handlerErr);
+            alert('An error occurred during signup. Please try again.');
+          }
+        });
+      } catch (initErr) {
+        console.error('Failed to initialize defensive signup handler:', initErr);
+      }
+    })();
 
     // Adjustment type handler
     txnAdjustmentType.addEventListener('change', ()=> {
@@ -3202,107 +3521,21 @@
     setInterval(updateCountdown, 1000);
   })();
 
-  // Signup modal handlers - Enhanced with email validation, password hashing, and entity selection
-  (function initSignupModal() {
+  // Signup modal cancel handler only - submit is handled by defensive handler above
+  (function initSignupModalCancel() {
     const signupModal = document.getElementById('signupModal');
     const signupCancel = document.getElementById('signupCancel');
-    const signupSubmit = document.getElementById('signupSubmit');
-    const signupName = document.getElementById('signupName');
-    const signupUsername = document.getElementById('signupUsername');
-    const signupEmail = document.getElementById('signupEmail');
-    const signupPhone = document.getElementById('signupPhone');
-    const signupPassword = document.getElementById('signupPassword');
-    const signupPlan = document.getElementById('signupPlan');
+    const preLoginOverlay = document.getElementById('preLoginOverlay');
     
     if (!signupModal) return;
     
     if (signupCancel) {
       signupCancel.addEventListener('click', function() {
         closeModal(signupModal);
-      });
-    }
-    
-    if (signupSubmit) {
-      signupSubmit.addEventListener('click', async function() {
-        const name = (signupName && signupName.value) ? signupName.value.trim() : '';
-        const username = (signupUsername && signupUsername.value) ? signupUsername.value.trim() : '';
-        const email = (signupEmail && signupEmail.value) ? signupEmail.value.trim() : '';
-        const phone = (signupPhone && signupPhone.value) ? signupPhone.value.trim() : '';
-        const password = (signupPassword && signupPassword.value) ? signupPassword.value : '';
-        const plan = (signupPlan && signupPlan.value) ? signupPlan.value : 'Individual';
-        
-        // Validate required fields
-        if (!name || !username || !email || !password) {
-          alert('Name, Username, Email, and Password are required.');
-          return;
+        // Show pre-login overlay again since user didn't complete signup
+        if (preLoginOverlay && (!state || !state.auth || !state.auth.currentUserId)) {
+          preLoginOverlay.classList.remove('hidden');
         }
-        
-        // Validate email format
-        if (!isValidEmail(email)) {
-          alert('Please enter a valid email address.');
-          return;
-        }
-        
-        // Validate password minimum length (6 characters)
-        if (password.length < 6) {
-          alert('Password must be at least 6 characters long.');
-          return;
-        }
-        
-        // Check username uniqueness
-        var existingUserByUsername = state.users.find(function(u) { return u.username === username; });
-        if (existingUserByUsername) {
-          alert('Username already exists. Please choose a different username.');
-          return;
-        }
-        
-        // Check email uniqueness
-        var existingUserByEmail = state.users.find(function(u) { return u.email === email; });
-        if (existingUserByEmail) {
-          alert('This email address is already registered. Please use a different email or login with your existing account.');
-          return;
-        }
-        
-        // Hash the password using SHA-256
-        const passwordHash = await sha256Hex(password);
-        
-        // Create user with all new fields
-        const userId = uid('user');
-        const newUser = {
-          id: userId,
-          username: username,
-          display: name,
-          email: email,
-          phone: phone,
-          passwordHash: passwordHash,
-          role: 'User',
-          isAdmin: false,
-          permissions: { view: true, edit: true, delete: false },
-          plan: plan,
-          createdAt: new Date().toISOString(),
-          trialStart: new Date().toISOString(),
-          tourSeen: false
-        };
-        
-        state.users.push(newUser);
-        
-        // Set current user to the new user
-        state.auth.currentUserId = userId;
-        
-        saveState();
-        addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ', Email: ' + email + ')');
-        
-        // Clear form and close signup modal
-        if (signupName) signupName.value = '';
-        if (signupUsername) signupUsername.value = '';
-        if (signupEmail) signupEmail.value = '';
-        if (signupPhone) signupPhone.value = '';
-        if (signupPassword) signupPassword.value = '';
-        if (signupPlan) signupPlan.value = 'Individual';
-        closeModal(signupModal);
-        
-        // Show entity selection modal
-        showEntitySelectModal(userId, plan);
       });
     }
   })();
