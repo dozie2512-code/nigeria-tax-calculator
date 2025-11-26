@@ -97,6 +97,8 @@
         <button id="btnImport" class="small">Import JSON</button>
         <button id="btnClearAll" class="small danger">Clear All</button>
         <input type="file" id="fileInput" accept="application/json" style="display:none;" />
+        <a id="buyNowBtn" class="small primary" href="https://paystack.shop/pay/financialbook" target="_blank" style="text-decoration:none;">Buy Now</a>
+        <span id="offerTimer" class="small-note" style="margin-left:8px;">Offer ends in: <strong id="offerCountdown">72:00:00</strong></span>
       </div>
     </div>
   </header>
@@ -490,6 +492,39 @@
       <button class="primary" id="loginSubmit">Login</button>
     </div>
   </div>
+
+<div id="signupModal" class="modal">
+  <h3>Signup — Nigeria Tax (7-day trial)</h3>
+  <div class="row">
+    <label>Name: <input type="text" id="signupName"></label>
+    <label>Username: <input type="text" id="signupUsername"></label>
+    <label>Password: <input type="password" id="signupPassword"></label>
+    <label>Plan:
+      <select id="signupPlan">
+        <option value="Individual">Individual</option>
+        <option value="Enterprise">Enterprise</option>
+        <option value="Company">Company</option>
+      </select>
+    </label>
+  </div>
+  <small class="note">Account valid for 7 days from signup. A notification will be sent to salesrepng@gmail.com.</small>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+    <button id="signupCancel">Cancel</button>
+    <button class="primary" id="signupSubmit">Create account</button>
+  </div>
+</div>
+
+<div id="forgotModal" class="modal">
+  <h3>Forgot Password</h3>
+  <div class="row">
+    <label>Username: <input type="text" id="forgotUsername"></label>
+  </div>
+  <small class="note">We will open an email request to the admin/sales team to process the reset (prototype). If you are the user, contact your admin to reset.</small>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+    <button id="forgotCancel">Cancel</button>
+    <button class="primary" id="forgotSubmit">Request reset</button>
+  </div>
+</div>
 
   <footer class="muted" style="margin-top:16px;">GitHub Copilot Chat Assistant — prototype stores data in localStorage (ntc_full_accounting_v1)</footer>
 
@@ -2762,6 +2797,147 @@
   populateAccountSelect();
   resetForms();
   renderAll();
+
+  // Offer countdown timer
+  (function initOfferCountdown() {
+    const countdownEl = document.getElementById('offerCountdown');
+    if (!countdownEl) return;
+    
+    const OFFER_DURATION_MS = 72 * 60 * 60 * 1000; // 72 hours in milliseconds
+    const STORAGE_KEY_OFFER = 'offerStartTime';
+    
+    let startTime = localStorage.getItem(STORAGE_KEY_OFFER);
+    if (!startTime) {
+      startTime = Date.now();
+      localStorage.setItem(STORAGE_KEY_OFFER, startTime);
+    } else {
+      startTime = parseInt(startTime, 10);
+    }
+    
+    function updateCountdown() {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, OFFER_DURATION_MS - elapsed);
+      
+      if (remaining <= 0) {
+        countdownEl.textContent = '00:00:00';
+        return;
+      }
+      
+      const hours = Math.floor(remaining / (1000 * 60 * 60));
+      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+      
+      countdownEl.textContent = 
+        String(hours).padStart(2, '0') + ':' +
+        String(minutes).padStart(2, '0') + ':' +
+        String(seconds).padStart(2, '0');
+    }
+    
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+  })();
+
+  // Signup modal handlers
+  (function initSignupModal() {
+    const signupModal = document.getElementById('signupModal');
+    const signupCancel = document.getElementById('signupCancel');
+    const signupSubmit = document.getElementById('signupSubmit');
+    const signupName = document.getElementById('signupName');
+    const signupUsername = document.getElementById('signupUsername');
+    const signupPassword = document.getElementById('signupPassword');
+    const signupPlan = document.getElementById('signupPlan');
+    
+    if (!signupModal) return;
+    
+    if (signupCancel) {
+      signupCancel.addEventListener('click', function() {
+        closeModal(signupModal);
+      });
+    }
+    
+    if (signupSubmit) {
+      signupSubmit.addEventListener('click', function() {
+        const name = (signupName && signupName.value) ? signupName.value.trim() : '';
+        const username = (signupUsername && signupUsername.value) ? signupUsername.value.trim() : '';
+        const password = (signupPassword && signupPassword.value) ? signupPassword.value : '';
+        const plan = (signupPlan && signupPlan.value) ? signupPlan.value : 'Individual';
+        
+        if (!name || !username) {
+          alert('Name and Username are required.');
+          return;
+        }
+        
+        // Create user (prototype)
+        const userId = uid('user');
+        const newUser = {
+          id: userId,
+          username: username,
+          display: name,
+          role: 'User',
+          isAdmin: false,
+          permissions: { view: true, edit: true, delete: false },
+          plan: plan,
+          trialStart: new Date().toISOString()
+        };
+        
+        state.users.push(newUser);
+        saveState();
+        addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ')');
+        
+        alert('Account created! Trial valid for 7 days. A notification will be sent to salesrepng@gmail.com.');
+        
+        // Clear form and close modal
+        if (signupName) signupName.value = '';
+        if (signupUsername) signupUsername.value = '';
+        if (signupPassword) signupPassword.value = '';
+        if (signupPlan) signupPlan.value = 'Individual';
+        closeModal(signupModal);
+        refreshSelectors();
+      });
+    }
+  })();
+
+  // Forgot password modal handlers
+  (function initForgotModal() {
+    const forgotModal = document.getElementById('forgotModal');
+    const forgotCancel = document.getElementById('forgotCancel');
+    const forgotSubmit = document.getElementById('forgotSubmit');
+    const forgotUsername = document.getElementById('forgotUsername');
+    
+    if (!forgotModal) return;
+    
+    if (forgotCancel) {
+      forgotCancel.addEventListener('click', function() {
+        closeModal(forgotModal);
+      });
+    }
+    
+    if (forgotSubmit) {
+      forgotSubmit.addEventListener('click', function() {
+        const username = (forgotUsername && forgotUsername.value) ? forgotUsername.value.trim() : '';
+        
+        if (!username) {
+          alert('Please enter your username.');
+          return;
+        }
+        
+        // Check if user exists
+        const user = state.users.find(function(u) { return u.username === username; });
+        if (!user) {
+          alert('User not found. Please check your username.');
+          return;
+        }
+        
+        addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for: ' + username);
+        
+        alert('Password reset request submitted. Please contact your admin or the sales team at salesrepng@gmail.com to process the reset.');
+        
+        // Clear form and close modal
+        if (forgotUsername) forgotUsername.value = '';
+        closeModal(forgotModal);
+      });
+    }
+  })();
 
   </script>
 </body>
