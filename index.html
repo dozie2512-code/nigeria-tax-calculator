@@ -295,6 +295,9 @@
         <label>Email:
           <input type="email" id="authSignupEmail" placeholder="your@email.com" autocomplete="email" required />
         </label>
+        <label>Phone:
+          <input type="tel" id="authSignupPhone" placeholder="e.g. +234..." autocomplete="tel" />
+        </label>
         <label>Password (min 6 chars):
           <input type="password" id="authSignupPassword" placeholder="Choose a password" autocomplete="new-password" minlength="6" required />
         </label>
@@ -884,6 +887,37 @@
     caRateDefault:20.0, depRateDefault:20.0, turnoverThreshold:100000000 
   };
   
+  // WARNING: This plaintext password is committed in source for prototype/demo only. Do NOT use in production.
+  const DEFAULT_ADMIN_USERNAME = 'admin';
+  const DEFAULT_ADMIN_PASSWORD = 'chukwuedozie25$';
+  
+  /**
+   * Stores signup lead and opens mailto for sales notification.
+   * Contains only name, email, phone - no sensitive data.
+   * @param {string} name - User's full name
+   * @param {string} email - User's email address
+   * @param {string} phone - User's phone number
+   */
+  function storeSignupLeadAndNotify(name, email, phone) {
+    // Store lead in signupLeads localStorage (name, email, phone only)
+    try {
+      const leads = JSON.parse(localStorage.getItem('signupLeads') || '[]');
+      leads.push({ name: name, email: email, phone: phone, createdAt: Date.now() });
+      localStorage.setItem('signupLeads', JSON.stringify(leads));
+    } catch (leadErr) {
+      console.warn('Failed to store signup lead:', leadErr);
+    }
+    
+    // Open mailto with lead info (name, email, phone only - no sensitive data)
+    try {
+      const mailtoBody = 'Name: ' + encodeURIComponent(name) + '%0AEmail: ' + encodeURIComponent(email) + '%0APhone: ' + encodeURIComponent(phone);
+      const mailtoUrl = 'mailto:salesrepng@gmail.com?subject=New%20Signup&body=' + mailtoBody;
+      window.open(mailtoUrl, '_blank');
+    } catch (mailtoErr) {
+      console.warn('Failed to open mailto:', mailtoErr);
+    }
+  }
+  
   // PIT/PAYE bands per Nigerian tax law (updated to match requirements)
   const PAYE_BANDS = [
     { upTo: 800000, rate: 0.00 },       // First ₦800,000 @ 0%
@@ -1244,6 +1278,7 @@
   const authSignupName = document.getElementById('authSignupName');
   const authSignupUsername = document.getElementById('authSignupUsername');
   const authSignupEmail = document.getElementById('authSignupEmail');
+  const authSignupPhone = document.getElementById('authSignupPhone');
   const authSignupPassword = document.getElementById('authSignupPassword');
   const authSignupPassword2 = document.getElementById('authSignupPassword2');
   const authSignupSubmit = document.getElementById('authSignupSubmit');
@@ -1275,6 +1310,46 @@
     try { state = JSON.parse(raw); migrateState(); }
     catch(e){ console.error('Failed parse store, seeding demo', e); seedDemo(); }
   }
+  
+  /**
+   * Seeds the default admin account if it does not exist.
+   * Called during migration to ensure admin is always available for prototype/demo.
+   */
+  async function seedAdminIfNeeded() {
+    // Check if admin user already exists
+    const existingAdmin = state.users.find(u => u.id === 'admin' || u.username === DEFAULT_ADMIN_USERNAME);
+    if (existingAdmin) {
+      // Ensure admin has passwordHash if missing (prototype migration)
+      if (!existingAdmin.passwordHash) {
+        existingAdmin.passwordHash = await sha256Hex(DEFAULT_ADMIN_PASSWORD);
+        saveState();
+      }
+      return;
+    }
+    
+    // Create seeded admin user
+    const adminPasswordHash = await sha256Hex(DEFAULT_ADMIN_PASSWORD);
+    const adminUser = {
+      id: 'admin',
+      username: DEFAULT_ADMIN_USERNAME,
+      display: 'Admin',
+      role: 'Admin',
+      isAdmin: true,
+      passwordHash: adminPasswordHash,
+      permissions: { view: true, edit: true, delete: true },
+      createdAt: new Date().toISOString(),
+      tourSeen: true
+    };
+    
+    state.users.push(adminUser);
+    
+    // Create a default business for admin using existing helper
+    createBusinessForUser('admin', 'Company');
+    
+    saveState();
+    addAudit('admin.seed', 'user', 'admin', 'Seeded default admin account for prototype/demo');
+  }
+  
   function migrateState(){
     state.users = state.users || [];
     state.businesses = state.businesses || [];
@@ -1282,6 +1357,9 @@
     state.attachments = state.attachments || {};
     state.audit = state.audit || [];
     state.auth = state.auth || { currentUserId: null };
+    
+    // Seed admin account if not present (runs async, saves state when done)
+    seedAdminIfNeeded();
     
     state.businesses.forEach(b => {
       // MIGRATION: Rename SoleProprietor to Enterprise
@@ -1380,8 +1458,8 @@
     saveState();
   }
 
-  function seedDemo(){
-    const u = uid('user'), b = uid('biz');
+  async function seedDemo(){
+    const u = 'admin', b = uid('biz');  // Use 'admin' as the user ID for seeded admin
     const sales = { id: uid('acct'), name: 'Sales', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
     const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
     const purchases = { id: uid('acct'), name: 'Purchases', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
@@ -1391,8 +1469,21 @@
     const chargeInc = { id: uid('acct'), name: 'Chargeable asset income', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
     const chargeCost = { id: uid('acct'), name: 'Chargeable asset cost', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
 
+    // Compute password hash for seeded admin
+    const adminPasswordHash = await sha256Hex(DEFAULT_ADMIN_PASSWORD);
+
     state = {
-      users: [{ id: u, username: 'admin', display:'Admin User', role:'Admin', isAdmin:true, permissions:{ view:true, edit:true, delete:true }, tourSeen: true }],
+      users: [{ 
+        id: u, 
+        username: DEFAULT_ADMIN_USERNAME, 
+        display:'Admin', 
+        role:'Admin', 
+        isAdmin:true, 
+        passwordHash: adminPasswordHash,
+        permissions:{ view:true, edit:true, delete:true }, 
+        createdAt: new Date().toISOString(),
+        tourSeen: true 
+      }],
       businesses: [{
         id: b,
         name: 'Demo Business',
@@ -1428,7 +1519,7 @@
       { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', whtApplied:false, paye:true, contact:'John Employee', receiptId:null },
       { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
     ];
-    addAudit('seed','system','',`Seeded demo data`);
+    addAudit('seed','system','',`Seeded demo data with admin account (prototype)`);
     saveState();
   }
 
@@ -1751,6 +1842,7 @@
         const name = authSignupName ? authSignupName.value.trim() : '';
         const username = authSignupUsername ? authSignupUsername.value.trim() : '';
         const email = authSignupEmail ? authSignupEmail.value.trim().toLowerCase() : '';
+        const phone = authSignupPhone ? authSignupPhone.value.trim() : '';
         const pass = authSignupPassword ? authSignupPassword.value : '';
         const pass2 = authSignupPassword2 ? authSignupPassword2.value : '';
         
@@ -1793,6 +1885,7 @@
           username: username,
           display: name,
           email: email,
+          phone: phone,
           passwordHash: passwordHash,
           role: 'User',
           isAdmin: false,
@@ -1808,10 +1901,14 @@
         saveState();
         addAudit('user.signup', 'user', userId, 'User signed up via auth panel: ' + username);
         
+        // Store lead and notify sales (uses helper function)
+        storeSignupLeadAndNotify(name, email, phone);
+        
         // Clear form
         if (authSignupName) authSignupName.value = '';
         if (authSignupUsername) authSignupUsername.value = '';
         if (authSignupEmail) authSignupEmail.value = '';
+        if (authSignupPhone) authSignupPhone.value = '';
         if (authSignupPassword) authSignupPassword.value = '';
         if (authSignupPassword2) authSignupPassword2.value = '';
         
@@ -1966,6 +2063,27 @@
                 addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ', Email: ' + email + ')');
               } catch (auditErr) {
                 console.warn('addAudit() failed:', auditErr);
+              }
+            }
+
+            // Store lead and notify sales (uses helper function if available, fallback inline)
+            if (typeof storeSignupLeadAndNotify === 'function') {
+              storeSignupLeadAndNotify(name, email, phone);
+            } else {
+              // Fallback: inline implementation
+              try {
+                var leads = JSON.parse(localStorage.getItem('signupLeads') || '[]');
+                leads.push({ name: name, email: email, phone: phone, createdAt: Date.now() });
+                localStorage.setItem('signupLeads', JSON.stringify(leads));
+              } catch (leadErr) {
+                console.warn('Failed to store signup lead:', leadErr);
+              }
+              try {
+                var mailtoBody = 'Name: ' + encodeURIComponent(name) + '%0AEmail: ' + encodeURIComponent(email) + '%0APhone: ' + encodeURIComponent(phone);
+                var mailtoUrl = 'mailto:salesrepng@gmail.com?subject=New%20Signup&body=' + mailtoBody;
+                window.open(mailtoUrl, '_blank');
+              } catch (mailtoErr) {
+                console.warn('Failed to open mailto:', mailtoErr);
               }
             }
 
@@ -4240,4 +4358,4 @@
 })();
 </script>
 </body>
-        </html>
+            </html>
