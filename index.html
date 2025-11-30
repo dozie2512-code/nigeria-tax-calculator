@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1497,8 +1498,12 @@
   }
 
   // audit
-  function addAudit(type, entityType, entityId, details){
+  function addAudit(type, entityType, entityId, details, originalData){
     const entry = { id: uid('audit'), timestamp: new Date().toISOString(), userId: state.auth.currentUserId, type, entityType, entityId, details };
+    // Store original amounts/data if provided for audit trail
+    if(originalData) {
+      entry.originalData = originalData;
+    }
     state.audit = state.audit || [];
     state.audit.push(entry);
     saveState();
@@ -2857,6 +2862,10 @@
     if(!selectedBizId) return alert('Select business');
     const b = findBiz(selectedBizId);
     const selectedItemId = invItemSelect.value;
+    let inventoryItemId = null;
+    let prevState = null; // Store previous inventory state for undo/delete reversal
+    let isNewItem = false;
+    
     if(selectedItemId === '__new__'){
       const name = (invNewName.value || '').trim();
       if(!name) return alert('New item name required');
@@ -2867,10 +2876,17 @@
       }
       b.inventory = b.inventory || [];
       b.inventory.push(item);
-      addAudit('inv.add','inventory', item.id, `Added inventory ${item.name}`);
+      inventoryItemId = item.id;
+      isNewItem = true;
+      // For new items, store that this was a new item creation (no previous state)
+      prevState = { isNewItem: true, itemId: item.id };
+      addAudit('inv.add','inventory', item.id, `Added inventory ${item.name}`, { amount: item.qty * item.avgCost, qty: item.qty, avgCost: item.avgCost });
     } else {
       const item = (b.inventory||[]).find(x=>x.id===selectedItemId);
       if(!item) return alert('Item not found');
+      inventoryItemId = item.id;
+      // Store previous state before modification
+      prevState = { isNewItem: false, itemId: item.id, prevQty: item.qty || 0, prevAvgCost: item.avgCost || 0 };
       const qty = Number(invQty.value || 0);
       const unit = Number(invUnitPrice.value || 0);
       if(txnAction.value === 'InventoryPurchase'){
@@ -2883,9 +2899,27 @@
         item.qty = (item.qty || 0) - qty;
         if(item.qty < 0) item.qty = 0;
       }
-      addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`);
+      addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`, { amount: qty * unit, qty: qty, prevQty: prevState.prevQty, prevAvgCost: prevState.prevAvgCost });
     }
-    const t = { id: uid('txn'), date: today(), action: txnAction.value || 'InventoryPurchase', accountId: invAccountSelect.value, accountName: findAccount(b, invAccountSelect.value)?.name || '', accountCategory: findAccount(b, invAccountSelect.value)?.category || '', description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), qty: Number(invQty.value||0), unitPrice: Number(invUnitPrice.value||0), amount: Number((invQty.value||0)*(invUnitPrice.value||0)), vatType: invVatType.value || 'none', whtApplied:false, paye:false, contact: invContact.value || '', receiptId:null };
+    const t = { 
+      id: uid('txn'), 
+      date: today(), 
+      action: txnAction.value || 'InventoryPurchase', 
+      accountId: invAccountSelect.value, 
+      accountName: findAccount(b, invAccountSelect.value)?.name || '', 
+      accountCategory: findAccount(b, invAccountSelect.value)?.category || '', 
+      description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), 
+      qty: Number(invQty.value||0), 
+      unitPrice: Number(invUnitPrice.value||0), 
+      amount: Number((invQty.value||0)*(invUnitPrice.value||0)), 
+      vatType: invVatType.value || 'none', 
+      whtApplied: false, 
+      paye: false, 
+      contact: invContact.value || '', 
+      receiptId: null, 
+      inventoryItemId: inventoryItemId, 
+      inventoryPrevState: prevState 
+    };
     if(invReceipt.files && invReceipt.files[0]){
       const r = invReceipt.files[0];
       const reader = new FileReader();
@@ -2902,22 +2936,51 @@
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
-    addAudit('txn.inv','txn',t.id, `Inventory txn ${t.action} ${t.amount}`);
+    addAudit('txn.inv','txn',t.id, `Inventory txn ${t.action} ${t.amount}`, { amount: t.amount, qty: t.qty, unitPrice: t.unitPrice });
     saveState();
     txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
     renderAll();
     refreshAllReports(); // Refresh all reports when inventory changes
   }
+  
+  /**
+   * Reverts inventory state based on transaction data.
+   * @param {Object} tx - The transaction being undone/deleted
+   * @param {Object} b - The business object
+   */
+  function revertInventoryState(tx, b) {
+    if(!tx || !b) return;
+    const prevState = tx.inventoryPrevState;
+    if(!prevState) return; // No previous state stored, can't revert
+    
+    if(prevState.isNewItem) {
+      // This was a new item creation, remove the item from inventory
+      b.inventory = (b.inventory || []).filter(item => item.id !== prevState.itemId);
+    } else {
+      // This was an update to existing item, restore previous state
+      const item = (b.inventory || []).find(x => x.id === prevState.itemId);
+      if(item) {
+        item.qty = prevState.prevQty;
+        item.avgCost = prevState.prevAvgCost;
+      }
+    }
+  }
+  
   function handleUndoInventory(){
     const arr = state.transactions[selectedUserId][selectedBizId];
+    const b = findBiz(selectedBizId);
     for(let i=arr.length-1;i>=0;i--){
       if(arr[i].action && arr[i].action.startsWith('Inventory')){
+        const tx = arr[i];
+        // Revert inventory state before removing the transaction
+        revertInventoryState(tx, b);
         arr.splice(i,1);
-        addAudit('txn.undo','txn','','Undo inventory txn');
+        addAudit('txn.undo','txn',tx.id || '','Undo inventory txn - inventory state reverted', { amount: tx.amount, qty: tx.qty, action: tx.action });
         saveState();
         renderAll();
-        return alert('Undid last inventory transaction (ledger entry removed). Inventory quantities may require manual adjustment.');
+        refreshAllReports();
+        return alert('Undid last inventory transaction. Inventory state has been reverted.');
       }
     }
     alert('No inventory transaction found to undo');
@@ -2971,7 +3034,9 @@
       whtApplied:false, 
       paye:false, 
       contact: assetContact.value || '', 
-      receiptId:null 
+      receiptId:null,
+      assetId: item.id, // Store asset ID for undo/delete reversal
+      assetPrevState: { isNewAsset: true, assetId: item.id } // Store that this was a new asset creation
     };
     if(assetReceipt.files && assetReceipt.files[0]){
       const r = assetReceipt.files[0];
@@ -2989,7 +3054,7 @@
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
-    addAudit('asset.add','asset',t.id, `Added asset txn ${t.description}`);
+    addAudit('asset.add','asset',t.id, `Added asset txn ${t.description}`, { amount: t.amount, qty: t.qty, assetId: t.assetId });
     saveState();
     txnAction.value=''; assetPurchaseSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -3005,6 +3070,21 @@
     
     const qtyDisposed = Number(assetDisposalQty.value || 1);
     if(qtyDisposed > (asset.qty || 1)) return alert('Cannot dispose more than available quantity');
+    
+    // Store previous asset state for undo/delete reversal
+    // Use structuredClone if available, otherwise shallow copy the disposal object
+    const prevDisposal = asset.disposal 
+      ? (typeof structuredClone === 'function' 
+          ? structuredClone(asset.disposal) 
+          : Object.assign({}, asset.disposal))
+      : {};
+    const assetPrevState = {
+      isNewAsset: false,
+      assetId: asset.id,
+      prevQty: asset.qty || 1,
+      prevDisposed: asset.disposed,
+      prevDisposal: prevDisposal
+    };
     
     asset.disposed = qtyDisposed >= (asset.qty || 1); // Fully disposed if qty matches
     asset.disposal = { 
@@ -3032,8 +3112,8 @@
       asset.qty = (asset.qty || 1) - qtyDisposed;
     }
     
-    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} qty ${qtyDisposed} gain ${gain}`);
-    const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name} (qty: ${qtyDisposed})`, amount: asset.disposal.proceeds, gain: gain, qty: qtyDisposed, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id };
+    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} qty ${qtyDisposed} gain ${gain}`, { amount: asset.disposal.proceeds, qty: qtyDisposed, gain: gain });
+    const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name} (qty: ${qtyDisposed})`, amount: asset.disposal.proceeds, gain: gain, qty: qtyDisposed, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id, assetPrevState: assetPrevState };
     if(assetDisposalReceipt.files && assetDisposalReceipt.files[0]){
       const r = assetDisposalReceipt.files[0];
       const reader = new FileReader();
@@ -3050,27 +3130,75 @@
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
-    addAudit('txn.asset.dispose','txn',t.id, `Asset disposal txn ${t.amount}`);
+    addAudit('txn.asset.dispose','txn',t.id, `Asset disposal txn ${t.amount}`, { amount: t.amount, qty: t.qty, gain: t.gain, assetId: t.assetId });
     saveState();
     txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
     renderAll();
     refreshAllReports(); // Refresh all reports when asset is disposed
   }
+  
+  /**
+   * Reverts asset state based on transaction data.
+   * For transactions with assetPrevState, uses the stored state.
+   * For legacy transactions without assetPrevState, applies safe fallback behavior.
+   * @param {Object} tx - The transaction being undone/deleted
+   * @param {Object} b - The business object
+   */
+  function revertAssetState(tx, b) {
+    if(!tx || !b) return;
+    const prevState = tx.assetPrevState;
+    
+    // Handle transactions with stored previous state
+    if(prevState) {
+      if(prevState.isNewAsset) {
+        // This was a new asset creation, remove the asset
+        b.assets = (b.assets || []).filter(a => a.id !== prevState.assetId);
+      } else if(tx.action === 'AssetDisposal') {
+        // This was a disposal, restore previous state
+        const asset = (b.assets || []).find(a => a.id === tx.assetId);
+        if(asset) {
+          asset.qty = prevState.prevQty;
+          asset.disposed = prevState.prevDisposed;
+          asset.disposal = prevState.prevDisposal || {};
+        }
+      }
+      return;
+    }
+    
+    // Fallback for legacy transactions without assetPrevState
+    // For asset purchases/opening balances: remove the asset if it exists
+    if((tx.action === 'AssetPurchase' || tx.action === 'OpeningAssetBal') && tx.assetId) {
+      b.assets = (b.assets || []).filter(a => a.id !== tx.assetId);
+    } 
+    // For asset disposals: restore the asset to not disposed state
+    else if(tx.action === 'AssetDisposal' && tx.assetId) {
+      const asset = (b.assets || []).find(a => a.id === tx.assetId);
+      if(asset) {
+        // Restore quantity from transaction if available
+        if(tx.qty) {
+          asset.qty = (asset.qty || 0) + tx.qty;
+        }
+        asset.disposed = false;
+        asset.disposal = {};
+      }
+    }
+  }
+  
   function handleUndoAsset(){
     const arr = state.transactions[selectedUserId][selectedBizId] || [];
+    const b = findBiz(selectedBizId);
     for(let i=arr.length-1;i>=0;i--){
-      if(arr[i].action && (arr[i].action === 'AssetPurchase' || arr[i].action === 'AssetDisposal')){
-        const tx = arr.splice(i,1)[0];
-        if(tx.assetId){
-          const b = findBiz(selectedBizId);
-          const a = b.assets.find(x=>x.id===tx.assetId);
-          if(a) { a.disposed = false; a.disposal = {}; }
-        }
-        addAudit('txn.undo','txn','','Undo asset txn');
+      if(arr[i].action && (arr[i].action === 'AssetPurchase' || arr[i].action === 'AssetDisposal' || arr[i].action === 'OpeningAssetBal')){
+        const tx = arr[i];
+        // Revert asset state before removing the transaction
+        revertAssetState(tx, b);
+        arr.splice(i,1);
+        addAudit('txn.undo','txn',tx.id || '','Undo asset txn - asset state reverted', { amount: tx.amount, action: tx.action, assetId: tx.assetId });
         saveState();
         renderAll();
-        return alert('Undid last asset transaction (ledger entry removed). Asset state may require manual adjustment.');
+        refreshAllReports();
+        return alert('Undid last asset transaction. Asset state has been reverted.');
       }
     }
     alert('No asset transaction found to undo');
@@ -3254,7 +3382,26 @@
   function deleteTxn(id){
     const arr = state.transactions[selectedUserId][selectedBizId];
     const idx = arr.findIndex(x=>x.id===id);
-    if(idx>=0){ arr.splice(idx,1); saveState(); addAudit('txn.del','txn',id,'Deleted txn'); renderAll(); }
+    if(idx>=0){ 
+      const tx = arr[idx];
+      const b = findBiz(selectedBizId);
+      
+      // Revert inventory state if this was an inventory transaction
+      if(tx.action && tx.action.startsWith('Inventory')) {
+        revertInventoryState(tx, b);
+      }
+      
+      // Revert asset state if this was an asset transaction
+      if(tx.action && (tx.action === 'AssetPurchase' || tx.action === 'AssetDisposal' || tx.action === 'OpeningAssetBal')) {
+        revertAssetState(tx, b);
+      }
+      
+      arr.splice(idx,1); 
+      saveState(); 
+      addAudit('txn.del','txn',id,'Deleted txn - state reverted', { amount: tx.amount, action: tx.action, originalData: { qty: tx.qty, unitPrice: tx.unitPrice } }); 
+      renderAll(); 
+      refreshAllReports();
+    }
   }
 
   // Render overall UI
@@ -4680,11 +4827,34 @@
       // Audit Trail report
       let html = `<h3>Audit Trail</h3>`;
       if(state.audit && state.audit.length > 0){
-        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Timestamp</th><th>Action</th><th>Entity Type</th><th>Entity ID</th><th>Details</th></tr></thead><tbody>`;
+        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Timestamp</th><th>Action</th><th>Entity Type</th><th>Entity ID</th><th>Details</th><th>Original Data</th></tr></thead><tbody>`;
         // Show most recent first
         const sortedAudit = [...state.audit].reverse().slice(0, 100);
         for(const entry of sortedAudit){
-          html += `<tr><td>${entry.timestamp || ''}</td><td>${entry.action || ''}</td><td>${entry.entityType || ''}</td><td>${entry.entityId || ''}</td><td>${entry.details || ''}</td></tr>`;
+          // Format original data if present
+          let originalDataStr = '';
+          if(entry.originalData) {
+            const od = entry.originalData;
+            const parts = [];
+            if(od.amount !== undefined) parts.push(`Amount: ${fmt(od.amount)}`);
+            if(od.qty !== undefined) parts.push(`Qty: ${od.qty}`);
+            if(od.prevQty !== undefined) parts.push(`Prev Qty: ${od.prevQty}`);
+            if(od.avgCost !== undefined) parts.push(`Avg Cost: ${fmt(od.avgCost)}`);
+            if(od.prevAvgCost !== undefined) parts.push(`Prev Avg Cost: ${fmt(od.prevAvgCost)}`);
+            if(od.unitPrice !== undefined) parts.push(`Unit Price: ${fmt(od.unitPrice)}`);
+            if(od.gain !== undefined) parts.push(`Gain: ${fmt(od.gain)}`);
+            if(od.action !== undefined) parts.push(`Action: ${od.action}`);
+            if(od.assetId !== undefined) parts.push(`Asset ID: ${od.assetId}`);
+            originalDataStr = parts.join(', ');
+          }
+          html += '<tr>';
+          html += '<td>' + (entry.timestamp || '') + '</td>';
+          html += '<td>' + (entry.action || entry.type || '') + '</td>';
+          html += '<td>' + (entry.entityType || '') + '</td>';
+          html += '<td>' + (entry.entityId || '') + '</td>';
+          html += '<td>' + (entry.details || '') + '</td>';
+          html += '<td class="small-muted">' + originalDataStr + '</td>';
+          html += '</tr>';
         }
         html += `</tbody></table>`;
         if(state.audit.length > 100) {
