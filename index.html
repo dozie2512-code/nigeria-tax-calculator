@@ -2900,7 +2900,25 @@
       }
       addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`, { amount: qty * unit, qty: qty, prevQty: prevState.prevQty, prevAvgCost: prevState.prevAvgCost });
     }
-    const t = { id: uid('txn'), date: today(), action: txnAction.value || 'InventoryPurchase', accountId: invAccountSelect.value, accountName: findAccount(b, invAccountSelect.value)?.name || '', accountCategory: findAccount(b, invAccountSelect.value)?.category || '', description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), qty: Number(invQty.value||0), unitPrice: Number(invUnitPrice.value||0), amount: Number((invQty.value||0)*(invUnitPrice.value||0)), vatType: invVatType.value || 'none', whtApplied:false, paye:false, contact: invContact.value || '', receiptId:null, inventoryItemId: inventoryItemId, inventoryPrevState: prevState };
+    const t = { 
+      id: uid('txn'), 
+      date: today(), 
+      action: txnAction.value || 'InventoryPurchase', 
+      accountId: invAccountSelect.value, 
+      accountName: findAccount(b, invAccountSelect.value)?.name || '', 
+      accountCategory: findAccount(b, invAccountSelect.value)?.category || '', 
+      description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), 
+      qty: Number(invQty.value||0), 
+      unitPrice: Number(invUnitPrice.value||0), 
+      amount: Number((invQty.value||0)*(invUnitPrice.value||0)), 
+      vatType: invVatType.value || 'none', 
+      whtApplied: false, 
+      paye: false, 
+      contact: invContact.value || '', 
+      receiptId: null, 
+      inventoryItemId: inventoryItemId, 
+      inventoryPrevState: prevState 
+    };
     if(invReceipt.files && invReceipt.files[0]){
       const r = invReceipt.files[0];
       const reader = new FileReader();
@@ -3053,12 +3071,18 @@
     if(qtyDisposed > (asset.qty || 1)) return alert('Cannot dispose more than available quantity');
     
     // Store previous asset state for undo/delete reversal
+    // Use structuredClone if available, otherwise shallow copy the disposal object
+    const prevDisposal = asset.disposal 
+      ? (typeof structuredClone === 'function' 
+          ? structuredClone(asset.disposal) 
+          : Object.assign({}, asset.disposal))
+      : {};
     const assetPrevState = {
       isNewAsset: false,
       assetId: asset.id,
       prevQty: asset.qty || 1,
       prevDisposed: asset.disposed,
-      prevDisposal: asset.disposal ? JSON.parse(JSON.stringify(asset.disposal)) : {}
+      prevDisposal: prevDisposal
     };
     
     asset.disposed = qtyDisposed >= (asset.qty || 1); // Fully disposed if qty matches
@@ -3115,6 +3139,8 @@
   
   /**
    * Reverts asset state based on transaction data.
+   * For transactions with assetPrevState, uses the stored state.
+   * For legacy transactions without assetPrevState, applies safe fallback behavior.
    * @param {Object} tx - The transaction being undone/deleted
    * @param {Object} b - The business object
    */
@@ -3122,26 +3148,36 @@
     if(!tx || !b) return;
     const prevState = tx.assetPrevState;
     
-    if(prevState && prevState.isNewAsset) {
-      // This was a new asset creation, remove the asset
-      b.assets = (b.assets || []).filter(a => a.id !== prevState.assetId);
-    } else if(prevState && tx.action === 'AssetDisposal') {
-      // This was a disposal, restore previous state
+    // Handle transactions with stored previous state
+    if(prevState) {
+      if(prevState.isNewAsset) {
+        // This was a new asset creation, remove the asset
+        b.assets = (b.assets || []).filter(a => a.id !== prevState.assetId);
+      } else if(tx.action === 'AssetDisposal') {
+        // This was a disposal, restore previous state
+        const asset = (b.assets || []).find(a => a.id === tx.assetId);
+        if(asset) {
+          asset.qty = prevState.prevQty;
+          asset.disposed = prevState.prevDisposed;
+          asset.disposal = prevState.prevDisposal || {};
+        }
+      }
+      return;
+    }
+    
+    // Fallback for legacy transactions without assetPrevState
+    // For asset purchases/opening balances: remove the asset if it exists
+    if((tx.action === 'AssetPurchase' || tx.action === 'OpeningAssetBal') && tx.assetId) {
+      b.assets = (b.assets || []).filter(a => a.id !== tx.assetId);
+    } 
+    // For asset disposals: restore the asset to not disposed state
+    else if(tx.action === 'AssetDisposal' && tx.assetId) {
       const asset = (b.assets || []).find(a => a.id === tx.assetId);
       if(asset) {
-        asset.qty = prevState.prevQty;
-        asset.disposed = prevState.prevDisposed;
-        asset.disposal = prevState.prevDisposal;
-      }
-    } else if(tx.action === 'AssetPurchase' || tx.action === 'OpeningAssetBal') {
-      // Fallback for old transactions without assetPrevState - remove the asset
-      if(tx.assetId) {
-        b.assets = (b.assets || []).filter(a => a.id !== tx.assetId);
-      }
-    } else if(tx.action === 'AssetDisposal' && tx.assetId) {
-      // Fallback for old disposal transactions - just mark as not disposed
-      const asset = (b.assets || []).find(a => a.id === tx.assetId);
-      if(asset) {
+        // Restore quantity from transaction if available
+        if(tx.qty) {
+          asset.qty = (asset.qty || 0) + tx.qty;
+        }
         asset.disposed = false;
         asset.disposal = {};
       }
@@ -4810,7 +4846,14 @@
             if(od.assetId !== undefined) parts.push(`Asset ID: ${od.assetId}`);
             originalDataStr = parts.join(', ');
           }
-          html += `<tr><td>${entry.timestamp || ''}</td><td>${entry.action || entry.type || ''}</td><td>${entry.entityType || ''}</td><td>${entry.entityId || ''}</td><td>${entry.details || ''}</td><td class="small-muted">${originalDataStr}</td></tr>`;
+          html += '<tr>';
+          html += '<td>' + (entry.timestamp || '') + '</td>';
+          html += '<td>' + (entry.action || entry.type || '') + '</td>';
+          html += '<td>' + (entry.entityType || '') + '</td>';
+          html += '<td>' + (entry.entityId || '') + '</td>';
+          html += '<td>' + (entry.details || '') + '</td>';
+          html += '<td class="small-muted">' + originalDataStr + '</td>';
+          html += '</tr>';
         }
         html += `</tbody></table>`;
         if(state.audit.length > 100) {
