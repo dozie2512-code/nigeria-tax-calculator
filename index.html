@@ -469,6 +469,7 @@
               <option value="Furniture & Fittings">Furniture & Fittings</option>
               <option value="Motor Vehicles">Motor Vehicles</option>
               <option value="Land & Building">Land & Building</option>
+              <option value="Shares">Shares</option>
               <option value="Other Asset">Other Asset</option>
             </select>
           </label>
@@ -978,7 +979,9 @@
       statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
       lossBroughtForward: 0, caCarryForward: 0,
       defaultExpenseDisallowable: false, defaultRevenueNonTax: false,
-      userIds: [userId] // Track users associated with this business
+      userIds: [userId], // Track users associated with this business
+      chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
+      shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
     };
     
     state.businesses.push(newBusiness);
@@ -1469,14 +1472,16 @@
         accounts: [cogs, purchases, salaries, rent, bank, chargeInc, chargeCost], // Removed sales
         inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
         assets: [
-          { id: uid('asset'), name: 'Office PC', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, disposed:false, disposal:{}, openingAccDep:0 },
-          { id: uid('asset'), name: 'Land Plot', qty:1, unitPrice:2000000, cost: 2000000, purchaseDate: '2020-01-01', lifeYears: 20, caPercent: 5, depRate: 0, classification: 'Chargeable', accumulatedDep:0, disposed:false, disposal:{}, openingAccDep:0 }
+          { id: uid('asset'), name: 'Office PC', category: 'Furniture & Fittings', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, accumulatedDepreciation:0, capitalAllowances: [], disposed:false, disposal:{}, openingAccDep:0 },
+          { id: uid('asset'), name: 'Land Plot', category: 'Property Plant and Equipment', qty:1, unitPrice:2000000, cost: 2000000, purchaseDate: '2020-01-01', lifeYears: 20, caPercent: 5, depRate: 0, classification: 'Chargeable', accumulatedDep:0, accumulatedDepreciation:0, capitalAllowances: [], disposed:false, disposal:{}, openingAccDep:0 }
         ],
         contacts: [{ id: uid('c'), name:'John Employee', type:'Employee', statutory:{ pension: 20000, rent: 120000, life: 5000, mortgage: 100000, nhf: 5000 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } }],
         statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
         lossBroughtForward: 150000, caCarryForward: 50000,
         defaultExpenseDisallowable:false, defaultRevenueNonTax:false,
-        userIds: [u] // Track users associated with this business
+        userIds: [u], // Track users associated with this business
+        chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
+        shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       }],
       transactions: {},
       attachments: {},
@@ -2456,7 +2461,9 @@
         turnoverThreshold: turnoverThresholdValue,
         vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
         accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-        lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault
+        lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault,
+        chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
+        shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       };
       // Removed Sales account as per requirements
       newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
@@ -3009,7 +3016,9 @@
       caPercent: Number(assetCA.value || findBiz(selectedBizId)?.caRateDefault || DEFAULTS.caRateDefault),
       depRate: Number(assetDepRate.value || findBiz(selectedBizId)?.depRateDefault || DEFAULTS.depRateDefault),
       classification: assetClassification.value || 'Fixed',
-      accumulatedDep: Number(assetOpeningAccDep.value || 0),
+      accumulatedDep: Number(assetOpeningAccDep.value || 0), // Deprecated: use accumulatedDepreciation
+      accumulatedDepreciation: Number(assetOpeningAccDep.value || 0), // CGT: accumulated depreciation for TWDV calculation
+      capitalAllowances: [], // CGT: array of {date: 'YYYY-MM-DD', amount: number}
       disposed: false,
       disposal: {}
     };
@@ -3085,34 +3094,159 @@
       prevDisposal: prevDisposal
     };
     
+    const disposalDate = assetDisposalDate.value || today();
+    const disposalProceeds = Number(assetDisposalProceeds.value || 0);
+    const disposalYear = new Date(disposalDate).getFullYear();
+    
     asset.disposed = qtyDisposed >= (asset.qty || 1); // Fully disposed if qty matches
     asset.disposal = { 
-      date: assetDisposalDate.value || today(), 
-      proceeds: Number(assetDisposalProceeds.value || 0), 
+      date: disposalDate, 
+      proceeds: disposalProceeds, 
       qty: qtyDisposed,
       accountId: assetDisposalAccount.value || '', 
       accountName: findAccount(b, assetDisposalAccount.value)?.name || '' 
     };
     
-    // Compute Tax Written Down Value (TWDV)
-    // TWDV = cost - accumulated depreciation - capital allowances claimed
-    // Use residual value of ₦10 at end of useful life
-    const totalCost = (asset.cost || 0) + (asset.openingCost || 0);
-    const totalAccDep = (asset.accumulatedDep || 0) + (asset.openingAccDep || 0);
-    let twdv = Math.max(totalCost - totalAccDep, ASSET_RESIDUAL_VALUE);
+    // CGT: Compute Tax Written Down Value (TWDV) using new helper
+    // If no CA claimed, TWDV = cost; otherwise TWDV = cost - CA claimed
+    const twdv = computeTaxWrittenDownValue(asset, disposalDate);
     
-    // Chargeable gain/loss = proceeds - TWDV
-    const gain = (asset.disposal.proceeds || 0) - twdv;
-    asset.disposal.gain = gain;
+    // CGT: Compute chargeable gain/loss using new helper
+    const chargeableGain = computeChargeableGain(asset, disposalProceeds, disposalDate);
+    
+    asset.disposal.gain = chargeableGain;
     asset.disposal.twdv = twdv;
+    
+    // Initialize CGT tracking variables
+    let cgtCharge = 0;
+    let netGainAfterOffset = chargeableGain;
+    let lossCarriedForward = 0;
+    let offsetUsed = 0;
+    let isShareExempt = false;
+    let includedInTaxableProfit = false;
+    
+    // CGT: Apply disposal rules only for Chargeable classification and property assets
+    if(asset.classification === 'Chargeable' && isPropertyAsset(asset)) {
+      
+      if(chargeableGain < 0) {
+        // Loss: record carryforward loss under business.chargeableLosses[disposalYear][asset.category]
+        // Do NOT apply the loss to current-year gains (only next accounting periods)
+        lossCarriedForward = Math.abs(chargeableGain);
+        recordCarryforwardLoss(b, disposalYear, asset.category, lossCarriedForward);
+        addAudit('cgt.carryforward_loss', 'asset', asset.id, 
+          `Carryforward loss recorded: ${fmt(lossCarriedForward)} for ${asset.category} in year ${disposalYear}`, 
+          { lossAmount: lossCarriedForward, year: disposalYear, assetClass: asset.category });
+        netGainAfterOffset = 0;
+        
+      } else if(chargeableGain > 0) {
+        // Gain: first offset with prior-year carryforwards for same asset class
+        const offsetResult = offsetWithCarryforward(b, asset.category, chargeableGain, disposalYear);
+        netGainAfterOffset = offsetResult.remainingGain;
+        offsetUsed = offsetResult.used;
+        
+        if(offsetUsed > 0) {
+          addAudit('cgt.offset_applied', 'asset', asset.id, 
+            `Carryforward loss offset applied: ${fmt(offsetUsed)} reducing gain from ${fmt(chargeableGain)} to ${fmt(netGainAfterOffset)}`, 
+            { originalGain: chargeableGain, offsetUsed: offsetUsed, remainingGain: netGainAfterOffset });
+        }
+        
+        // CGT: Evaluate share-exemption
+        if(isShareAsset(asset)) {
+          // Update share disposals aggregation FIRST
+          updateShareDisposals(b, disposalYear, disposalProceeds, netGainAfterOffset);
+          
+          // Check if year's share disposals qualify for exemption
+          isShareExempt = isShareDisposalExempt(b, disposalYear);
+          
+          if(isShareExempt) {
+            addAudit('cgt.share_exempt', 'asset', asset.id, 
+              `Share disposal exempt - Year ${disposalYear} aggregates: proceeds ${fmt(b.shareDisposalsByYear[disposalYear]?.proceedsSum || 0)}, gain ${fmt(b.shareDisposalsByYear[disposalYear]?.gainSum || 0)}`,
+              { disposalYear: disposalYear, isExempt: true });
+          }
+        }
+        
+        // CGT: Apply entity-specific rules for net (post-offset) gain
+        if(netGainAfterOffset > 0 && !isShareExempt) {
+          if(b.entity === 'Individual' || b.entity === 'Enterprise') {
+            // Individual or Enterprise: include netGain in taxable profit
+            includedInTaxableProfit = true;
+            addAudit('cgt.taxable_profit', 'asset', asset.id, 
+              `Chargeable gain ${fmt(netGainAfterOffset)} included in taxable profit for ${b.entity}`,
+              { entityType: b.entity, netGain: netGainAfterOffset, includedInTaxableProfit: true });
+            
+          } else if(b.entity === 'Company') {
+            // Company: check turnover threshold
+            const turnoverThreshold = Number(b.turnoverThreshold || 0);
+            
+            if(turnoverThreshold <= 100000000) {
+              // Turnover threshold <= ₦100,000,000: do NOT include in taxable profit and do NOT charge CGT
+              includedInTaxableProfit = false;
+              cgtCharge = 0;
+              addAudit('cgt.company_exempt', 'asset', asset.id, 
+                `Company with turnover threshold ${fmt(turnoverThreshold)} <= ₦100,000,000: No CGT charged, gain not included in taxable profit`,
+                { turnoverThreshold: turnoverThreshold, netGain: netGainAfterOffset, cgtCharge: 0 });
+                
+            } else {
+              // Turnover threshold > ₦100,000,000: do NOT include in taxable profit but charge CGT at 30%
+              includedInTaxableProfit = false;
+              cgtCharge = Math.round(netGainAfterOffset * CGT_COMPANY_RATE * 100) / 100;
+              addAudit('cgt.charge', 'asset', asset.id, 
+                `CGT Charge: ${fmt(cgtCharge)} (30% of ${fmt(netGainAfterOffset)}) for Company with turnover threshold ${fmt(turnoverThreshold)}`,
+                { turnoverThreshold: turnoverThreshold, netGain: netGainAfterOffset, cgtRate: CGT_COMPANY_RATE, cgtCharge: cgtCharge });
+            }
+          }
+        }
+      }
+    }
+    
+    // Store CGT computation results on the disposal object
+    asset.disposal.chargeableGain = chargeableGain;
+    asset.disposal.netGainAfterOffset = netGainAfterOffset;
+    asset.disposal.offsetUsed = offsetUsed;
+    asset.disposal.lossCarriedForward = lossCarriedForward;
+    asset.disposal.cgtCharge = cgtCharge;
+    asset.disposal.includedInTaxableProfit = includedInTaxableProfit;
+    asset.disposal.isShareExempt = isShareExempt;
+    asset.disposal.disposalYear = disposalYear;
     
     // Update asset qty if partial disposal
     if(!asset.disposed) {
       asset.qty = (asset.qty || 1) - qtyDisposed;
     }
     
-    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} qty ${qtyDisposed} gain ${gain}`, { amount: asset.disposal.proceeds, qty: qtyDisposed, gain: gain });
-    const t = { id: uid('txn'), date: asset.disposal.date, action: 'AssetDisposal', accountId: assetDisposalAccount.value, accountName: findAccount(b, assetDisposalAccount.value)?.name || '', accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', description: `Asset disposal ${asset.name} (qty: ${qtyDisposed})`, amount: asset.disposal.proceeds, gain: gain, qty: qtyDisposed, vatType:'none', whtApplied:false, paye:false, contact: assetDisposalContact.value || '', receiptId:null, assetId: asset.id, assetPrevState: assetPrevState };
+    // Build transaction description with CGT details
+    let txnDesc = `Asset disposal ${asset.name} (qty: ${qtyDisposed})`;
+    if(cgtCharge > 0) {
+      txnDesc += ` | CGT Charge: ${fmt(cgtCharge)}`;
+    }
+    if(lossCarriedForward > 0) {
+      txnDesc += ` | Loss c/f: ${fmt(lossCarriedForward)}`;
+    }
+    
+    addAudit('asset.dispose','asset',asset.id, `Disposed asset ${asset.name} qty ${qtyDisposed} gain ${chargeableGain} netGain ${netGainAfterOffset}`, { amount: asset.disposal.proceeds, qty: qtyDisposed, gain: chargeableGain, netGain: netGainAfterOffset, cgtCharge: cgtCharge });
+    
+    const t = { 
+      id: uid('txn'), 
+      date: asset.disposal.date, 
+      action: 'AssetDisposal', 
+      accountId: assetDisposalAccount.value, 
+      accountName: findAccount(b, assetDisposalAccount.value)?.name || '', 
+      accountCategory: findAccount(b, assetDisposalAccount.value)?.category || '', 
+      description: txnDesc, 
+      amount: asset.disposal.proceeds, 
+      gain: chargeableGain, 
+      netGain: netGainAfterOffset,
+      cgtCharge: cgtCharge,
+      qty: qtyDisposed, 
+      vatType:'none', 
+      whtApplied:false, 
+      paye:false, 
+      contact: assetDisposalContact.value || '', 
+      receiptId:null, 
+      assetId: asset.id, 
+      assetPrevState: assetPrevState 
+    };
+    
     if(assetDisposalReceipt.files && assetDisposalReceipt.files[0]){
       const r = assetDisposalReceipt.files[0];
       const reader = new FileReader();
@@ -3129,7 +3263,7 @@
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
-    addAudit('txn.asset.dispose','txn',t.id, `Asset disposal txn ${t.amount}`, { amount: t.amount, qty: t.qty, gain: t.gain, assetId: t.assetId });
+    addAudit('txn.asset.dispose','txn',t.id, `Asset disposal txn ${t.amount} | CGT: ${fmt(t.cgtCharge || 0)}`, { amount: t.amount, qty: t.qty, gain: t.gain, netGain: t.netGain, cgtCharge: t.cgtCharge, assetId: t.assetId });
     saveState();
     txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -3549,14 +3683,25 @@
       if(!a.purchaseDate) continue;
       const days = Math.max(0, daysBetween(a.purchaseDate, asOf));
       const dinYear = daysInYear(a.purchaseDate);
+      let assetDep = 0;
       if(a.lifeYears && a.lifeYears>0){
         const annualDep = (a.cost || 0) / a.lifeYears;
         const daily = annualDep / dinYear;
-        totalDep += daily * days;
+        assetDep = daily * days;
       } else {
         const annual = ((a.depRate || 0)/100) * (a.cost || 0);
         const daily = annual / dinYear;
-        totalDep += daily * days;
+        assetDep = daily * days;
+      }
+      totalDep += assetDep;
+      
+      // CGT: Update asset.accumulatedDepreciation when depreciation is computed
+      // This ensures the depreciation to date is stored on the asset
+      const computedAccDep = Math.round(assetDep * 100) / 100;
+      if(a.accumulatedDepreciation !== computedAccDep) {
+        a.accumulatedDepreciation = computedAccDep;
+        // Also keep accumulatedDep in sync for backward compatibility
+        a.accumulatedDep = (a.openingAccDep || 0) + computedAccDep;
       }
     }
     return totalDep;
@@ -3579,6 +3724,202 @@
       totalCA += daily * days;
     }
     return totalCA;
+  }
+
+  // CGT Rate constant for Companies (30%)
+  const CGT_COMPANY_RATE = 0.30;
+  
+  /**
+   * Computes sum of capital allowances claimed for an asset up to a given date.
+   * @param {object} asset - The asset object
+   * @param {string} uptoDate - Date string 'YYYY-MM-DD' to sum allowances up to
+   * @returns {number} Sum of capital allowances
+   */
+  function computeCapitalAllowanceToDate(asset, uptoDate) {
+    if (!asset || !asset.capitalAllowances || !Array.isArray(asset.capitalAllowances)) {
+      return 0;
+    }
+    let sum = 0;
+    const uptoTime = new Date(uptoDate).getTime();
+    for (const ca of asset.capitalAllowances) {
+      if (ca.date && ca.amount) {
+        const caTime = new Date(ca.date).getTime();
+        if (caTime <= uptoTime) {
+          sum += Number(ca.amount || 0);
+        }
+      }
+    }
+    return Math.round(sum * 100) / 100;
+  }
+
+  /**
+   * Gets the cost of an asset (cost + openingCost).
+   * @param {object} asset - The asset object
+   * @returns {number} Asset cost
+   */
+  function getAssetCost(asset) {
+    if (!asset) return 0;
+    return Number(asset.cost || 0) + Number(asset.openingCost || 0);
+  }
+
+  /**
+   * Computes Tax Written Down Value (TWDV) for an asset.
+   * TWDV = Cost - Capital Allowances claimed up to the date.
+   * If no capital allowances have been claimed, TWDV = Cost.
+   * @param {object} asset - The asset object
+   * @param {string} uptoDate - Date string 'YYYY-MM-DD'
+   * @returns {number} TWDV
+   */
+  function computeTaxWrittenDownValue(asset, uptoDate) {
+    if (!asset) return 0;
+    const cost = getAssetCost(asset);
+    const caToDate = computeCapitalAllowanceToDate(asset, uptoDate);
+    // If no CA claimed, TWDV = cost per user rule
+    if (caToDate === 0) {
+      return Math.round(cost * 100) / 100;
+    }
+    return Math.round(Math.max(0, cost - caToDate) * 100) / 100;
+  }
+
+  /**
+   * Computes chargeable gain for an asset disposal.
+   * Chargeable Gain = Proceeds - TWDV
+   * @param {object} asset - The asset object
+   * @param {number} proceeds - Disposal proceeds
+   * @param {string} uptoDate - Date of disposal 'YYYY-MM-DD'
+   * @returns {number} Chargeable gain (negative = loss)
+   */
+  function computeChargeableGain(asset, proceeds, uptoDate) {
+    const twdv = computeTaxWrittenDownValue(asset, uptoDate);
+    return Math.round((Number(proceeds || 0) - twdv) * 100) / 100;
+  }
+
+  /**
+   * Offsets a chargeable gain with carryforward losses from prior years.
+   * Only losses from years < disposalYear apply.
+   * @param {object} biz - Business object
+   * @param {string} assetClass - Asset class/category
+   * @param {number} gain - Chargeable gain to offset
+   * @param {number|string} disposalYear - Year of disposal
+   * @returns {object} { remainingGain: number, used: number }
+   */
+  function offsetWithCarryforward(biz, assetClass, gain, disposalYear) {
+    if (!biz || !biz.chargeableLosses || gain <= 0) {
+      return { remainingGain: Math.max(0, gain), used: 0 };
+    }
+    
+    const dispYear = Number(disposalYear);
+    let remainingGain = gain;
+    let totalUsed = 0;
+    
+    // Sort years in ascending order to use oldest losses first
+    const years = Object.keys(biz.chargeableLosses).map(Number).sort((a, b) => a - b);
+    
+    for (const year of years) {
+      if (year >= dispYear) continue; // Only use losses from prior years
+      
+      const lossesForYear = biz.chargeableLosses[year];
+      if (!lossesForYear || !lossesForYear[assetClass]) continue;
+      
+      const availableLoss = Number(lossesForYear[assetClass] || 0);
+      if (availableLoss <= 0) continue;
+      
+      const toUse = Math.min(availableLoss, remainingGain);
+      remainingGain -= toUse;
+      totalUsed += toUse;
+      
+      // Reduce the recorded loss
+      biz.chargeableLosses[year][assetClass] -= toUse;
+      if (biz.chargeableLosses[year][assetClass] <= 0) {
+        delete biz.chargeableLosses[year][assetClass];
+      }
+      if (Object.keys(biz.chargeableLosses[year]).length === 0) {
+        delete biz.chargeableLosses[year];
+      }
+      
+      if (remainingGain <= 0) break;
+    }
+    
+    return {
+      remainingGain: Math.round(remainingGain * 100) / 100,
+      used: Math.round(totalUsed * 100) / 100
+    };
+  }
+
+  /**
+   * Checks if an asset is a property asset (eligible for chargeable disposal).
+   * Property assets: category is 'Property Plant and Equipment' (case-insensitive)
+   * or category contains 'land' or 'building' (case-insensitive).
+   * @param {object} asset - The asset object
+   * @returns {boolean}
+   */
+  function isPropertyAsset(asset) {
+    if (!asset || !asset.category) return false;
+    const cat = asset.category.toLowerCase();
+    return cat === 'property plant and equipment' ||
+           cat.includes('land') ||
+           cat.includes('building');
+  }
+
+  /**
+   * Checks if an asset is a share asset.
+   * Share assets: category === 'Shares' or type === 'Share' (case-insensitive).
+   * @param {object} asset - The asset object
+   * @returns {boolean}
+   */
+  function isShareAsset(asset) {
+    if (!asset) return false;
+    const cat = (asset.category || '').toLowerCase();
+    const type = (asset.type || '').toLowerCase();
+    return cat === 'shares' || type === 'share';
+  }
+
+  /**
+   * Records a carryforward loss for a business.
+   * @param {object} biz - Business object
+   * @param {number|string} year - Originating year
+   * @param {string} assetClass - Asset class/category
+   * @param {number} lossAmount - Loss amount (positive number)
+   */
+  function recordCarryforwardLoss(biz, year, assetClass, lossAmount) {
+    if (!biz || !year || !assetClass || lossAmount <= 0) return;
+    
+    biz.chargeableLosses = biz.chargeableLosses || {};
+    biz.chargeableLosses[year] = biz.chargeableLosses[year] || {};
+    biz.chargeableLosses[year][assetClass] = (biz.chargeableLosses[year][assetClass] || 0) + Math.round(lossAmount * 100) / 100;
+  }
+
+  /**
+   * Updates share disposals aggregation for share exemption checks.
+   * @param {object} biz - Business object
+   * @param {number|string} year - Disposal year
+   * @param {number} proceeds - Disposal proceeds
+   * @param {number} gain - Disposal gain
+   */
+  function updateShareDisposals(biz, year, proceeds, gain) {
+    if (!biz) return;
+    
+    biz.shareDisposalsByYear = biz.shareDisposalsByYear || {};
+    if (!biz.shareDisposalsByYear[year]) {
+      biz.shareDisposalsByYear[year] = { proceedsSum: 0, gainSum: 0 };
+    }
+    biz.shareDisposalsByYear[year].proceedsSum += Number(proceeds || 0);
+    biz.shareDisposalsByYear[year].gainSum += Number(gain || 0);
+  }
+
+  /**
+   * Checks if share disposals for a year qualify for exemption.
+   * Exempt if aggregated proceeds <= 150,000,000 OR aggregated gain <= 10,000,000.
+   * @param {object} biz - Business object
+   * @param {number|string} year - Disposal year
+   * @returns {boolean}
+   */
+  function isShareDisposalExempt(biz, year) {
+    if (!biz || !biz.shareDisposalsByYear || !biz.shareDisposalsByYear[year]) {
+      return true; // No disposals recorded, effectively exempt
+    }
+    const data = biz.shareDisposalsByYear[year];
+    return (data.proceedsSum <= CGT_EXEMPTION_PROCEEDS) || (data.gainSum <= CGT_EXEMPTION_GAIN);
   }
 
   // PAYE computation per contact using PAYE_BANDS
@@ -3694,40 +4035,39 @@
     let cgtCharge = 0;
     let cgtExcludedFromTaxable = 0;
     
-    // Chargeable gains treatment based on entity type and turnover threshold
-    if(b.entity === 'Company'){
-      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-      if(turnover > threshold && threshold > 0){
-        // Above threshold: charge CGT, exclude from CIT base
-        for(const g of chargeableGains){
-          if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
-            // Exempt
-            cgtExcludedFromTaxable += g.gain;
-          } else {
-            cgtCharge += g.gain * 0.30;
-            cgtExcludedFromTaxable += g.gain;
-          }
+    // CGT: Sum CGT charges from asset disposals and adjust taxable profit
+    for(const g of chargeableGains){
+      // Add CGT charge from the disposal (computed during disposal)
+      cgtCharge += g.cgtCharge || 0;
+      
+      // Adjust taxable profit based on entity and disposal settings
+      if(b.entity === 'Company'){
+        // For Company: gains are excluded from taxable profit (CGT charged separately)
+        if(!g.isShareExempt && g.gain > 0) {
+          cgtExcludedFromTaxable += g.gain;
         }
-        taxableProfit -= cgtExcludedFromTaxable;
       } else {
-        // Below threshold: no CGT, exclude gains from profit
-        for(const g of chargeableGains){
-          if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
-            taxableProfit -= g.gain;
-          } else {
-            // No CGT below threshold, but still exclude
-            taxableProfit -= g.gain;
-          }
-        }
-      }
-    } else {
-      // Individual or Enterprise: include in taxable profit unless exempt
-      for(const g of chargeableGains){
-        if((g.proceeds <= CGT_EXEMPTION_PROCEEDS) || (g.gain <= CGT_EXEMPTION_GAIN)) {
-          // Exempt: exclude from taxable profit
+        // For Individual/Enterprise: gains included in taxable profit unless exempt
+        // The disposal already flagged includedInTaxableProfit
+        if(!g.includedInTaxableProfit && !g.isShareExempt && g.gain > 0) {
+          // If not included but should be exempt, exclude from profit
           taxableProfit -= g.gain;
-        } else {
-          // Not exempt: leave in taxable profit
+        }
+        // If includedInTaxableProfit is true, the gain is already in taxable profit via disposal
+      }
+    }
+    
+    // For Company, exclude chargeable gains from taxable profit (handled separately via CGT)
+    if(b.entity === 'Company'){
+      taxableProfit -= cgtExcludedFromTaxable;
+    }
+    
+    // Calculate total carryforward losses for display
+    let totalCarryforwardLosses = 0;
+    if(b.chargeableLosses) {
+      for(const year in b.chargeableLosses) {
+        for(const assetClass in b.chargeableLosses[year]) {
+          totalCarryforwardLosses += Number(b.chargeableLosses[year][assetClass] || 0);
         }
       }
     }
@@ -3830,11 +4170,17 @@
         if(whtCarryForward > 0) {
           html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
         }
-        html += `<div><strong>CGT Charge (30% where applicable):</strong> ${fmt(cgtCharge)}</div>`;
+        html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
         html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
+        if(totalCarryforwardLosses > 0) {
+          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
+        }
       } else {
         html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+        if(totalCarryforwardLosses > 0) {
+          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
+        }
       }
     }
     
@@ -3855,7 +4201,18 @@
     for(const a of b.assets || []){
       if(a.disposed && a.disposal){
         if(a.classification === 'Chargeable'){
-          gains.push({ assetId: a.id, name: a.name, proceeds: Number(a.disposal.proceeds || 0), gain: Number(a.disposal.gain || 0) });
+          gains.push({ 
+            assetId: a.id, 
+            name: a.name, 
+            proceeds: Number(a.disposal.proceeds || 0), 
+            gain: Number(a.disposal.gain || 0),
+            netGain: Number(a.disposal.netGainAfterOffset || a.disposal.gain || 0),
+            cgtCharge: Number(a.disposal.cgtCharge || 0),
+            offsetUsed: Number(a.disposal.offsetUsed || 0),
+            lossCarriedForward: Number(a.disposal.lossCarriedForward || 0),
+            includedInTaxableProfit: a.disposal.includedInTaxableProfit || false,
+            isShareExempt: a.disposal.isShareExempt || false
+          });
         }
       }
     }
@@ -4353,6 +4710,7 @@
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
     
     html += `</tbody></table>`;
+    const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
     html += `<p class="small-note" style="margin-top:12px;">Turnover threshold: ${fmt(threshold)} | CIT Rate: ${(citRate * 100).toFixed(0)}%</p>`;
     
     return html;
@@ -4371,75 +4729,135 @@
     const disposals = [];
     let totalGains = 0;
     let totalLosses = 0;
-    let exemptGains = 0;
-    let taxableGains = 0;
+    let totalCarryforwardLosses = 0;
+    let totalOffsetUsed = 0;
+    let totalCgtCharge = 0;
     
     for(const a of b.assets || []){
       if(a.disposed && a.disposal){
         if(a.classification === 'Chargeable'){
           const proceeds = Number(a.disposal.proceeds || 0);
           const gain = Number(a.disposal.gain || 0);
-          const cost = Number(a.cost || 0);
-          const accDep = Number(a.accumulatedDep || 0);
-          const twdv = Math.max(ASSET_RESIDUAL_VALUE, cost - accDep);
+          const netGain = Number(a.disposal.netGainAfterOffset || gain);
+          const cost = getAssetCost(a);
+          const twdv = Number(a.disposal.twdv || computeTaxWrittenDownValue(a, a.disposal.date || today()));
+          const cgtCharge = Number(a.disposal.cgtCharge || 0);
+          const offsetUsed = Number(a.disposal.offsetUsed || 0);
+          const lossCarriedForward = Number(a.disposal.lossCarriedForward || 0);
           
           disposals.push({
             name: a.name,
+            category: a.category,
             disposalDate: a.disposal.date || '',
+            disposalYear: a.disposal.disposalYear || new Date(a.disposal.date || today()).getFullYear(),
             cost: cost,
-            accDep: accDep,
             twdv: twdv,
             proceeds: proceeds,
-            gain: gain
+            gain: gain,
+            netGain: netGain,
+            offsetUsed: offsetUsed,
+            cgtCharge: cgtCharge,
+            lossCarriedForward: lossCarriedForward,
+            isShareExempt: a.disposal.isShareExempt || false,
+            includedInTaxableProfit: a.disposal.includedInTaxableProfit || false
           });
           
           if(gain > 0) {
             totalGains += gain;
-            // Check exemption thresholds
-            if(proceeds <= CGT_EXEMPTION_PROCEEDS || gain <= CGT_EXEMPTION_GAIN) {
-              exemptGains += gain;
-            } else {
-              taxableGains += gain;
-            }
           } else {
             totalLosses += Math.abs(gain);
           }
+          totalCarryforwardLosses += lossCarriedForward;
+          totalOffsetUsed += offsetUsed;
+          totalCgtCharge += cgtCharge;
         }
       }
     }
     
-    const cgtLiability = taxableGains * CGT_RATE;
+    // Calculate available carryforward losses
+    let availableCarryforwardLosses = 0;
+    if(b.chargeableLosses) {
+      for(const year in b.chargeableLosses) {
+        for(const assetClass in b.chargeableLosses[year]) {
+          availableCarryforwardLosses += Number(b.chargeableLosses[year][assetClass] || 0);
+        }
+      }
+    }
     
     let html = `<h3>Capital Gains Tax Report</h3>`;
     html += `<p><strong>Business Name:</strong> ${b.name}</p>`;
+    html += `<p><strong>Entity Type:</strong> ${b.entity}</p>`;
     html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
     
     if(disposals.length === 0) {
       html += `<div class="notice" style="margin-top:16px;">No chargeable asset disposals recorded.</div>`;
+      if(availableCarryforwardLosses > 0) {
+        html += `<div style="margin-top:8px;"><strong>Carryforward Losses Available:</strong> ${fmt(availableCarryforwardLosses)}</div>`;
+      }
       return html;
     }
     
     html += `<h4 style="margin-top:16px;">Disposal Schedule</h4>`;
-    html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Disposal Date</th><th>Cost</th><th>Acc. Dep</th><th>TWDV</th><th>Proceeds</th><th>Gain/(Loss)</th></tr></thead><tbody>`;
+    html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Category</th><th>Disposal Date</th><th>Cost</th><th>TWDV</th><th>Proceeds</th><th>Gain/(Loss)</th><th>Offset</th><th>Net Gain</th><th>CGT</th></tr></thead><tbody>`;
     
     for(const d of disposals){
       const gainClass = d.gain >= 0 ? '' : 'style="color:#b00;"';
-      html += `<tr><td>${d.name}</td><td>${d.disposalDate}</td><td>${fmt(d.cost)}</td><td>${fmt(d.accDep)}</td><td>${fmt(d.twdv)}</td><td>${fmt(d.proceeds)}</td><td ${gainClass}>${fmt(d.gain)}</td></tr>`;
+      let notes = [];
+      if(d.isShareExempt) notes.push('Share exempt');
+      if(d.includedInTaxableProfit) notes.push('In taxable profit');
+      if(d.lossCarriedForward > 0) notes.push(`Loss c/f: ${fmt(d.lossCarriedForward)}`);
+      const notesStr = notes.length > 0 ? `<div class="small-muted">${notes.join(', ')}</div>` : '';
+      
+      html += `<tr><td>${d.name}${notesStr}</td><td>${d.category || ''}</td><td>${d.disposalDate}</td><td>${fmt(d.cost)}</td><td>${fmt(d.twdv)}</td><td>${fmt(d.proceeds)}</td><td ${gainClass}>${fmt(d.gain)}</td><td>${fmt(d.offsetUsed)}</td><td>${fmt(d.netGain)}</td><td>${fmt(d.cgtCharge)}</td></tr>`;
     }
     
     html += `</tbody></table>`;
     
-    html += `<h4 style="margin-top:16px;">CGT Computation</h4>`;
+    html += `<h4 style="margin-top:16px;">CGT Summary</h4>`;
     html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     html += `<tr><td>Total Gains</td><td style="text-align:right;">${fmt(totalGains)}</td></tr>`;
-    html += `<tr><td>Total Losses</td><td style="text-align:right;">(${fmt(totalLosses)})</td></tr>`;
-    html += `<tr><td>Net Gains</td><td style="text-align:right;">${fmt(totalGains - totalLosses)}</td></tr>`;
-    html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Exemptions</strong></td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Exempt gains (proceeds ≤ ${fmt(CGT_EXEMPTION_PROCEEDS)} or gain ≤ ${fmt(CGT_EXEMPTION_GAIN)})</td><td style="text-align:right;">(${fmt(exemptGains)})</td></tr>`;
-    html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Gains</strong></td><td style="text-align:right;"><strong>${fmt(taxableGains)}</strong></td></tr>`;
-    html += `<tr><td>CGT @ ${(CGT_RATE * 100).toFixed(0)}%</td><td style="text-align:right;">${fmt(cgtLiability)}</td></tr>`;
-    html += `<tr style="background:#e6f3ff;"><td><strong>CGT Liability</strong></td><td style="text-align:right;"><strong>${fmt(cgtLiability)}</strong></td></tr>`;
+    html += `<tr><td>Total Losses (recorded as carryforward)</td><td style="text-align:right;">(${fmt(totalLosses)})</td></tr>`;
+    html += `<tr><td>Total Offset Used (from prior-year losses)</td><td style="text-align:right;">(${fmt(totalOffsetUsed)})</td></tr>`;
+    html += `<tr style="background:#f2f6fa;"><td><strong>Net Gains After Offset</strong></td><td style="text-align:right;"><strong>${fmt(Math.max(0, totalGains - totalOffsetUsed))}</strong></td></tr>`;
+    html += `<tr style="background:#e6f3ff;"><td><strong>Total CGT Charge</strong></td><td style="text-align:right;"><strong>${fmt(totalCgtCharge)}</strong></td></tr>`;
     html += `</tbody></table>`;
+    
+    // Carryforward losses section
+    html += `<h4 style="margin-top:16px;">Carryforward Losses</h4>`;
+    if(availableCarryforwardLosses > 0 || totalCarryforwardLosses > 0) {
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
+      html += `<tr><td>Losses Created This Period</td><td style="text-align:right;">${fmt(totalCarryforwardLosses)}</td></tr>`;
+      html += `<tr><td>Available Carryforward Losses (to offset future gains)</td><td style="text-align:right;">${fmt(availableCarryforwardLosses)}</td></tr>`;
+      html += `</tbody></table>`;
+      
+      // Show breakdown by year and asset class
+      if(b.chargeableLosses && Object.keys(b.chargeableLosses).length > 0) {
+        html += `<div class="small-muted" style="margin-top:8px;"><strong>Breakdown:</strong></div>`;
+        html += `<ul style="margin:4px 0;font-size:0.9rem;">`;
+        for(const year in b.chargeableLosses) {
+          for(const assetClass in b.chargeableLosses[year]) {
+            const amount = b.chargeableLosses[year][assetClass];
+            if(amount > 0) {
+              html += `<li>Year ${year} - ${assetClass}: ${fmt(amount)}</li>`;
+            }
+          }
+        }
+        html += `</ul>`;
+      }
+    } else {
+      html += `<div class="small-muted">No carryforward losses recorded.</div>`;
+    }
+    
+    // Entity-specific notes
+    html += `<h4 style="margin-top:16px;">Notes</h4>`;
+    if(b.entity === 'Company') {
+      const threshold = b.turnoverThreshold || 0;
+      html += `<div class="small-muted">For Companies with turnover threshold > ₦100,000,000: CGT is charged at 30% on net gains, not included in taxable profit.</div>`;
+      html += `<div class="small-muted">Current turnover threshold setting: ${fmt(threshold)}</div>`;
+    } else {
+      html += `<div class="small-muted">For Individual/Enterprise: Net gains are included in taxable profit and subject to PIT rates.</div>`;
+    }
+    html += `<div class="small-muted" style="margin-top:6px;">Carryforward losses can only offset gains in future accounting periods (years after the loss occurred).</div>`;
     
     return html;
   }
@@ -4842,8 +5260,16 @@
             if(od.prevAvgCost !== undefined) parts.push(`Prev Avg Cost: ${fmt(od.prevAvgCost)}`);
             if(od.unitPrice !== undefined) parts.push(`Unit Price: ${fmt(od.unitPrice)}`);
             if(od.gain !== undefined) parts.push(`Gain: ${fmt(od.gain)}`);
+            if(od.netGain !== undefined) parts.push(`Net Gain: ${fmt(od.netGain)}`);
+            if(od.cgtCharge !== undefined) parts.push(`CGT: ${fmt(od.cgtCharge)}`);
+            if(od.lossAmount !== undefined) parts.push(`Loss: ${fmt(od.lossAmount)}`);
+            if(od.offsetUsed !== undefined) parts.push(`Offset: ${fmt(od.offsetUsed)}`);
+            if(od.year !== undefined) parts.push(`Year: ${od.year}`);
+            if(od.assetClass !== undefined) parts.push(`Asset Class: ${od.assetClass}`);
             if(od.action !== undefined) parts.push(`Action: ${od.action}`);
             if(od.assetId !== undefined) parts.push(`Asset ID: ${od.assetId}`);
+            if(od.entityType !== undefined) parts.push(`Entity: ${od.entityType}`);
+            if(od.turnoverThreshold !== undefined) parts.push(`Threshold: ${fmt(od.turnoverThreshold)}`);
             originalDataStr = parts.join(', ');
           }
           html += '<tr>';
