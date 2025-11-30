@@ -3125,8 +3125,9 @@
     let isShareExempt = false;
     let includedInTaxableProfit = false;
     
-    // CGT: Apply disposal rules only for Chargeable classification and property assets
-    if(asset.classification === 'Chargeable' && isPropertyAsset(asset)) {
+    // CGT: Apply disposal rules for Chargeable classification
+    // Applies to property assets (PPE, land, building) and share assets
+    if(asset.classification === 'Chargeable' && (isPropertyAsset(asset) || isShareAsset(asset))) {
       
       if(chargeableGain < 0) {
         // Loss: record carryforward loss under business.chargeableLosses[disposalYear][asset.category]
@@ -3696,12 +3697,18 @@
       totalDep += assetDep;
       
       // CGT: Update asset.accumulatedDepreciation when depreciation is computed
-      // This ensures the depreciation to date is stored on the asset
+      // accumulatedDepreciation stores computed depreciation from purchase to asOf date
+      // accumulatedDep is the total (opening + computed) for backward compatibility
       const computedAccDep = Math.round(assetDep * 100) / 100;
+      // Only update if value has changed (avoid unnecessary state changes)
       if(a.accumulatedDepreciation !== computedAccDep) {
         a.accumulatedDepreciation = computedAccDep;
-        // Also keep accumulatedDep in sync for backward compatibility
-        a.accumulatedDep = (a.openingAccDep || 0) + computedAccDep;
+      }
+      // accumulatedDep = openingAccDep + computed depreciation from purchase date
+      // Note: openingAccDep represents depreciation before the asset was added to this system
+      const totalAccDep = (a.openingAccDep || 0) + computedAccDep;
+      if(a.accumulatedDep !== totalAccDep) {
+        a.accumulatedDep = totalAccDep;
       }
     }
     return totalDep;
@@ -4041,17 +4048,20 @@
       cgtCharge += g.cgtCharge || 0;
       
       // Adjust taxable profit based on entity and disposal settings
+      // Use netGain (after offset) for correct taxable profit calculation
+      const effectiveGain = g.netGain || g.gain || 0;
+      
       if(b.entity === 'Company'){
         // For Company: gains are excluded from taxable profit (CGT charged separately)
-        if(!g.isShareExempt && g.gain > 0) {
-          cgtExcludedFromTaxable += g.gain;
+        if(!g.isShareExempt && effectiveGain > 0) {
+          cgtExcludedFromTaxable += effectiveGain;
         }
       } else {
         // For Individual/Enterprise: gains included in taxable profit unless exempt
-        // The disposal already flagged includedInTaxableProfit
-        if(!g.includedInTaxableProfit && !g.isShareExempt && g.gain > 0) {
-          // If not included but should be exempt, exclude from profit
-          taxableProfit -= g.gain;
+        // If the gain is exempt (share exemption), exclude from taxable profit
+        if(g.isShareExempt && effectiveGain > 0) {
+          // Exempt gains: exclude from taxable profit
+          taxableProfit -= effectiveGain;
         }
         // If includedInTaxableProfit is true, the gain is already in taxable profit via disposal
       }
