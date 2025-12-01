@@ -153,7 +153,7 @@
    * If not configured, the app will fall back to local prototype authentication.
    */
   
-  // Set to true to enable Firebase Authentication
+  // Set to true to enable Firebase Authentication (requires firebaseConfig to be defined)
   var FIREBASE_ENABLED = false;
   
   // Uncomment and configure with your Firebase project credentials:
@@ -172,7 +172,16 @@
   var firebaseApp = null;
   var firebaseAuth = null;
   
-  if (typeof firebaseConfig !== 'undefined' && FIREBASE_ENABLED) {
+  // Check if firebaseConfig is defined and has required properties
+  function isFirebaseConfigValid() {
+    return typeof firebaseConfig !== 'undefined' && 
+           firebaseConfig !== null &&
+           typeof firebaseConfig.apiKey === 'string' &&
+           typeof firebaseConfig.authDomain === 'string' &&
+           typeof firebaseConfig.projectId === 'string';
+  }
+  
+  if (FIREBASE_ENABLED && isFirebaseConfigValid()) {
     try {
       firebaseApp = firebase.initializeApp(firebaseConfig);
       firebaseAuth = firebase.auth();
@@ -1834,8 +1843,8 @@
 
   // Pre-login overlay handler - authenticates user from the blocking overlay form
   async function handlePreLogin(){
-    const loginInput = (preLoginUsername.value || '').trim();
-    const password = (preLoginPassword.value || '');
+    const loginInput = (preLoginUsername && preLoginUsername.value ? preLoginUsername.value : '').trim();
+    const password = (preLoginPassword && preLoginPassword.value ? preLoginPassword.value : '');
     
     if(!loginInput) {
       if(authLoginMsg) { authLoginMsg.textContent = 'Username or email required'; authLoginMsg.style.color = '#b00'; }
@@ -1843,7 +1852,8 @@
     }
     
     // Firebase authentication if enabled and input looks like email
-    const isEmailInput = loginInput.includes('@');
+    // loginInput is guaranteed to be a non-empty string at this point
+    const isEmailInput = loginInput.indexOf('@') !== -1;
     
     if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && isEmailInput) {
       if(!password) {
@@ -2165,13 +2175,17 @@
         const preLoginUsername = document.getElementById('preLoginUsername');
         const forgotEmail = document.getElementById('forgotEmail');
         if (preLoginUsername && forgotEmail) {
-          const loginValue = preLoginUsername.value.trim().toLowerCase();
+          const loginValue = (preLoginUsername.value || '').trim().toLowerCase();
           // Only pre-fill if it looks like an email
-          if (loginValue.includes('@')) {
+          if (loginValue.indexOf('@') !== -1) {
             forgotEmail.value = loginValue;
           } else {
             forgotEmail.value = '';
           }
+        }
+        // Update forgot modal UI for current Firebase state
+        if (typeof window.updateForgotModalUI === 'function') {
+          window.updateForgotModalUI();
         }
         openModal(forgotModal);
       });
@@ -6336,15 +6350,9 @@
       }
     }
     
-    // Update UI on modal open
-    if (forgotModal) {
-      const observer = new MutationObserver(function() {
-        if (forgotModal.style.display === 'block') {
-          updateForgotModalUI();
-        }
-      });
-      observer.observe(forgotModal, { attributes: true, attributeFilter: ['style'] });
-    }
+    // Update UI initially and expose function globally for modal open
+    updateForgotModalUI();
+    window.updateForgotModalUI = updateForgotModalUI;
     
     if (forgotCancel) {
       forgotCancel.addEventListener('click', function() {
