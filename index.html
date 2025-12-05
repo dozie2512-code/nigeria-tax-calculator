@@ -849,7 +849,6 @@
         <button class="small tab" data-report="pitEnterprise">PIT (Enterprise)</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
         <button class="small tab" data-report="companyAccounts">Company Accounts</button>
-        <button class="small tab" data-report="auditTrail">Audit Trail</button>
         <button class="small tab" data-report="receiptsFolder">Receipts Folder</button>
       </div>
 
@@ -1600,6 +1599,48 @@
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
   function isLeapYear(y){ return (y%4===0 && y%100!==0) || (y%400===0); }
   function daysInYear(d){ const y = new Date(d).getFullYear(); return isLeapYear(y) ? 366 : 365; }
+
+  /**
+   * Computes VAT amount based on VAT type and rate
+   * @param {number} amount - Transaction amount
+   * @param {string} vatType - 'exclusive', 'inclusive', or 'none'
+   * @param {number} vatRate - VAT rate percentage (e.g., 7.5 for 7.5%)
+   * @returns {number} VAT amount
+   */
+  function computeVAT(amount, vatType, vatRate) {
+    if (!vatType || vatType === 'none') return 0;
+    const rate = Number(vatRate || 0);
+    const amt = Number(amount || 0);
+    
+    if (vatType === 'exclusive') {
+      // VAT exclusive: vat_amount = amount * (rate/100)
+      return amt * (rate / 100);
+    } else if (vatType === 'inclusive') {
+      // VAT inclusive: vat_amount = amount - (amount / (1 + rate/100))
+      return amt - (amt / (1 + rate / 100));
+    }
+    return 0;
+  }
+
+  /**
+   * Computes WHT amount based on basis and rate
+   * @param {number} amount - Transaction amount
+   * @param {string} basis - 'gross' or 'net'
+   * @param {number} whtRate - WHT rate percentage
+   * @returns {number} WHT amount
+   */
+  function computeWHT(amount, basis, whtRate) {
+    const rate = Number(whtRate || 0) / 100;
+    const amt = Number(amount || 0);
+    
+    if (basis === 'net') {
+      // WHT net basis: WHT = amount * (rate / (1 - rate))
+      return amt * (rate / (1 - rate));
+    } else {
+      // WHT gross basis (default): WHT = amount * rate
+      return amt * rate;
+    }
+  }
 
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -5649,29 +5690,45 @@
       reportContent.innerHTML = html;
       
     } else if(name === 'pitIndividual'){
-      // PIT Individual report - compute from actual transactions
+      // PIT Individual report - compute from actual transactions using adjusted_amount where present
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const currentYear = new Date().getFullYear();
       
-      // Compute income by category
-      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0;
+      // Compute income by category using adjusted_amount if present
+      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0, salesRevenue = 0;
       let totalGrossIncome = 0;
+      let totalWHTReceivable = 0;
       
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
-          const amount = Number(t.amount || 0);
-          totalGrossIncome += amount;
+          // Use adjusted_amount if present, otherwise use amount
+          const taxableAmount = (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) 
+            ? Number(t.adjusted_amount || 0) 
+            : Number(t.amount || 0);
+          totalGrossIncome += taxableAmount;
           
           const acct = findAccount(b, t.accountId);
           const acctName = acct ? acct.name.toLowerCase() : '';
           
-          if(acctName.includes('salary')) salary += amount;
-          else if(acctName.includes('dividend')) dividend += amount;
-          else if(acctName.includes('interest')) interest += amount;
-          else if(acctName.includes('royalty')) royalty += amount;
-          else if(acctName.includes('rent')) rent += amount;
-          else if(acctName.includes('benefit')) benefitInKind += amount;
-          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += amount;
+          if(acctName.includes('salary')) salary += taxableAmount;
+          else if(acctName.includes('dividend')) dividend += taxableAmount;
+          else if(acctName.includes('interest')) interest += taxableAmount;
+          else if(acctName.includes('royalty')) royalty += taxableAmount;
+          else if(acctName.includes('rent')) rent += taxableAmount;
+          else if(acctName.includes('benefit')) benefitInKind += taxableAmount;
+          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += taxableAmount;
+          else if(acctName.includes('sales') || acctName.includes('revenue')) salesRevenue += taxableAmount;
+        }
+        
+        // Compute WHT Receivable using stored wht_amount if available
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          if (typeof t.wht_amount !== 'undefined' && t.wht_amount !== null) {
+            totalWHTReceivable += Number(t.wht_amount || 0);
+          } else {
+            const rate = Number(t.whtRate || b.whtRate) / 100;
+            const whtBasis = Number(t.amount || 0);
+            totalWHTReceivable += whtBasis * rate;
+          }
         }
       }
       
@@ -5679,35 +5736,26 @@
       const ded = getStatutoryDeductions(b, null);
       const totalDed = totalStatutoryDeductions(ded);
       
-      // Taxable income
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
+      // Taxable income = Gross Income - Statutory Deductions - WHT
+      const taxableIncome = Math.max(0, totalGrossIncome - totalDed - totalWHTReceivable);
       
-      // Compute PIT using bands
-      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
-      
-      // WHT receivable
-      let whtReceivable = 0;
-      for(const t of arr){
-        if(t.whtApplied && t.accountCategory === 'Revenue') {
-          const rate = Number(t.whtRate || b.whtRate) / 100;
-          whtReceivable += Number(t.amount || 0) * rate;
-        }
-      }
-      
-      const finalPIT = Math.max(0, pitLiability - whtReceivable);
+      // Compute PIT using bands (annual)
+      const pitAnnual = computePAYEOnAnnualIncome(taxableIncome);
+      const pitMonthly = pitAnnual / 12;
       
       let html = `<h3>Personal Income Tax Computation (Individual) - ${currentYear}</h3>`;
       html += `<p><strong>Name:</strong> ${b.name}</p>`;
       html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
       html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
       html += `<tr><td colspan="2"><strong>Gross Income</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
+      if(salary > 0) html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
+      if(salesRevenue > 0) html += `<tr><td style="padding-left:20px;">Sales Revenue</td><td style="text-align:right;">${fmt(salesRevenue)}</td></tr>`;
+      if(dividend > 0) html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
+      if(interest > 0) html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
+      if(royalty > 0) html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
+      if(rent > 0) html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
+      if(benefitInKind > 0) html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
+      if(shareOfProfit > 0) html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Gross Income</strong></td><td style="text-align:right;"><strong>${fmt(totalGrossIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
@@ -5715,12 +5763,16 @@
       html += `<tr><td style="padding-left:20px;">Life assurance</td><td style="text-align:right;">${fmt(ded.life)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Mortgage interest</td><td style="text-align:right;">${fmt(ded.mortgage)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">NHF</td><td style="text-align:right;">${fmt(ded.nhf)}</td></tr>`;
+      html += `<tr style="background:#fff4e6;"><td><strong>Total Statutory Deductions</strong></td><td style="text-align:right;"><strong>${fmt(totalDed)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(totalWHTReceivable)})</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
-      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">PIT Annual (as per bands)</td><td style="text-align:right;">${fmt(pitAnnual)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">PIT Monthly</td><td style="text-align:right;">${fmt(pitMonthly)}</td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Annual</strong></td><td style="text-align:right;"><strong>${fmt(pitAnnual)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Monthly</strong></td><td style="text-align:right;"><strong>${fmt(pitMonthly)}</strong></td></tr>`;
       html += `</tbody></table>`;
+      html += `<div class="small-note" style="margin-top:12px;">Note: PIT figures show final annual and monthly values. Adjustments (if any) are reflected in taxable income via adjusted_amount.</div>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'pitEnterprise'){
