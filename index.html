@@ -824,7 +824,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>Adj. Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -1322,6 +1322,27 @@
       return biz.userIds.length;
     }
     return 1; // At least the owner
+  }
+
+  /**
+   * Gets all businesses owned by a user.
+   * @param {string} userId - The user ID
+   * @returns {Array} - Array of business objects
+   */
+  function getUserBusinesses(userId) {
+    if (!userId) return [];
+    return state.businesses.filter(b => b.ownerId === userId);
+  }
+
+  /**
+   * Checks if a user is a "new signup" user (has no businesses yet).
+   * @param {string} userId - The user ID
+   * @returns {boolean} - True if user has no businesses
+   */
+  function isNewSignupUser(userId) {
+    if (!userId) return false;
+    const userBusinesses = getUserBusinesses(userId);
+    return userBusinesses.length === 0;
   }
 
   /**
@@ -2010,23 +2031,58 @@
   function enforcePermissions(){
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
+    const currentUserId = state.auth.currentUserId;
     
-    // Disable business management buttons for non-admins
-    btnAddBusiness.disabled = !isAdmin;
+    // New signup user behavior: check if user has businesses
+    const isNewUser = isNewSignupUser(currentUserId);
+    const userBusinesses = getUserBusinesses(currentUserId);
+    const hasOneBusiness = userBusinesses.length === 1;
+    
+    // For new signup users: allow adding first business only
+    // For users with one business: disable "+ Business" button
+    if (isNewUser) {
+      // New user (no businesses): allow adding first business
+      btnAddBusiness.disabled = false;
+      btnAddBusiness.classList.remove('disabled');
+      // Enable Manage Accounts for new signups
+      btnManageAccounts.disabled = false;
+      btnManageAccounts.classList.remove('disabled');
+    } else if (hasOneBusiness) {
+      // User with exactly one business: disable "+ Business" button
+      btnAddBusiness.disabled = true;
+      btnAddBusiness.classList.add('disabled');
+      btnAddBusiness.style.display = 'none'; // Hide the button
+      // Enable Manage Accounts
+      btnManageAccounts.disabled = false;
+      btnManageAccounts.classList.remove('disabled');
+    } else {
+      // Legacy behavior for users with multiple businesses or admins
+      btnAddBusiness.disabled = !isAdmin;
+      btnManageAccounts.disabled = !isAdmin;
+      
+      if(!isAdmin){
+        btnAddBusiness.classList.add('disabled');
+        btnEditBusiness.classList.add('disabled');
+        btnDeleteBusiness.classList.add('disabled');
+        btnManageAccounts.classList.add('disabled');
+      } else {
+        btnAddBusiness.classList.remove('disabled');
+        btnEditBusiness.classList.remove('disabled');
+        btnDeleteBusiness.classList.remove('disabled');
+        btnManageAccounts.classList.remove('disabled');
+      }
+      btnAddBusiness.style.display = ''; // Show the button for legacy users
+    }
+    
+    // Edit and Delete buttons follow admin permissions
     btnEditBusiness.disabled = !isAdmin;
     btnDeleteBusiness.disabled = !isAdmin;
-    btnManageAccounts.disabled = !isAdmin;
-    
     if(!isAdmin){
-      btnAddBusiness.classList.add('disabled');
       btnEditBusiness.classList.add('disabled');
       btnDeleteBusiness.classList.add('disabled');
-      btnManageAccounts.classList.add('disabled');
     } else {
-      btnAddBusiness.classList.remove('disabled');
       btnEditBusiness.classList.remove('disabled');
       btnDeleteBusiness.classList.remove('disabled');
-      btnManageAccounts.classList.remove('disabled');
     }
   }
 
@@ -2896,7 +2952,8 @@
     } else {
       const newBiz = {
         id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
-        entity: bizEntity.value, 
+        entity: bizEntity.value,
+        entityLocked: true, // Lock entity type after creation
         vatRate: Number(bizVat.value||DEFAULTS.vatRate), 
         whtRate: Number(bizWht.value||DEFAULTS.whtRate), 
         citRate: Number(bizCit.value||DEFAULTS.citRate),
@@ -2907,13 +2964,26 @@
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       };
-      // Removed Sales account as per requirements
-      newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      // Add default accounts based on entity type
+      if (newBiz.entity === 'Individual') {
+        // For Individual: add only income accounts
+        newBiz.accounts.push({ id: uid('acct'), name:'sales revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'dividend', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'interest', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'royalty', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'rent', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'benefit in kind', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'share of profit', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      } else {
+        // For Company/Enterprise: add standard accounts
+        newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      }
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -2962,7 +3032,12 @@
     const isIndividual = b.entity === 'Individual';
     
     if (isIndividual) {
-      // Hide panels and elements for Individual
+      // Default action to Income for Individual
+      if (!txnAction.value || txnAction.value === '') {
+        txnAction.value = 'Income';
+      }
+      
+      // Hide panels for Individual
       const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
       const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
       const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
@@ -2970,22 +3045,19 @@
       if(assetsQuick) assetsQuick.style.display = 'none';
       if(plQuick) plQuick.style.display = 'none';
       
-      // Restrict actions - only show Income for Individuals
+      // Restrict actions - only show Income and empty option for Individuals
       Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Income') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Income') {
+        if (opt.value === '' || opt.value === 'Income') {
           opt.style.display = '';
+        } else {
+          opt.style.display = 'none';
         }
       });
       
-      // Restrict accounts - show Individual income accounts, hide Salary
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (accountText === 'Salary') {
-          opt.style.display = 'none';  // Hide Salary for Individual
-        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
-          opt.style.display = '';  // Show Individual income accounts
+      // Adjust adjustment type dropdown for Individual - only show None and Non-taxable
+      Array.from(txnAdjustmentType.options).forEach(opt => {
+        if (opt.value === '' || opt.value === 'nontaxable') {
+          opt.style.display = '';
         } else {
           opt.style.display = 'none';
         }
@@ -2999,9 +3071,9 @@
       if(assetsQuick) assetsQuick.style.display = 'block';
       if(plQuick) plQuick.style.display = 'block';
       
-      // Show all actions and accounts for non-Individual entities
+      // Show all actions and adjustment types for non-Individual entities
       Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
+      Array.from(txnAdjustmentType.options).forEach(opt => { opt.style.display = ''; });
     }
   }
 
@@ -3170,15 +3242,54 @@
     assetDisposalAccount.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
+    
+    // Define income accounts for Individual entity
+    const individualIncomeAccounts = ['sales revenue', 'dividend', 'interest', 'royalty', 'rent', 'benefit in kind', 'share of profit'];
+    
     for(const a of b.accounts){
-      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
-      txnAccount.appendChild(opt);
-      const opt2 = opt.cloneNode(true);
-      invAccountSelect.appendChild(opt2);
-      const opt3 = opt.cloneNode(true);
-      assetPurchaseAccount.appendChild(opt3);
-      const opt4 = opt.cloneNode(true);
-      assetDisposalAccount.appendChild(opt4);
+      // For Individual entity: filter account lists
+      if(b.entity === 'Individual') {
+        // Only show income accounts (Revenue category) in transaction account dropdown
+        // Check if account name matches individual income accounts (case-insensitive)
+        const accountNameLower = (a.name || '').toLowerCase();
+        const isIncomeAccount = individualIncomeAccounts.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
+        
+        if(a.category === 'Revenue' && isIncomeAccount) {
+          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+          txnAccount.appendChild(opt);
+        } else if(a.category === 'Asset') {
+          // Allow Asset accounts (e.g., Bank)
+          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+          txnAccount.appendChild(opt);
+        }
+        // Skip expense accounts for Individual
+      } else {
+        // For Company/Enterprise: show all accounts
+        const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+        txnAccount.appendChild(opt);
+      }
+      
+      // Inventory and asset account selects: apply same filtering
+      if(b.entity === 'Individual') {
+        const accountNameLower = (a.name || '').toLowerCase();
+        const isIncomeAccount = individualIncomeAccounts.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
+        
+        if((a.category === 'Revenue' && isIncomeAccount) || a.category === 'Asset') {
+          const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
+          invAccountSelect.appendChild(opt2);
+          const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
+          assetPurchaseAccount.appendChild(opt3);
+          const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
+          assetDisposalAccount.appendChild(opt4);
+        }
+      } else {
+        const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
+        invAccountSelect.appendChild(opt2);
+        const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
+        assetPurchaseAccount.appendChild(opt3);
+        const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
+        assetDisposalAccount.appendChild(opt4);
+      }
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
@@ -3237,25 +3348,42 @@
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
     
-    // Handle adjustment transactions
+    // Handle adjustment transactions - create adjustment entry with adjusted_amount
     if(txnAdjustmentType.value && txnAdjustmentType.value !== ''){
       const adjustmentAmount = Number(txnAdjustmentAmount.value || 0);
       if(adjustmentAmount <= 0) return alert('Adjustment amount required');
       
+      const baseAmount = Number(txnAmount.value || 0);
+      if(baseAmount <= 0) return alert('Transaction amount required for adjustment');
+      
+      // Calculate adjusted_amount based on adjustment type
+      let adjustedAmount = baseAmount;
+      if(txnAdjustmentType.value === 'nontaxable') {
+        // Non-taxable: adjusted_amount = amount - adjustmentAmount
+        adjustedAmount = baseAmount - adjustmentAmount;
+      } else if(txnAdjustmentType.value === 'disallowable') {
+        // Disallowable: adjusted_amount = amount + adjustmentAmount
+        adjustedAmount = baseAmount + adjustmentAmount;
+      }
+      
       const adjTxn = {
         id: uid('txn'),
         date: txnDate.value || today(),
-        action: 'Adjustment',
+        action: txnAction.value || 'Income',
         accountId: txnAccount.value,
         accountName: findAccount(b, txnAccount.value)?.name || '',
         accountCategory: findAccount(b, txnAccount.value)?.category || '',
-        description: `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
-        amount: adjustmentAmount,
+        description: txnDesc.value || `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
+        amount: baseAmount,
+        adjusted_amount: adjustedAmount,
         adjustmentType: txnAdjustmentType.value,
-        vatType: 'none',
-        whtApplied: false,
-        paye: false,
-        contact: '',
+        adjustmentAmount: adjustmentAmount,
+        vatType: txnVatType.value || 'none',
+        whtApplied: !!txnWht.checked,
+        whtRate: Number(txnWhtRate.value || 0),
+        whtBasis: txnWhtBasis.value || 'gross',
+        paye: !!txnSalary.checked,
+        contact: txnContact.value || '',
         receiptId: null
       };
       pushTransaction(adjTxn);
@@ -3812,6 +3940,14 @@
       const tdAccount = document.createElement('td'); tdAccount.textContent = t.accountName || '';
       const tdDesc = document.createElement('td'); tdDesc.textContent = t.description || '';
       const tdAmount = document.createElement('td'); tdAmount.textContent = fmt(t.amount||0);
+      const tdAdjustedAmount = document.createElement('td');
+      // Show adjusted amount if present, otherwise show dash
+      if (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) {
+        tdAdjustedAmount.textContent = fmt(t.adjusted_amount);
+        tdAdjustedAmount.style.color = '#059669'; // Green to indicate adjustment
+      } else {
+        tdAdjustedAmount.textContent = '-';
+      }
       const tdVat = document.createElement('td'); tdVat.textContent = t.vatType || '';
       const tdWht = document.createElement('td'); tdWht.textContent = t.whtApplied ? ((t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%') : '';
       const tdPaye = document.createElement('td'); tdPaye.textContent = t.paye ? 'Yes' : '';
@@ -3844,6 +3980,7 @@
       tr.appendChild(tdAccount);
       tr.appendChild(tdDesc);
       tr.appendChild(tdAmount);
+      tr.appendChild(tdAdjustedAmount);
       tr.appendChild(tdVat);
       tr.appendChild(tdWht);
       tr.appendChild(tdPaye);
@@ -4086,7 +4223,16 @@
     }
     
     const pl = computePLSnapshot();
-    plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
+    const b = findBiz(selectedBizId);
+    const isIndividual = b && b.entity === 'Individual';
+    
+    if(isIndividual) {
+      // For Individual: show only Gross Income and Taxable Income, hide expenses
+      plSnapshotQuick.innerHTML = `<div><strong>Gross Income:</strong> ${fmt(pl.revenue)}</div><div><strong>Taxable Income:</strong> ${fmt(pl.accountingProfit)}</div>`;
+    } else {
+      // For Company/Enterprise: show full accounting profit with details
+      plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
+    }
   }
 
   // PL computation
@@ -4598,10 +4744,10 @@
     
     let html = '';
     if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
+      // For Individual: show simplified summary - no Expenses detail, no WHT Payable, no PAYE, no CA details
       html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
+      // Hide expenses section for Individual as per requirements
       html += `<hr/>`;
       // For Individual: show only WHT Receivable and PIT
       html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
