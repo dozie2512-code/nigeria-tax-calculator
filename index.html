@@ -129,26 +129,6 @@
     details.plan-card summary .plan-header-right .plan-offer-price { color:#059669; font-size:1.15rem; font-weight:700; }
     details.plan-card summary .plan-arrow { transition:transform 0.2s ease; font-size:0.8rem; color:#64748b; }
     details.plan-card[open] summary .plan-arrow { transform:rotate(180deg); }
-    
-    /* Business Chat UI Styles */
-    #businessChatBtn { position:fixed; bottom:24px; left:24px; z-index:9999; width:56px; height:56px; border-radius:50%; background:#10b981; color:#fff; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); display:flex; align-items:center; justify-content:center; font-size:1.5rem; transition:background 0.2s; }
-    #businessChatBtn:hover { background:#059669; }
-    #businessChatModal { position:fixed; bottom:90px; left:24px; z-index:9998; width:380px; max-height:520px; background:#fff; border:1px solid #ccc; border-radius:10px; display:none; flex-direction:column; box-shadow:0 6px 24px rgba(0,0,0,0.18); }
-    #businessChatHeader { padding:12px 16px; background:#10b981; color:#fff; border-radius:10px 10px 0 0; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
-    #businessChatClose { background:transparent; border:none; color:#fff; font-size:1.3rem; cursor:pointer; padding:0; width:24px; height:24px; line-height:1; }
-    #businessChatMessages { flex:1; padding:12px; overflow-y:auto; font-size:0.95rem; min-height:240px; max-height:360px; display:flex; flex-direction:column; gap:8px; background:#f9fafb; }
-    #businessChatInput { display:flex; border-top:1px solid #e6e6e6; background:#fff; border-radius:0 0 10px 10px; }
-    #businessChatInput input { flex:1; padding:12px; border:none; outline:none; font-size:0.95rem; border-radius:0 0 0 10px; }
-    #businessChatInput button { padding:12px 16px; background:#10b981; color:#fff; border:none; cursor:pointer; font-weight:600; border-radius:0 0 10px 0; transition:background 0.2s; }
-    #businessChatInput button:hover { background:#059669; }
-    .business-chat-msg { padding:10px 12px; border-radius:8px; max-width:85%; word-wrap:break-word; }
-    .business-chat-msg.sent { background:#dcfce7; align-self:flex-end; margin-left:auto; border:1px solid #bbf7d0; }
-    .business-chat-msg.received { background:#fff; align-self:flex-start; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
-    .business-chat-msg .msg-author { font-size:0.8rem; color:#6b7280; margin-bottom:4px; font-weight:600; }
-    .business-chat-msg .msg-text { font-size:0.95rem; color:#1f2937; line-height:1.4; }
-    .business-chat-msg .msg-time { font-size:0.75rem; color:#9ca3af; margin-top:4px; }
-    #businessChatInfo { padding:8px 12px; background:#fef3c7; border-bottom:1px solid #fbbf24; font-size:0.85rem; color:#78350f; text-align:center; }
-    .business-chat-loading { padding:20px; text-align:center; color:#6b7280; font-size:0.9rem; }
   </style>
 
   <!-- jsPDF for PDF export -->
@@ -156,7 +136,263 @@
   <!-- SheetJS for XLSX export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+  <!-- Firebase compat SDK for Authentication -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
   <script>
+  /**
+   * Firebase Configuration
+   * 
+   * Firebase Authentication is enabled with the config below.
+   * To customize or disable:
+   * 1. Update the firebaseConfig values with your Firebase project credentials
+   * 2. Set FIREBASE_ENABLED to false to use local prototype authentication instead
+   * 
+   * For setup: Enable Email/Password under Authentication → Sign-in method in Firebase Console.
+   */
+  
+  // Set to true to enable Firebase Authentication (requires firebaseConfig to be defined)
+  var FIREBASE_ENABLED = true;
+
+  // Firebase web config — verify values in Firebase Console (storageBucket commonly ends with ".appspot.com")
+  var firebaseConfig = {
+    apiKey: "AIzaSyDyLT58G18M7XPNLd3J6YnAMnLcKeEPmto",
+    authDomain: "aaaa-b8178.firebaseapp.com",
+    projectId: "aaaa-b8178",
+    storageBucket: "aaaa-b8178.firebasestorage.app",
+    messagingSenderId: "313899934004",
+    appId: "1:313899934004:web:cb2b729fb3b42c57e00561",
+    measurementId: "G-X18YDSXSZV"
+  };
+  
+  // Firebase initialization (only if configured)
+  var firebaseApp = null;
+  var firebaseAuth = null;
+  
+  // Check if firebaseConfig is defined and has required properties
+  function isFirebaseConfigValid() {
+    return typeof firebaseConfig !== 'undefined' && 
+           firebaseConfig !== null &&
+           typeof firebaseConfig.apiKey === 'string' &&
+           typeof firebaseConfig.authDomain === 'string' &&
+           typeof firebaseConfig.projectId === 'string';
+  }
+  
+  if (FIREBASE_ENABLED && isFirebaseConfigValid()) {
+    try {
+      firebaseApp = firebase.initializeApp(firebaseConfig);
+      firebaseAuth = firebase.auth();
+      console.log('Firebase Authentication initialized successfully');
+    } catch (e) {
+      console.warn('Firebase initialization failed, falling back to local auth:', e.message);
+      FIREBASE_ENABLED = false;
+    }
+  }
+  
+  /**
+   * Check if Firebase Authentication is available and enabled
+   * @returns {boolean}
+   */
+  function isFirebaseAuthEnabled() {
+    return FIREBASE_ENABLED && firebaseAuth !== null;
+  }
+  
+  /**
+   * Firebase Sign Up with Email/Password
+   * Creates a new Firebase user and maps to local app state
+   * @param {string} email - User email
+   * @param {string} password - User password
+   * @returns {Promise<{success: boolean, user?: object, error?: string}>}
+   */
+  async function firebaseSignUp(email, password) {
+    if (!isFirebaseAuthEnabled()) {
+      return { success: false, error: 'Firebase not configured' };
+    }
+    
+    try {
+      var userCredential = await firebaseAuth.createUserWithEmailAndPassword(email, password);
+      var user = userCredential.user;
+      return { 
+        success: true, 
+        user: {
+          uid: user.uid,
+          email: user.email,
+          emailVerified: user.emailVerified
+        }
+      };
+    } catch (error) {
+      var errorMessage = 'Sign up failed';
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          errorMessage = 'Email already registered';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password is too weak (min 6 characters)';
+          break;
+        case 'auth/operation-not-allowed':
+          errorMessage = 'Email/password sign up is not enabled';
+          break;
+        default:
+          errorMessage = error.message || 'Sign up failed';
+      }
+      return { success: false, error: errorMessage };
+    }
+  }
+  
+  /**
+   * Firebase Sign In with Email/Password
+   * @param {string} email - User email
+   * @param {string} password - User password
+   * @returns {Promise<{success: boolean, user?: object, error?: string}>}
+   */
+  async function firebaseSignIn(email, password) {
+    if (!isFirebaseAuthEnabled()) {
+      return { success: false, error: 'Firebase not configured' };
+    }
+    
+    try {
+      var userCredential = await firebaseAuth.signInWithEmailAndPassword(email, password);
+      var user = userCredential.user;
+      return { 
+        success: true, 
+        user: {
+          uid: user.uid,
+          email: user.email,
+          emailVerified: user.emailVerified
+        }
+      };
+    } catch (error) {
+      var errorMessage = 'Sign in failed';
+      switch (error.code) {
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address';
+          break;
+        case 'auth/user-disabled':
+          errorMessage = 'This account has been disabled';
+          break;
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email';
+          break;
+        case 'auth/wrong-password':
+          errorMessage = 'Invalid credentials';
+          break;
+        case 'auth/invalid-credential':
+          errorMessage = 'Invalid email or password';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many failed attempts. Please try again later';
+          break;
+        default:
+          errorMessage = error.message || 'Sign in failed';
+      }
+      return { success: false, error: errorMessage };
+    }
+  }
+  
+  /**
+   * Firebase Sign Out
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async function firebaseSignOut() {
+    if (!isFirebaseAuthEnabled()) {
+      return { success: false, error: 'Firebase not configured' };
+    }
+    
+    try {
+      await firebaseAuth.signOut();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message || 'Sign out failed' };
+    }
+  }
+  
+  /**
+   * Firebase Send Password Reset Email
+   * Uses Firebase's hosted password reset page
+   * @param {string} email - User email
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async function firebaseSendPasswordReset(email) {
+    if (!isFirebaseAuthEnabled()) {
+      return { success: false, error: 'Firebase not configured' };
+    }
+    
+    try {
+      await firebaseAuth.sendPasswordResetEmail(email);
+      return { success: true };
+    } catch (error) {
+      var errorMessage = 'Password reset failed';
+      switch (error.code) {
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address';
+          break;
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many requests. Please try again later';
+          break;
+        default:
+          errorMessage = error.message || 'Password reset failed';
+      }
+      return { success: false, error: errorMessage };
+    }
+  }
+  
+  /**
+   * Get current Firebase user
+   * @returns {object|null} Firebase user object or null
+   */
+  function getFirebaseCurrentUser() {
+    if (!isFirebaseAuthEnabled()) {
+      return null;
+    }
+    return firebaseAuth.currentUser;
+  }
+  
+  /**
+   * Maps Firebase UID to local app user ID
+   * Used to associate localStorage data with Firebase user
+   * @param {string} firebaseUid - Firebase user UID
+   * @returns {string|null} Local user ID or null
+   */
+  function getLocalUserIdFromFirebaseUid(firebaseUid) {
+    var storageKey = (typeof STORAGE_KEY !== 'undefined') ? STORAGE_KEY : 'ntc_full_accounting_v2';
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw) return null;
+      var state = JSON.parse(raw);
+      var user = (state.users || []).find(function(u) { return u.firebaseUid === firebaseUid; });
+      return user ? user.id : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /**
+   * Maps local user ID to Firebase UID in state
+   * @param {string} localUserId - Local app user ID
+   * @param {string} firebaseUid - Firebase user UID
+   */
+  function mapLocalUserToFirebaseUid(localUserId, firebaseUid) {
+    var storageKey = (typeof STORAGE_KEY !== 'undefined') ? STORAGE_KEY : 'ntc_full_accounting_v2';
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      var appState = JSON.parse(raw);
+      var user = (appState.users || []).find(function(u) { return u.id === localUserId; });
+      if (user) {
+        user.firebaseUid = firebaseUid;
+        localStorage.setItem(storageKey, JSON.stringify(appState));
+      }
+    } catch (e) {
+      console.warn('Failed to map local user to Firebase UID:', e);
+    }
+  }
   </script>
 </head>
 <body>
@@ -565,7 +801,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>Adj. Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -590,6 +826,7 @@
         <button class="small tab" data-report="pitEnterprise">PIT (Enterprise)</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
         <button class="small tab" data-report="companyAccounts">Company Accounts</button>
+        <button class="small tab" data-report="auditTrail">Audit Trail</button>
         <button class="small tab" data-report="receiptsFolder">Receipts Folder</button>
       </div>
 
@@ -957,9 +1194,6 @@
   const CGT_EXEMPTION_GAIN = 10000000; // ₦10,000,000
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
-  // Individual entity income accounts (for filtering and display)
-  const INDIVIDUAL_INCOME_ACCOUNTS = ['sales revenue', 'dividend', 'interest', 'royalty', 'rent', 'benefit in kind', 'share of profit'];
-  
   // Individual-only account names (for UI filtering)
   const INDIVIDUAL_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
 
@@ -1065,27 +1299,6 @@
       return biz.userIds.length;
     }
     return 1; // At least the owner
-  }
-
-  /**
-   * Gets all businesses owned by a user.
-   * @param {string} userId - The user ID
-   * @returns {Array} - Array of business objects
-   */
-  function getUserBusinesses(userId) {
-    if (!userId) return [];
-    return state.businesses.filter(b => b.ownerId === userId);
-  }
-
-  /**
-   * Checks if a user is a "new signup" user (has no businesses yet).
-   * @param {string} userId - The user ID
-   * @returns {boolean} - True if user has no businesses
-   */
-  function isNewSignupUser(userId) {
-    if (!userId) return false;
-    const userBusinesses = getUserBusinesses(userId);
-    return userBusinesses.length === 0;
   }
 
   /**
@@ -1343,48 +1556,6 @@
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
   function isLeapYear(y){ return (y%4===0 && y%100!==0) || (y%400===0); }
   function daysInYear(d){ const y = new Date(d).getFullYear(); return isLeapYear(y) ? 366 : 365; }
-
-  /**
-   * Computes VAT amount based on VAT type and rate
-   * @param {number} amount - Transaction amount
-   * @param {string} vatType - 'exclusive', 'inclusive', or 'none'
-   * @param {number} vatRate - VAT rate percentage (e.g., 7.5 for 7.5%)
-   * @returns {number} VAT amount
-   */
-  function computeVAT(amount, vatType, vatRate) {
-    if (!vatType || vatType === 'none') return 0;
-    const rate = Number(vatRate || 0);
-    const amt = Number(amount || 0);
-    
-    if (vatType === 'exclusive') {
-      // VAT exclusive: vat_amount = amount * (rate/100)
-      return amt * (rate / 100);
-    } else if (vatType === 'inclusive') {
-      // VAT inclusive: vat_amount = amount - (amount / (1 + rate/100))
-      return amt - (amt / (1 + rate / 100));
-    }
-    return 0;
-  }
-
-  /**
-   * Computes WHT amount based on basis and rate
-   * @param {number} amount - Transaction amount
-   * @param {string} basis - 'gross' or 'net'
-   * @param {number} whtRate - WHT rate percentage
-   * @returns {number} WHT amount
-   */
-  function computeWHT(amount, basis, whtRate) {
-    const rate = Number(whtRate || 0) / 100;
-    const amt = Number(amount || 0);
-    
-    if (basis === 'net') {
-      // WHT net basis: WHT = amount * (rate / (1 - rate))
-      return amt * (rate / (1 - rate));
-    } else {
-      // WHT gross basis (default): WHT = amount * rate
-      return amt * rate;
-    }
-  }
 
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -1654,6 +1825,13 @@
   function handleLogout(){
     if(!state.auth.currentUserId) return;
     
+    // Firebase sign out if enabled
+    if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+      firebaseSignOut().catch(function(e) {
+        console.warn('Firebase sign out error:', e);
+      });
+    }
+    
     addAudit('auth.logout', 'user', state.auth.currentUserId, 'User logged out');
     state.auth.currentUserId = null;
     saveState();
@@ -1671,8 +1849,82 @@
       return;
     }
     
-    // Local authentication
-    // Support login by username or email
+    // Firebase authentication if enabled and input looks like email
+    // loginInput is guaranteed to be a non-empty string at this point
+    const isEmailInput = loginInput.indexOf('@') !== -1;
+    
+    if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && isEmailInput) {
+      if(!password) {
+        if(authLoginMsg) { authLoginMsg.textContent = 'Password required'; authLoginMsg.style.color = '#b00'; }
+        return;
+      }
+      
+      if(authLoginMsg) { authLoginMsg.textContent = 'Signing in...'; authLoginMsg.style.color = 'var(--muted)'; }
+      
+      const fbResult = await firebaseSignIn(loginInput.toLowerCase(), password);
+      
+      if (fbResult.success) {
+        const firebaseUid = fbResult.user.uid;
+        const email = fbResult.user.email;
+        
+        // Find local user by Firebase UID or email
+        let user = state.users.find(u => u.firebaseUid === firebaseUid);
+        if (!user) {
+          user = state.users.find(u => u.email === email);
+          // Map the Firebase UID to existing user
+          if (user && !user.firebaseUid) {
+            user.firebaseUid = firebaseUid;
+            saveState();
+          }
+        }
+        
+        if (!user) {
+          // User exists in Firebase but not locally - create local user
+          const userId = uid('user');
+          user = {
+            id: userId,
+            username: email.split('@')[0], // Use email prefix as username
+            display: email.split('@')[0],
+            email: email,
+            firebaseUid: firebaseUid,
+            role: 'User',
+            isAdmin: false,
+            permissions: { view: true, edit: true, delete: false },
+            plan: 'Individual',
+            createdAt: Date.now(),
+            trialStart: Date.now(),
+            tourSeen: false,
+            createdByAdmin: false
+          };
+          state.users.push(user);
+        }
+        
+        state.auth.currentUserId = user.id;
+        saveState();
+        addAudit('auth.login', 'user', user.id, 'User logged in via Firebase');
+        preLoginUsername.value = '';
+        preLoginPassword.value = '';
+        if(authLoginMsg) { authLoginMsg.textContent = ''; }
+        
+        setTimeout(() => {
+          updateAuthUI();
+          renderAll();
+          
+          // Check if user needs to see video tour (first time after signup)
+          if(user.tourSeen !== true) {
+            showTourModal(user.id);
+          }
+        }, 400);
+        return;
+      } else {
+        // Firebase login failed - show error
+        if(authLoginMsg) { authLoginMsg.textContent = fbResult.error || 'Sign in failed'; authLoginMsg.style.color = '#b00'; }
+        return;
+      }
+    }
+    
+    // Fallback to local authentication
+    // Support login by username or email (merged from auth.js)
     const loginLower = loginInput.toLowerCase();
     const user = state.users.find(u => u.username === loginInput || u.username === loginLower || u.email === loginLower);
     if(!user) {
@@ -1735,57 +1987,23 @@
   function enforcePermissions(){
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
-    const currentUserId = state.auth.currentUserId;
     
-    // New signup user behavior: check if user has businesses
-    const isNewUser = isNewSignupUser(currentUserId);
-    const userBusinesses = getUserBusinesses(currentUserId);
-    const hasOneBusiness = userBusinesses.length === 1;
-    
-    // For new signup users: allow adding first business only
-    // For users with one business: hide "+ Business" button
-    if (isNewUser) {
-      // New user (no businesses): allow adding first business
-      btnAddBusiness.disabled = false;
-      btnAddBusiness.classList.remove('disabled');
-      btnAddBusiness.style.display = ''; // Show the button
-      // Enable Manage Accounts for new signups
-      btnManageAccounts.disabled = false;
-      btnManageAccounts.classList.remove('disabled');
-    } else if (hasOneBusiness) {
-      // User with exactly one business: hide "+ Business" button completely
-      btnAddBusiness.style.display = 'none';
-      // Enable Manage Accounts
-      btnManageAccounts.disabled = false;
-      btnManageAccounts.classList.remove('disabled');
-    } else {
-      // Legacy behavior for users with multiple businesses or admins
-      btnAddBusiness.disabled = !isAdmin;
-      btnManageAccounts.disabled = !isAdmin;
-      btnAddBusiness.style.display = ''; // Show the button
-      
-      if(!isAdmin){
-        btnAddBusiness.classList.add('disabled');
-        btnEditBusiness.classList.add('disabled');
-        btnDeleteBusiness.classList.add('disabled');
-        btnManageAccounts.classList.add('disabled');
-      } else {
-        btnAddBusiness.classList.remove('disabled');
-        btnEditBusiness.classList.remove('disabled');
-        btnDeleteBusiness.classList.remove('disabled');
-        btnManageAccounts.classList.remove('disabled');
-      }
-    }
-    
-    // Edit and Delete buttons follow admin permissions
+    // Disable business management buttons for non-admins
+    btnAddBusiness.disabled = !isAdmin;
     btnEditBusiness.disabled = !isAdmin;
     btnDeleteBusiness.disabled = !isAdmin;
+    btnManageAccounts.disabled = !isAdmin;
+    
     if(!isAdmin){
+      btnAddBusiness.classList.add('disabled');
       btnEditBusiness.classList.add('disabled');
       btnDeleteBusiness.classList.add('disabled');
+      btnManageAccounts.classList.add('disabled');
     } else {
+      btnAddBusiness.classList.remove('disabled');
       btnEditBusiness.classList.remove('disabled');
       btnDeleteBusiness.classList.remove('disabled');
+      btnManageAccounts.classList.remove('disabled');
     }
   }
 
@@ -1945,7 +2163,7 @@
       switchAuthTab('login');
     });
     
-    // Forgot password link handler
+    // Forgot password link handler - wires to firebaseSendPasswordReset helper
     const authForgotPassword = document.getElementById('authForgotPassword');
     const authLoginMsg = document.getElementById('authLoginMsg');
     if (authForgotPassword) {
@@ -1984,8 +2202,21 @@
         
         const email = inputValue.toLowerCase();
         
-        // Local prototype mode
-        showMsg('Password reset is not available in prototype mode. Please contact your admin.', true);
+        // Check if Firebase is enabled
+        if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+          showMsg('Sending password reset link...', false);
+          
+          const result = await firebaseSendPasswordReset(email);
+          
+          if (result.success) {
+            showMsg('Password reset email sent! Check your inbox.', false);
+          } else {
+            showMsg(result.error || 'Failed to send reset email.', true);
+          }
+        } else {
+          // Fallback for local prototype mode
+          showMsg('Password reset is not available in prototype mode. Please contact your admin.', true);
+        }
       });
     }
     
@@ -2030,7 +2261,20 @@
           return;
         }
         
-        // Hash password for local storage
+        // Firebase signup if enabled
+        let firebaseUid = null;
+        if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Creating account...'; authSignupMsg.style.color = 'var(--muted)'; }
+          
+          const fbResult = await firebaseSignUp(email, pass);
+          if (!fbResult.success) {
+            if (authSignupMsg) { authSignupMsg.textContent = fbResult.error || 'Firebase signup failed'; authSignupMsg.style.color = '#b00'; }
+            return;
+          }
+          firebaseUid = fbResult.user.uid;
+        }
+        
+        // Hash password for local storage (backup/fallback)
         const passwordHash = await sha256Hex(pass);
         
         // Create user
@@ -2041,6 +2285,7 @@
           display: name,
           email: email,
           passwordHash: passwordHash,
+          firebaseUid: firebaseUid, // Map to Firebase UID if available
           role: 'User',
           isAdmin: false,
           permissions: { view: true, edit: true, delete: false },
@@ -2054,7 +2299,7 @@
         state.users.push(newUser);
         state.auth.currentUserId = userId;
         saveState();
-        addAudit('user.signup', 'user', userId, 'User signed up via auth panel: ' + username);
+        addAudit('user.signup', 'user', userId, 'User signed up via auth panel: ' + username + (firebaseUid ? ' (Firebase)' : ' (Local)'));
         
         // Clear form
         if (authSignupName) authSignupName.value = '';
@@ -2628,8 +2873,7 @@
     } else {
       const newBiz = {
         id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
-        entity: bizEntity.value,
-        entityLocked: true, // Lock entity type after creation
+        entity: bizEntity.value, 
         vatRate: Number(bizVat.value||DEFAULTS.vatRate), 
         whtRate: Number(bizWht.value||DEFAULTS.whtRate), 
         citRate: Number(bizCit.value||DEFAULTS.citRate),
@@ -2640,26 +2884,13 @@
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       };
-      // Add default accounts based on entity type
-      if (newBiz.entity === 'Individual') {
-        // For Individual: add only income accounts
-        newBiz.accounts.push({ id: uid('acct'), name:'sales revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'dividend', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'interest', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'royalty', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'rent', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'benefit in kind', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'share of profit', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
-      } else {
-        // For Company/Enterprise: add standard accounts
-        newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
-        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      }
+      // Removed Sales account as per requirements
+      newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -2708,12 +2939,7 @@
     const isIndividual = b.entity === 'Individual';
     
     if (isIndividual) {
-      // Default action to Income for Individual
-      if (!txnAction.value || txnAction.value === '') {
-        txnAction.value = 'Income';
-      }
-      
-      // Hide panels for Individual
+      // Hide panels and elements for Individual
       const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
       const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
       const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
@@ -2721,19 +2947,22 @@
       if(assetsQuick) assetsQuick.style.display = 'none';
       if(plQuick) plQuick.style.display = 'none';
       
-      // Restrict actions - only show Income and empty option for Individuals
+      // Restrict actions - only show Income for Individuals
       Array.from(txnAction.options).forEach(opt => {
-        if (opt.value === '' || opt.value === 'Income') {
-          opt.style.display = '';
-        } else {
+        if (opt.value && opt.value !== 'Income') {
           opt.style.display = 'none';
+        } else if (opt.value === 'Income') {
+          opt.style.display = '';
         }
       });
       
-      // Adjust adjustment type dropdown for Individual - only show None and Non-taxable
-      Array.from(txnAdjustmentType.options).forEach(opt => {
-        if (opt.value === '' || opt.value === 'nontaxable') {
-          opt.style.display = '';
+      // Restrict accounts - show Individual income accounts, hide Salary
+      Array.from(txnAccount.options).forEach(opt => {
+        const accountText = opt.textContent.split(' (')[0]; // Get name without category
+        if (accountText === 'Salary') {
+          opt.style.display = 'none';  // Hide Salary for Individual
+        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
+          opt.style.display = '';  // Show Individual income accounts
         } else {
           opt.style.display = 'none';
         }
@@ -2747,9 +2976,9 @@
       if(assetsQuick) assetsQuick.style.display = 'block';
       if(plQuick) plQuick.style.display = 'block';
       
-      // Show all actions and adjustment types for non-Individual entities
+      // Show all actions and accounts for non-Individual entities
       Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAdjustmentType.options).forEach(opt => { opt.style.display = ''; });
+      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
     }
   }
 
@@ -2918,51 +3147,15 @@
     assetDisposalAccount.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
-    
     for(const a of b.accounts){
-      // For Individual entity: filter account lists
-      if(b.entity === 'Individual') {
-        // Only show income accounts (Revenue category) in transaction account dropdown
-        // Check if account name matches individual income accounts (case-insensitive)
-        const accountNameLower = (a.name || '').toLowerCase();
-        const isIncomeAccount = INDIVIDUAL_INCOME_ACCOUNTS.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
-        
-        if(a.category === 'Revenue' && isIncomeAccount) {
-          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
-          txnAccount.appendChild(opt);
-        } else if(a.category === 'Asset') {
-          // Allow Asset accounts (e.g., Bank)
-          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
-          txnAccount.appendChild(opt);
-        }
-        // Skip expense accounts for Individual
-      } else {
-        // For Company/Enterprise: show all accounts
-        const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
-        txnAccount.appendChild(opt);
-      }
-      
-      // Inventory and asset account selects: apply same filtering
-      if(b.entity === 'Individual') {
-        const accountNameLower = (a.name || '').toLowerCase();
-        const isIncomeAccount = INDIVIDUAL_INCOME_ACCOUNTS.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
-        
-        if((a.category === 'Revenue' && isIncomeAccount) || a.category === 'Asset') {
-          const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
-          invAccountSelect.appendChild(opt2);
-          const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
-          assetPurchaseAccount.appendChild(opt3);
-          const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
-          assetDisposalAccount.appendChild(opt4);
-        }
-      } else {
-        const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
-        invAccountSelect.appendChild(opt2);
-        const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
-        assetPurchaseAccount.appendChild(opt3);
-        const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
-        assetDisposalAccount.appendChild(opt4);
-      }
+      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+      txnAccount.appendChild(opt);
+      const opt2 = opt.cloneNode(true);
+      invAccountSelect.appendChild(opt2);
+      const opt3 = opt.cloneNode(true);
+      assetPurchaseAccount.appendChild(opt3);
+      const opt4 = opt.cloneNode(true);
+      assetDisposalAccount.appendChild(opt4);
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
@@ -3003,11 +3196,6 @@
     txnSalary.checked = false;
     txnContact.value = '';
     txnReceipt.value = '';
-    
-    // Reset adjustment fields
-    txnAdjustmentType.value = '';
-    txnAdjustmentAmount.value = '';
-    txnAdjustmentAmountLabel.style.display = 'none';
 
     invItemSelect.value=''; invNewName.value=''; invAccountSelect.selectedIndex=0; invQty.value=''; invUnitPrice.value=''; invVatType.value='none'; invContact.value=''; invReceipt.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
 
@@ -3026,42 +3214,25 @@
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
     
-    // Handle adjustment transactions - create adjustment entry with adjusted_amount
+    // Handle adjustment transactions
     if(txnAdjustmentType.value && txnAdjustmentType.value !== ''){
       const adjustmentAmount = Number(txnAdjustmentAmount.value || 0);
       if(adjustmentAmount <= 0) return alert('Adjustment amount required');
       
-      const baseAmount = Number(txnAmount.value || 0);
-      if(baseAmount <= 0) return alert('Transaction amount required for adjustment');
-      
-      // Calculate adjusted_amount based on adjustment type
-      let adjustedAmount = baseAmount;
-      if(txnAdjustmentType.value === 'nontaxable') {
-        // Non-taxable: adjusted_amount = amount - adjustmentAmount
-        adjustedAmount = baseAmount - adjustmentAmount;
-      } else if(txnAdjustmentType.value === 'disallowable') {
-        // Disallowable: adjusted_amount = amount + adjustmentAmount
-        adjustedAmount = baseAmount + adjustmentAmount;
-      }
-      
       const adjTxn = {
         id: uid('txn'),
         date: txnDate.value || today(),
-        action: txnAction.value || 'Income',
+        action: 'Adjustment',
         accountId: txnAccount.value,
         accountName: findAccount(b, txnAccount.value)?.name || '',
         accountCategory: findAccount(b, txnAccount.value)?.category || '',
-        description: txnDesc.value || `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
-        amount: baseAmount,
-        adjusted_amount: adjustedAmount,
+        description: `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
+        amount: adjustmentAmount,
         adjustmentType: txnAdjustmentType.value,
-        adjustmentAmount: adjustmentAmount,
-        vatType: txnVatType.value || 'none',
-        whtApplied: !!txnWht.checked,
-        whtRate: Number(txnWhtRate.value || 0),
-        whtBasis: txnWhtBasis.value || 'gross',
-        paye: !!txnSalary.checked,
-        contact: txnContact.value || '',
+        vatType: 'none',
+        whtApplied: false,
+        paye: false,
+        contact: '',
         receiptId: null
       };
       pushTransaction(adjTxn);
@@ -3618,14 +3789,6 @@
       const tdAccount = document.createElement('td'); tdAccount.textContent = t.accountName || '';
       const tdDesc = document.createElement('td'); tdDesc.textContent = t.description || '';
       const tdAmount = document.createElement('td'); tdAmount.textContent = fmt(t.amount||0);
-      const tdAdjustedAmount = document.createElement('td');
-      // Show adjusted amount if present, otherwise show dash
-      if (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) {
-        tdAdjustedAmount.textContent = fmt(t.adjusted_amount);
-        tdAdjustedAmount.style.color = '#059669'; // Green to indicate adjustment
-      } else {
-        tdAdjustedAmount.textContent = '-';
-      }
       const tdVat = document.createElement('td'); tdVat.textContent = t.vatType || '';
       const tdWht = document.createElement('td'); tdWht.textContent = t.whtApplied ? ((t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%') : '';
       const tdPaye = document.createElement('td'); tdPaye.textContent = t.paye ? 'Yes' : '';
@@ -3658,7 +3821,6 @@
       tr.appendChild(tdAccount);
       tr.appendChild(tdDesc);
       tr.appendChild(tdAmount);
-      tr.appendChild(tdAdjustedAmount);
       tr.appendChild(tdVat);
       tr.appendChild(tdWht);
       tr.appendChild(tdPaye);
@@ -3723,15 +3885,6 @@
     txnWht.checked = !!tx.whtApplied; txnWhtRate.value = tx.whtRate || '';
     txnSalary.checked = !!tx.paye;
     txnContact.value = tx.contact || '';
-    
-    // Load adjustment fields if present
-    txnAdjustmentType.value = tx.adjustmentType || '';
-    txnAdjustmentAmount.value = tx.adjustmentAmount || '';
-    if(tx.adjustmentType && tx.adjustmentType !== '') {
-      txnAdjustmentAmountLabel.style.display = 'inline-flex';
-    } else {
-      txnAdjustmentAmountLabel.style.display = 'none';
-    }
 
     btnAddTxn.textContent = 'Save';
     btnAddTxn.dataset.edit = tx.id;
@@ -3756,23 +3909,6 @@
     tx.whtApplied = !!txnWht.checked; tx.whtRate = Number(txnWhtRate.value || 0); tx.whtBasis = txnWhtBasis.value || 'gross';
     tx.paye = !!txnSalary.checked;
     tx.contact = txnContact.value || '';
-    
-    // Handle adjustment updates
-    tx.adjustmentType = txnAdjustmentType.value || null;
-    tx.adjustmentAmount = txnAdjustmentType.value ? Number(txnAdjustmentAmount.value || 0) : null;
-    
-    // Recalculate adjusted_amount if adjustment is present
-    if(tx.adjustmentType && tx.adjustmentType !== '' && tx.adjustmentAmount) {
-      if(tx.adjustmentType === 'nontaxable') {
-        tx.adjusted_amount = tx.amount - tx.adjustmentAmount;
-      } else if(tx.adjustmentType === 'disallowable') {
-        tx.adjusted_amount = tx.amount + tx.adjustmentAmount;
-      }
-    } else {
-      // Clear adjusted_amount if no adjustment
-      tx.adjusted_amount = null;
-    }
-    
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
       const reader = new FileReader();
@@ -3927,16 +4063,7 @@
     }
     
     const pl = computePLSnapshot();
-    const b = findBiz(selectedBizId);
-    const isIndividual = b && b.entity === 'Individual';
-    
-    if(isIndividual) {
-      // For Individual: show only Gross Income and Taxable Income, hide expenses
-      plSnapshotQuick.innerHTML = `<div><strong>Gross Income:</strong> ${fmt(pl.revenue)}</div><div><strong>Taxable Income:</strong> ${fmt(pl.accountingProfit)}</div>`;
-    } else {
-      // For Company/Enterprise: show full accounting profit with details
-      plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
-    }
+    plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
   }
 
   // PL computation
@@ -4448,10 +4575,10 @@
     
     let html = '';
     if(isIndividual){
-      // For Individual: show simplified summary - no Expenses detail, no WHT Payable, no PAYE, no CA details
+      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
       html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      // Hide expenses section for Individual as per requirements
+      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
       html += `<hr/>`;
       // For Individual: show only WHT Receivable and PIT
       html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
@@ -5353,45 +5480,29 @@
       reportContent.innerHTML = html;
       
     } else if(name === 'pitIndividual'){
-      // PIT Individual report - compute from actual transactions using adjusted_amount where present
+      // PIT Individual report - compute from actual transactions
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const currentYear = new Date().getFullYear();
       
-      // Compute income by category using adjusted_amount if present
-      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0, salesRevenue = 0;
+      // Compute income by category
+      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0;
       let totalGrossIncome = 0;
-      let totalWHTReceivable = 0;
       
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
-          // Use adjusted_amount if present, otherwise use amount
-          const taxableAmount = (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) 
-            ? Number(t.adjusted_amount || 0) 
-            : Number(t.amount || 0);
-          totalGrossIncome += taxableAmount;
+          const amount = Number(t.amount || 0);
+          totalGrossIncome += amount;
           
           const acct = findAccount(b, t.accountId);
           const acctName = acct ? acct.name.toLowerCase() : '';
           
-          if(acctName.includes('salary')) salary += taxableAmount;
-          else if(acctName.includes('dividend')) dividend += taxableAmount;
-          else if(acctName.includes('interest')) interest += taxableAmount;
-          else if(acctName.includes('royalty')) royalty += taxableAmount;
-          else if(acctName.includes('rent')) rent += taxableAmount;
-          else if(acctName.includes('benefit')) benefitInKind += taxableAmount;
-          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += taxableAmount;
-          else if(acctName.includes('sales') || acctName.includes('revenue')) salesRevenue += taxableAmount;
-        }
-        
-        // Compute WHT Receivable using stored wht_amount if available
-        if(t.whtApplied && t.accountCategory === 'Revenue') {
-          if (typeof t.wht_amount !== 'undefined' && t.wht_amount !== null) {
-            totalWHTReceivable += Number(t.wht_amount || 0);
-          } else {
-            const rate = Number(t.whtRate || b.whtRate) / 100;
-            const whtBasis = Number(t.amount || 0);
-            totalWHTReceivable += whtBasis * rate;
-          }
+          if(acctName.includes('salary')) salary += amount;
+          else if(acctName.includes('dividend')) dividend += amount;
+          else if(acctName.includes('interest')) interest += amount;
+          else if(acctName.includes('royalty')) royalty += amount;
+          else if(acctName.includes('rent')) rent += amount;
+          else if(acctName.includes('benefit')) benefitInKind += amount;
+          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += amount;
         }
       }
       
@@ -5399,26 +5510,35 @@
       const ded = getStatutoryDeductions(b, null);
       const totalDed = totalStatutoryDeductions(ded);
       
-      // Taxable income = Gross Income - Statutory Deductions - WHT
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed - totalWHTReceivable);
+      // Taxable income
+      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
       
-      // Compute PIT using bands (annual)
-      const pitAnnual = computePAYEOnAnnualIncome(taxableIncome);
-      const pitMonthly = pitAnnual / 12;
+      // Compute PIT using bands
+      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
+      
+      // WHT receivable
+      let whtReceivable = 0;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          const rate = Number(t.whtRate || b.whtRate) / 100;
+          whtReceivable += Number(t.amount || 0) * rate;
+        }
+      }
+      
+      const finalPIT = Math.max(0, pitLiability - whtReceivable);
       
       let html = `<h3>Personal Income Tax Computation (Individual) - ${currentYear}</h3>`;
       html += `<p><strong>Name:</strong> ${b.name}</p>`;
       html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
       html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
       html += `<tr><td colspan="2"><strong>Gross Income</strong></td></tr>`;
-      if(salary > 0) html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
-      if(salesRevenue > 0) html += `<tr><td style="padding-left:20px;">Sales Revenue</td><td style="text-align:right;">${fmt(salesRevenue)}</td></tr>`;
-      if(dividend > 0) html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
-      if(interest > 0) html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
-      if(royalty > 0) html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
-      if(rent > 0) html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
-      if(benefitInKind > 0) html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
-      if(shareOfProfit > 0) html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Gross Income</strong></td><td style="text-align:right;"><strong>${fmt(totalGrossIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
@@ -5426,16 +5546,12 @@
       html += `<tr><td style="padding-left:20px;">Life assurance</td><td style="text-align:right;">${fmt(ded.life)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Mortgage interest</td><td style="text-align:right;">${fmt(ded.mortgage)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">NHF</td><td style="text-align:right;">${fmt(ded.nhf)}</td></tr>`;
-      html += `<tr style="background:#fff4e6;"><td><strong>Total Statutory Deductions</strong></td><td style="text-align:right;"><strong>${fmt(totalDed)}</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(totalWHTReceivable)})</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">PIT Annual (as per bands)</td><td style="text-align:right;">${fmt(pitAnnual)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">PIT Monthly</td><td style="text-align:right;">${fmt(pitMonthly)}</td></tr>`;
-      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Annual</strong></td><td style="text-align:right;"><strong>${fmt(pitAnnual)}</strong></td></tr>`;
-      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Monthly</strong></td><td style="text-align:right;"><strong>${fmt(pitMonthly)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
       html += `</tbody></table>`;
-      html += `<div class="small-note" style="margin-top:12px;">Note: PIT figures show final annual and monthly values. Adjustments (if any) are reflected in taxable income via adjusted_amount.</div>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'pitEnterprise'){
@@ -5853,13 +5969,46 @@
   resetForms();
   renderAll();
   
-  // Auth UI Initialization
-  (function initAuthUI() {
+  // Firebase Auth UI Initialization
+  (function initFirebaseAuthUI() {
     const authModeNote = document.getElementById('authModeNote');
     
-    // Update auth mode note
+    // Update auth mode note based on Firebase availability
     if (authModeNote) {
-      authModeNote.textContent = 'Note: This is a prototype. Credentials stored locally. Passwords hashed with SHA-256.';
+      if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+        authModeNote.textContent = 'Secure authentication powered by Firebase. Your data is stored locally in your browser.';
+      } else {
+        authModeNote.textContent = 'Note: This is a prototype. Credentials stored locally. Passwords hashed with SHA-256.';
+      }
+    }
+    
+    // Listen for Firebase auth state changes if enabled
+    if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && firebaseAuth) {
+      firebaseAuth.onAuthStateChanged(function(firebaseUser) {
+        if (firebaseUser) {
+          // User is signed in with Firebase
+          const localUserId = getLocalUserIdFromFirebaseUid(firebaseUser.uid);
+          if (localUserId && state.auth.currentUserId !== localUserId) {
+            // Sync local auth state with Firebase
+            state.auth.currentUserId = localUserId;
+            saveState();
+            updateAuthUI();
+            renderAll();
+          }
+        } else {
+          // User is signed out of Firebase
+          if (state.auth.currentUserId) {
+            const currentUser = state.users.find(function(u) { return u.id === state.auth.currentUserId; });
+            // Only auto-logout if the user was authenticated via Firebase
+            if (currentUser && currentUser.firebaseUid) {
+              state.auth.currentUserId = null;
+              saveState();
+              updateAuthUI();
+              renderAll();
+            }
+          }
+        }
+      });
     }
   })();
 
@@ -6214,12 +6363,25 @@
     const forgotSubmit = document.getElementById('forgotSubmit');
     const forgotEmail = document.getElementById('forgotEmail');
     const forgotMsg = document.getElementById('forgotMsg');
+    const forgotNoteFirebase = document.getElementById('forgotNoteFirebase');
     const forgotNoteLocal = document.getElementById('forgotNoteLocal');
     
     if (!forgotModal) return;
     
-    // Update UI - always show local note
-    if (forgotNoteLocal) forgotNoteLocal.style.display = 'block';
+    // Update UI based on Firebase availability
+    function updateForgotModalUI() {
+      if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+        if (forgotNoteFirebase) forgotNoteFirebase.style.display = 'block';
+        if (forgotNoteLocal) forgotNoteLocal.style.display = 'none';
+      } else {
+        if (forgotNoteFirebase) forgotNoteFirebase.style.display = 'none';
+        if (forgotNoteLocal) forgotNoteLocal.style.display = 'block';
+      }
+    }
+    
+    // Update UI initially and expose function globally for modal open
+    updateForgotModalUI();
+    window.updateForgotModalUI = updateForgotModalUI;
     
     if (forgotCancel) {
       forgotCancel.addEventListener('click', function() {
@@ -6245,23 +6407,43 @@
           return;
         }
         
-        // Local prototype behavior
-        // Check if user exists with this email
-        const user = state.users.find(function(u) { return u.email === email; });
-        if (!user) {
-          if (forgotMsg) { forgotMsg.textContent = 'No account found with this email.'; forgotMsg.style.color = '#b00'; }
-          return;
-        }
-        
-        addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for: ' + email);
-        
-        if (forgotMsg) { 
-          forgotMsg.textContent = 'Reset request logged. Please contact your admin or salesrepng@gmail.com.'; 
-          forgotMsg.style.color = 'green'; 
-        }
-        
-        // Clear form and close modal after delay
-        setTimeout(function() {
+        // Use Firebase password reset if available
+        if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
+          if (forgotMsg) { forgotMsg.textContent = 'Sending reset link...'; forgotMsg.style.color = 'var(--muted)'; }
+          
+          const result = await firebaseSendPasswordReset(email);
+          
+          if (result.success) {
+            if (forgotMsg) { forgotMsg.textContent = 'Password reset email sent! Check your inbox.'; forgotMsg.style.color = 'green'; }
+            addAudit('user.forgot_password_firebase', 'auth', null, 'Firebase password reset email sent to: ' + email);
+            
+            // Clear form and close modal after delay
+            setTimeout(function() {
+              if (forgotEmail) forgotEmail.value = '';
+              if (forgotMsg) forgotMsg.textContent = '';
+              closeModal(forgotModal);
+            }, 2500);
+          } else {
+            if (forgotMsg) { forgotMsg.textContent = result.error || 'Failed to send reset email.'; forgotMsg.style.color = '#b00'; }
+          }
+        } else {
+          // Fallback to local prototype behavior
+          // Check if user exists with this email
+          const user = state.users.find(function(u) { return u.email === email; });
+          if (!user) {
+            if (forgotMsg) { forgotMsg.textContent = 'No account found with this email.'; forgotMsg.style.color = '#b00'; }
+            return;
+          }
+          
+          addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for: ' + email);
+          
+          if (forgotMsg) { 
+            forgotMsg.textContent = 'Reset request logged. Please contact your admin or salesrepng@gmail.com.'; 
+            forgotMsg.style.color = 'green'; 
+          }
+          
+          // Clear form and close modal after delay
+          setTimeout(function() {
             if (forgotEmail) forgotEmail.value = '';
             if (forgotMsg) forgotMsg.textContent = '';
             closeModal(forgotModal);
@@ -6410,62 +6592,26 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    // Password reset unavailable in prototype mode
-    loginMsg.textContent = 'Password reset unavailable in prototype mode. Please contact your admin.';
+    // If Firebase not enabled, show helpful message
+    if (!isFirebaseAuthEnabled()) {
+      loginMsg.textContent = 'Password reset unavailable: Firebase not configured. Check FIREBASE_ENABLED and firebaseConfig.';
+      return;
+    }
+
+    // Call helper that uses firebaseAuth.sendPasswordResetEmail
+    try {
+      var res = await firebaseSendPasswordReset(email);
+      if (res.success) {
+        loginMsg.textContent = 'Password reset email sent. Check your inbox (and spam).';
+      } else {
+        loginMsg.textContent = 'Reset failed: ' + (res.error || 'Unknown error');
+      }
+    } catch (err) {
+      console.error('Forgot password error', err);
+      loginMsg.textContent = 'An unexpected error occurred. See console.';
+    }
   });
 });
-</script>
-
-<!-- Business Chat Widget -->
-<button id="businessChatBtn" title="Business Chat">💬</button>
-<div id="businessChatModal">
-  <div id="businessChatHeader">
-    <span id="businessChatTitle">Business Chat</span>
-    <button id="businessChatClose">×</button>
-  </div>
-  <div id="businessChatInfo"></div>
-  <div id="businessChatMessages"></div>
-  <div id="businessChatInput">
-    <input type="text" id="businessChatInputField" placeholder="Type a message…" />
-    <button id="businessChatSend">Send</button>
-  </div>
-</div>
-
-<script>
-(function initBusinessChat() {
-  // Business Chat functionality disabled (requires Firestore)
-  // Early return to minimize overhead
-  const chatBtn = document.getElementById('businessChatBtn');
-  if (!chatBtn) return;
-  
-  const chatModal = document.getElementById('businessChatModal');
-  if (!chatModal) return;
-  
-  const chatClose = document.getElementById('businessChatClose');
-  const chatMessages = document.getElementById('businessChatMessages');
-  const chatInput = document.getElementById('businessChatInputField');
-  const chatSend = document.getElementById('businessChatSend');
-  
-  // Toggle chat modal
-  chatBtn.onclick = function() {
-    const isVisible = chatModal.style.display === 'flex';
-    chatModal.style.display = isVisible ? 'none' : 'flex';
-    
-    if (!isVisible && chatMessages) {
-      chatMessages.innerHTML = '<div class="business-chat-loading">Business chat is currently unavailable.</div>';
-    }
-  };
-  
-  if (chatClose) {
-    chatClose.onclick = function() {
-      chatModal.style.display = 'none';
-    };
-  }
-  
-  // Disable input controls
-  if (chatInput) chatInput.disabled = true;
-  if (chatSend) chatSend.disabled = true;
-})();
 </script>
 </body>
   </html>
