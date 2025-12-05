@@ -824,7 +824,7 @@
         <table class="ledger-table" id="ledgerTable">
           <thead>
             <tr>
-              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
+              <th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th><th>Adj. Amount</th><th>VAT</th><th>WHT</th><th>PAYE</th><th>Contact</th><th>Receipt</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -849,7 +849,6 @@
         <button class="small tab" data-report="pitEnterprise">PIT (Enterprise)</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
         <button class="small tab" data-report="companyAccounts">Company Accounts</button>
-        <button class="small tab" data-report="auditTrail">Audit Trail</button>
         <button class="small tab" data-report="receiptsFolder">Receipts Folder</button>
       </div>
 
@@ -1217,6 +1216,9 @@
   const CGT_EXEMPTION_GAIN = 10000000; // ₦10,000,000
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
+  // Individual entity income accounts (for filtering and display)
+  const INDIVIDUAL_INCOME_ACCOUNTS = ['sales revenue', 'dividend', 'interest', 'royalty', 'rent', 'benefit in kind', 'share of profit'];
+  
   // Individual-only account names (for UI filtering)
   const INDIVIDUAL_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
 
@@ -1322,6 +1324,27 @@
       return biz.userIds.length;
     }
     return 1; // At least the owner
+  }
+
+  /**
+   * Gets all businesses owned by a user.
+   * @param {string} userId - The user ID
+   * @returns {Array} - Array of business objects
+   */
+  function getUserBusinesses(userId) {
+    if (!userId) return [];
+    return state.businesses.filter(b => b.ownerId === userId);
+  }
+
+  /**
+   * Checks if a user is a "new signup" user (has no businesses yet).
+   * @param {string} userId - The user ID
+   * @returns {boolean} - True if user has no businesses
+   */
+  function isNewSignupUser(userId) {
+    if (!userId) return false;
+    const userBusinesses = getUserBusinesses(userId);
+    return userBusinesses.length === 0;
   }
 
   /**
@@ -1579,6 +1602,48 @@
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
   function isLeapYear(y){ return (y%4===0 && y%100!==0) || (y%400===0); }
   function daysInYear(d){ const y = new Date(d).getFullYear(); return isLeapYear(y) ? 366 : 365; }
+
+  /**
+   * Computes VAT amount based on VAT type and rate
+   * @param {number} amount - Transaction amount
+   * @param {string} vatType - 'exclusive', 'inclusive', or 'none'
+   * @param {number} vatRate - VAT rate percentage (e.g., 7.5 for 7.5%)
+   * @returns {number} VAT amount
+   */
+  function computeVAT(amount, vatType, vatRate) {
+    if (!vatType || vatType === 'none') return 0;
+    const rate = Number(vatRate || 0);
+    const amt = Number(amount || 0);
+    
+    if (vatType === 'exclusive') {
+      // VAT exclusive: vat_amount = amount * (rate/100)
+      return amt * (rate / 100);
+    } else if (vatType === 'inclusive') {
+      // VAT inclusive: vat_amount = amount - (amount / (1 + rate/100))
+      return amt - (amt / (1 + rate / 100));
+    }
+    return 0;
+  }
+
+  /**
+   * Computes WHT amount based on basis and rate
+   * @param {number} amount - Transaction amount
+   * @param {string} basis - 'gross' or 'net'
+   * @param {number} whtRate - WHT rate percentage
+   * @returns {number} WHT amount
+   */
+  function computeWHT(amount, basis, whtRate) {
+    const rate = Number(whtRate || 0) / 100;
+    const amt = Number(amount || 0);
+    
+    if (basis === 'net') {
+      // WHT net basis: WHT = amount * (rate / (1 - rate))
+      return amt * (rate / (1 - rate));
+    } else {
+      // WHT gross basis (default): WHT = amount * rate
+      return amt * rate;
+    }
+  }
 
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -2010,23 +2075,57 @@
   function enforcePermissions(){
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
+    const currentUserId = state.auth.currentUserId;
     
-    // Disable business management buttons for non-admins
-    btnAddBusiness.disabled = !isAdmin;
+    // New signup user behavior: check if user has businesses
+    const isNewUser = isNewSignupUser(currentUserId);
+    const userBusinesses = getUserBusinesses(currentUserId);
+    const hasOneBusiness = userBusinesses.length === 1;
+    
+    // For new signup users: allow adding first business only
+    // For users with one business: hide "+ Business" button
+    if (isNewUser) {
+      // New user (no businesses): allow adding first business
+      btnAddBusiness.disabled = false;
+      btnAddBusiness.classList.remove('disabled');
+      btnAddBusiness.style.display = ''; // Show the button
+      // Enable Manage Accounts for new signups
+      btnManageAccounts.disabled = false;
+      btnManageAccounts.classList.remove('disabled');
+    } else if (hasOneBusiness) {
+      // User with exactly one business: hide "+ Business" button completely
+      btnAddBusiness.style.display = 'none';
+      // Enable Manage Accounts
+      btnManageAccounts.disabled = false;
+      btnManageAccounts.classList.remove('disabled');
+    } else {
+      // Legacy behavior for users with multiple businesses or admins
+      btnAddBusiness.disabled = !isAdmin;
+      btnManageAccounts.disabled = !isAdmin;
+      btnAddBusiness.style.display = ''; // Show the button
+      
+      if(!isAdmin){
+        btnAddBusiness.classList.add('disabled');
+        btnEditBusiness.classList.add('disabled');
+        btnDeleteBusiness.classList.add('disabled');
+        btnManageAccounts.classList.add('disabled');
+      } else {
+        btnAddBusiness.classList.remove('disabled');
+        btnEditBusiness.classList.remove('disabled');
+        btnDeleteBusiness.classList.remove('disabled');
+        btnManageAccounts.classList.remove('disabled');
+      }
+    }
+    
+    // Edit and Delete buttons follow admin permissions
     btnEditBusiness.disabled = !isAdmin;
     btnDeleteBusiness.disabled = !isAdmin;
-    btnManageAccounts.disabled = !isAdmin;
-    
     if(!isAdmin){
-      btnAddBusiness.classList.add('disabled');
       btnEditBusiness.classList.add('disabled');
       btnDeleteBusiness.classList.add('disabled');
-      btnManageAccounts.classList.add('disabled');
     } else {
-      btnAddBusiness.classList.remove('disabled');
       btnEditBusiness.classList.remove('disabled');
       btnDeleteBusiness.classList.remove('disabled');
-      btnManageAccounts.classList.remove('disabled');
     }
   }
 
@@ -2896,7 +2995,8 @@
     } else {
       const newBiz = {
         id: uid('biz'), name, ownerId: bizOwnerSelect.value || (state.users[0] && state.users[0].id),
-        entity: bizEntity.value, 
+        entity: bizEntity.value,
+        entityLocked: true, // Lock entity type after creation
         vatRate: Number(bizVat.value||DEFAULTS.vatRate), 
         whtRate: Number(bizWht.value||DEFAULTS.whtRate), 
         citRate: Number(bizCit.value||DEFAULTS.citRate),
@@ -2907,13 +3007,26 @@
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       };
-      // Removed Sales account as per requirements
-      newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      // Add default accounts based on entity type
+      if (newBiz.entity === 'Individual') {
+        // For Individual: add only income accounts
+        newBiz.accounts.push({ id: uid('acct'), name:'sales revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'dividend', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'interest', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'royalty', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'rent', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'benefit in kind', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'share of profit', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      } else {
+        // For Company/Enterprise: add standard accounts
+        newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+        newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      }
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -2962,7 +3075,12 @@
     const isIndividual = b.entity === 'Individual';
     
     if (isIndividual) {
-      // Hide panels and elements for Individual
+      // Default action to Income for Individual
+      if (!txnAction.value || txnAction.value === '') {
+        txnAction.value = 'Income';
+      }
+      
+      // Hide panels for Individual
       const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
       const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
       const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
@@ -2970,22 +3088,19 @@
       if(assetsQuick) assetsQuick.style.display = 'none';
       if(plQuick) plQuick.style.display = 'none';
       
-      // Restrict actions - only show Income for Individuals
+      // Restrict actions - only show Income and empty option for Individuals
       Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Income') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Income') {
+        if (opt.value === '' || opt.value === 'Income') {
           opt.style.display = '';
+        } else {
+          opt.style.display = 'none';
         }
       });
       
-      // Restrict accounts - show Individual income accounts, hide Salary
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (accountText === 'Salary') {
-          opt.style.display = 'none';  // Hide Salary for Individual
-        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
-          opt.style.display = '';  // Show Individual income accounts
+      // Adjust adjustment type dropdown for Individual - only show None and Non-taxable
+      Array.from(txnAdjustmentType.options).forEach(opt => {
+        if (opt.value === '' || opt.value === 'nontaxable') {
+          opt.style.display = '';
         } else {
           opt.style.display = 'none';
         }
@@ -2999,9 +3114,9 @@
       if(assetsQuick) assetsQuick.style.display = 'block';
       if(plQuick) plQuick.style.display = 'block';
       
-      // Show all actions and accounts for non-Individual entities
+      // Show all actions and adjustment types for non-Individual entities
       Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
+      Array.from(txnAdjustmentType.options).forEach(opt => { opt.style.display = ''; });
     }
   }
 
@@ -3170,15 +3285,51 @@
     assetDisposalAccount.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
+    
     for(const a of b.accounts){
-      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
-      txnAccount.appendChild(opt);
-      const opt2 = opt.cloneNode(true);
-      invAccountSelect.appendChild(opt2);
-      const opt3 = opt.cloneNode(true);
-      assetPurchaseAccount.appendChild(opt3);
-      const opt4 = opt.cloneNode(true);
-      assetDisposalAccount.appendChild(opt4);
+      // For Individual entity: filter account lists
+      if(b.entity === 'Individual') {
+        // Only show income accounts (Revenue category) in transaction account dropdown
+        // Check if account name matches individual income accounts (case-insensitive)
+        const accountNameLower = (a.name || '').toLowerCase();
+        const isIncomeAccount = INDIVIDUAL_INCOME_ACCOUNTS.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
+        
+        if(a.category === 'Revenue' && isIncomeAccount) {
+          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+          txnAccount.appendChild(opt);
+        } else if(a.category === 'Asset') {
+          // Allow Asset accounts (e.g., Bank)
+          const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+          txnAccount.appendChild(opt);
+        }
+        // Skip expense accounts for Individual
+      } else {
+        // For Company/Enterprise: show all accounts
+        const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+        txnAccount.appendChild(opt);
+      }
+      
+      // Inventory and asset account selects: apply same filtering
+      if(b.entity === 'Individual') {
+        const accountNameLower = (a.name || '').toLowerCase();
+        const isIncomeAccount = INDIVIDUAL_INCOME_ACCOUNTS.some(incomeAcc => accountNameLower.includes(incomeAcc.toLowerCase()));
+        
+        if((a.category === 'Revenue' && isIncomeAccount) || a.category === 'Asset') {
+          const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
+          invAccountSelect.appendChild(opt2);
+          const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
+          assetPurchaseAccount.appendChild(opt3);
+          const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
+          assetDisposalAccount.appendChild(opt4);
+        }
+      } else {
+        const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
+        invAccountSelect.appendChild(opt2);
+        const opt3 = document.createElement('option'); opt3.value = a.id; opt3.textContent = a.name + ' ('+a.category+')';
+        assetPurchaseAccount.appendChild(opt3);
+        const opt4 = document.createElement('option'); opt4.value = a.id; opt4.textContent = a.name + ' ('+a.category+')';
+        assetDisposalAccount.appendChild(opt4);
+      }
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
@@ -3219,6 +3370,11 @@
     txnSalary.checked = false;
     txnContact.value = '';
     txnReceipt.value = '';
+    
+    // Reset adjustment fields
+    txnAdjustmentType.value = '';
+    txnAdjustmentAmount.value = '';
+    txnAdjustmentAmountLabel.style.display = 'none';
 
     invItemSelect.value=''; invNewName.value=''; invAccountSelect.selectedIndex=0; invQty.value=''; invUnitPrice.value=''; invVatType.value='none'; invContact.value=''; invReceipt.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
 
@@ -3237,25 +3393,42 @@
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
     
-    // Handle adjustment transactions
+    // Handle adjustment transactions - create adjustment entry with adjusted_amount
     if(txnAdjustmentType.value && txnAdjustmentType.value !== ''){
       const adjustmentAmount = Number(txnAdjustmentAmount.value || 0);
       if(adjustmentAmount <= 0) return alert('Adjustment amount required');
       
+      const baseAmount = Number(txnAmount.value || 0);
+      if(baseAmount <= 0) return alert('Transaction amount required for adjustment');
+      
+      // Calculate adjusted_amount based on adjustment type
+      let adjustedAmount = baseAmount;
+      if(txnAdjustmentType.value === 'nontaxable') {
+        // Non-taxable: adjusted_amount = amount - adjustmentAmount
+        adjustedAmount = baseAmount - adjustmentAmount;
+      } else if(txnAdjustmentType.value === 'disallowable') {
+        // Disallowable: adjusted_amount = amount + adjustmentAmount
+        adjustedAmount = baseAmount + adjustmentAmount;
+      }
+      
       const adjTxn = {
         id: uid('txn'),
         date: txnDate.value || today(),
-        action: 'Adjustment',
+        action: txnAction.value || 'Income',
         accountId: txnAccount.value,
         accountName: findAccount(b, txnAccount.value)?.name || '',
         accountCategory: findAccount(b, txnAccount.value)?.category || '',
-        description: `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
-        amount: adjustmentAmount,
+        description: txnDesc.value || `Adjustment: ${txnAdjustmentType.value === 'disallowable' ? 'Disallowable expense' : 'Non-taxable income'}`,
+        amount: baseAmount,
+        adjusted_amount: adjustedAmount,
         adjustmentType: txnAdjustmentType.value,
-        vatType: 'none',
-        whtApplied: false,
-        paye: false,
-        contact: '',
+        adjustmentAmount: adjustmentAmount,
+        vatType: txnVatType.value || 'none',
+        whtApplied: !!txnWht.checked,
+        whtRate: Number(txnWhtRate.value || 0),
+        whtBasis: txnWhtBasis.value || 'gross',
+        paye: !!txnSalary.checked,
+        contact: txnContact.value || '',
         receiptId: null
       };
       pushTransaction(adjTxn);
@@ -3812,6 +3985,14 @@
       const tdAccount = document.createElement('td'); tdAccount.textContent = t.accountName || '';
       const tdDesc = document.createElement('td'); tdDesc.textContent = t.description || '';
       const tdAmount = document.createElement('td'); tdAmount.textContent = fmt(t.amount||0);
+      const tdAdjustedAmount = document.createElement('td');
+      // Show adjusted amount if present, otherwise show dash
+      if (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) {
+        tdAdjustedAmount.textContent = fmt(t.adjusted_amount);
+        tdAdjustedAmount.style.color = '#059669'; // Green to indicate adjustment
+      } else {
+        tdAdjustedAmount.textContent = '-';
+      }
       const tdVat = document.createElement('td'); tdVat.textContent = t.vatType || '';
       const tdWht = document.createElement('td'); tdWht.textContent = t.whtApplied ? ((t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%') : '';
       const tdPaye = document.createElement('td'); tdPaye.textContent = t.paye ? 'Yes' : '';
@@ -3844,6 +4025,7 @@
       tr.appendChild(tdAccount);
       tr.appendChild(tdDesc);
       tr.appendChild(tdAmount);
+      tr.appendChild(tdAdjustedAmount);
       tr.appendChild(tdVat);
       tr.appendChild(tdWht);
       tr.appendChild(tdPaye);
@@ -3908,6 +4090,15 @@
     txnWht.checked = !!tx.whtApplied; txnWhtRate.value = tx.whtRate || '';
     txnSalary.checked = !!tx.paye;
     txnContact.value = tx.contact || '';
+    
+    // Load adjustment fields if present
+    txnAdjustmentType.value = tx.adjustmentType || '';
+    txnAdjustmentAmount.value = tx.adjustmentAmount || '';
+    if(tx.adjustmentType && tx.adjustmentType !== '') {
+      txnAdjustmentAmountLabel.style.display = 'inline-flex';
+    } else {
+      txnAdjustmentAmountLabel.style.display = 'none';
+    }
 
     btnAddTxn.textContent = 'Save';
     btnAddTxn.dataset.edit = tx.id;
@@ -3932,6 +4123,23 @@
     tx.whtApplied = !!txnWht.checked; tx.whtRate = Number(txnWhtRate.value || 0); tx.whtBasis = txnWhtBasis.value || 'gross';
     tx.paye = !!txnSalary.checked;
     tx.contact = txnContact.value || '';
+    
+    // Handle adjustment updates
+    tx.adjustmentType = txnAdjustmentType.value || null;
+    tx.adjustmentAmount = txnAdjustmentType.value ? Number(txnAdjustmentAmount.value || 0) : null;
+    
+    // Recalculate adjusted_amount if adjustment is present
+    if(tx.adjustmentType && tx.adjustmentType !== '' && tx.adjustmentAmount) {
+      if(tx.adjustmentType === 'nontaxable') {
+        tx.adjusted_amount = tx.amount - tx.adjustmentAmount;
+      } else if(tx.adjustmentType === 'disallowable') {
+        tx.adjusted_amount = tx.amount + tx.adjustmentAmount;
+      }
+    } else {
+      // Clear adjusted_amount if no adjustment
+      tx.adjusted_amount = null;
+    }
+    
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
       const reader = new FileReader();
@@ -4086,7 +4294,16 @@
     }
     
     const pl = computePLSnapshot();
-    plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
+    const b = findBiz(selectedBizId);
+    const isIndividual = b && b.entity === 'Individual';
+    
+    if(isIndividual) {
+      // For Individual: show only Gross Income and Taxable Income, hide expenses
+      plSnapshotQuick.innerHTML = `<div><strong>Gross Income:</strong> ${fmt(pl.revenue)}</div><div><strong>Taxable Income:</strong> ${fmt(pl.accountingProfit)}</div>`;
+    } else {
+      // For Company/Enterprise: show full accounting profit with details
+      plSnapshotQuick.innerHTML = `<div><strong>Accounting Profit:</strong> ${fmt(pl.accountingProfit)}</div><div class="small-muted">Revenue ${fmt(pl.revenue)} | Expenses ${fmt(pl.expenses)} | Depreciation ${fmt(pl.depreciation)}</div>`;
+    }
   }
 
   // PL computation
@@ -4598,10 +4815,10 @@
     
     let html = '';
     if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
+      // For Individual: show simplified summary - no Expenses detail, no WHT Payable, no PAYE, no CA details
       html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
+      // Hide expenses section for Individual as per requirements
       html += `<hr/>`;
       // For Individual: show only WHT Receivable and PIT
       html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
@@ -5503,29 +5720,45 @@
       reportContent.innerHTML = html;
       
     } else if(name === 'pitIndividual'){
-      // PIT Individual report - compute from actual transactions
+      // PIT Individual report - compute from actual transactions using adjusted_amount where present
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const currentYear = new Date().getFullYear();
       
-      // Compute income by category
-      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0;
+      // Compute income by category using adjusted_amount if present
+      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0, salesRevenue = 0;
       let totalGrossIncome = 0;
+      let totalWHTReceivable = 0;
       
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
-          const amount = Number(t.amount || 0);
-          totalGrossIncome += amount;
+          // Use adjusted_amount if present, otherwise use amount
+          const taxableAmount = (typeof t.adjusted_amount !== 'undefined' && t.adjusted_amount !== null) 
+            ? Number(t.adjusted_amount || 0) 
+            : Number(t.amount || 0);
+          totalGrossIncome += taxableAmount;
           
           const acct = findAccount(b, t.accountId);
           const acctName = acct ? acct.name.toLowerCase() : '';
           
-          if(acctName.includes('salary')) salary += amount;
-          else if(acctName.includes('dividend')) dividend += amount;
-          else if(acctName.includes('interest')) interest += amount;
-          else if(acctName.includes('royalty')) royalty += amount;
-          else if(acctName.includes('rent')) rent += amount;
-          else if(acctName.includes('benefit')) benefitInKind += amount;
-          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += amount;
+          if(acctName.includes('salary')) salary += taxableAmount;
+          else if(acctName.includes('dividend')) dividend += taxableAmount;
+          else if(acctName.includes('interest')) interest += taxableAmount;
+          else if(acctName.includes('royalty')) royalty += taxableAmount;
+          else if(acctName.includes('rent')) rent += taxableAmount;
+          else if(acctName.includes('benefit')) benefitInKind += taxableAmount;
+          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += taxableAmount;
+          else if(acctName.includes('sales') || acctName.includes('revenue')) salesRevenue += taxableAmount;
+        }
+        
+        // Compute WHT Receivable using stored wht_amount if available
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          if (typeof t.wht_amount !== 'undefined' && t.wht_amount !== null) {
+            totalWHTReceivable += Number(t.wht_amount || 0);
+          } else {
+            const rate = Number(t.whtRate || b.whtRate) / 100;
+            const whtBasis = Number(t.amount || 0);
+            totalWHTReceivable += whtBasis * rate;
+          }
         }
       }
       
@@ -5533,35 +5766,26 @@
       const ded = getStatutoryDeductions(b, null);
       const totalDed = totalStatutoryDeductions(ded);
       
-      // Taxable income
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
+      // Taxable income = Gross Income - Statutory Deductions - WHT
+      const taxableIncome = Math.max(0, totalGrossIncome - totalDed - totalWHTReceivable);
       
-      // Compute PIT using bands
-      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
-      
-      // WHT receivable
-      let whtReceivable = 0;
-      for(const t of arr){
-        if(t.whtApplied && t.accountCategory === 'Revenue') {
-          const rate = Number(t.whtRate || b.whtRate) / 100;
-          whtReceivable += Number(t.amount || 0) * rate;
-        }
-      }
-      
-      const finalPIT = Math.max(0, pitLiability - whtReceivable);
+      // Compute PIT using bands (annual)
+      const pitAnnual = computePAYEOnAnnualIncome(taxableIncome);
+      const pitMonthly = pitAnnual / 12;
       
       let html = `<h3>Personal Income Tax Computation (Individual) - ${currentYear}</h3>`;
       html += `<p><strong>Name:</strong> ${b.name}</p>`;
       html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
       html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
       html += `<tr><td colspan="2"><strong>Gross Income</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
+      if(salary > 0) html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
+      if(salesRevenue > 0) html += `<tr><td style="padding-left:20px;">Sales Revenue</td><td style="text-align:right;">${fmt(salesRevenue)}</td></tr>`;
+      if(dividend > 0) html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
+      if(interest > 0) html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
+      if(royalty > 0) html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
+      if(rent > 0) html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
+      if(benefitInKind > 0) html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
+      if(shareOfProfit > 0) html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Gross Income</strong></td><td style="text-align:right;"><strong>${fmt(totalGrossIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
@@ -5569,12 +5793,16 @@
       html += `<tr><td style="padding-left:20px;">Life assurance</td><td style="text-align:right;">${fmt(ded.life)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Mortgage interest</td><td style="text-align:right;">${fmt(ded.mortgage)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">NHF</td><td style="text-align:right;">${fmt(ded.nhf)}</td></tr>`;
+      html += `<tr style="background:#fff4e6;"><td><strong>Total Statutory Deductions</strong></td><td style="text-align:right;"><strong>${fmt(totalDed)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(totalWHTReceivable)})</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
-      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">PIT Annual (as per bands)</td><td style="text-align:right;">${fmt(pitAnnual)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">PIT Monthly</td><td style="text-align:right;">${fmt(pitMonthly)}</td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Annual</strong></td><td style="text-align:right;"><strong>${fmt(pitAnnual)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Monthly</strong></td><td style="text-align:right;"><strong>${fmt(pitMonthly)}</strong></td></tr>`;
       html += `</tbody></table>`;
+      html += `<div class="small-note" style="margin-top:12px;">Note: PIT figures show final annual and monthly values. Adjustments (if any) are reflected in taxable income via adjusted_amount.</div>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'pitEnterprise'){
@@ -6911,4 +7139,4 @@ document.addEventListener('DOMContentLoaded', function () {
 })();
 </script>
 </body>
-    </html>
+  </html>
