@@ -129,6 +129,26 @@
     details.plan-card summary .plan-header-right .plan-offer-price { color:#059669; font-size:1.15rem; font-weight:700; }
     details.plan-card summary .plan-arrow { transition:transform 0.2s ease; font-size:0.8rem; color:#64748b; }
     details.plan-card[open] summary .plan-arrow { transform:rotate(180deg); }
+    
+    /* Business Chat UI Styles */
+    #businessChatBtn { position:fixed; bottom:24px; left:24px; z-index:9999; width:56px; height:56px; border-radius:50%; background:#10b981; color:#fff; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); display:flex; align-items:center; justify-content:center; font-size:1.5rem; transition:background 0.2s; }
+    #businessChatBtn:hover { background:#059669; }
+    #businessChatModal { position:fixed; bottom:90px; left:24px; z-index:9998; width:380px; max-height:520px; background:#fff; border:1px solid #ccc; border-radius:10px; display:none; flex-direction:column; box-shadow:0 6px 24px rgba(0,0,0,0.18); }
+    #businessChatHeader { padding:12px 16px; background:#10b981; color:#fff; border-radius:10px 10px 0 0; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+    #businessChatClose { background:transparent; border:none; color:#fff; font-size:1.3rem; cursor:pointer; padding:0; width:24px; height:24px; line-height:1; }
+    #businessChatMessages { flex:1; padding:12px; overflow-y:auto; font-size:0.95rem; min-height:240px; max-height:360px; display:flex; flex-direction:column; gap:8px; background:#f9fafb; }
+    #businessChatInput { display:flex; border-top:1px solid #e6e6e6; background:#fff; border-radius:0 0 10px 10px; }
+    #businessChatInput input { flex:1; padding:12px; border:none; outline:none; font-size:0.95rem; border-radius:0 0 0 10px; }
+    #businessChatInput button { padding:12px 16px; background:#10b981; color:#fff; border:none; cursor:pointer; font-weight:600; border-radius:0 0 10px 0; transition:background 0.2s; }
+    #businessChatInput button:hover { background:#059669; }
+    .business-chat-msg { padding:10px 12px; border-radius:8px; max-width:85%; word-wrap:break-word; }
+    .business-chat-msg.sent { background:#dcfce7; align-self:flex-end; margin-left:auto; border:1px solid #bbf7d0; }
+    .business-chat-msg.received { background:#fff; align-self:flex-start; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
+    .business-chat-msg .msg-author { font-size:0.8rem; color:#6b7280; margin-bottom:4px; font-weight:600; }
+    .business-chat-msg .msg-text { font-size:0.95rem; color:#1f2937; line-height:1.4; }
+    .business-chat-msg .msg-time { font-size:0.75rem; color:#9ca3af; margin-top:4px; }
+    #businessChatInfo { padding:8px 12px; background:#fef3c7; border-bottom:1px solid #fbbf24; font-size:0.85rem; color:#78350f; text-align:center; }
+    .business-chat-loading { padding:20px; text-align:center; color:#6b7280; font-size:0.9rem; }
   </style>
 
   <!-- jsPDF for PDF export -->
@@ -139,6 +159,7 @@
   <!-- Firebase compat SDK for Authentication -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
   <script>
   /**
@@ -169,6 +190,7 @@
   // Firebase initialization (only if configured)
   var firebaseApp = null;
   var firebaseAuth = null;
+  var firebaseFirestore = null;
   
   // Check if firebaseConfig is defined and has required properties
   function isFirebaseConfigValid() {
@@ -183,7 +205,8 @@
     try {
       firebaseApp = firebase.initializeApp(firebaseConfig);
       firebaseAuth = firebase.auth();
-      console.log('Firebase Authentication initialized successfully');
+      firebaseFirestore = firebase.firestore();
+      console.log('Firebase Authentication and Firestore initialized successfully');
     } catch (e) {
       console.warn('Firebase initialization failed, falling back to local auth:', e.message);
       FIREBASE_ENABLED = false;
@@ -6612,6 +6635,280 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 });
+</script>
+
+<!-- Business Chat Widget -->
+<button id="businessChatBtn" title="Business Chat">💬</button>
+<div id="businessChatModal">
+  <div id="businessChatHeader">
+    <span id="businessChatTitle">Business Chat</span>
+    <button id="businessChatClose">×</button>
+  </div>
+  <div id="businessChatInfo"></div>
+  <div id="businessChatMessages"></div>
+  <div id="businessChatInput">
+    <input type="text" id="businessChatInputField" placeholder="Type a message…" />
+    <button id="businessChatSend">Send</button>
+  </div>
+</div>
+
+<script>
+(function initBusinessChat() {
+  // Business Chat functionality powered by Firestore
+  const chatBtn = document.getElementById('businessChatBtn');
+  const chatModal = document.getElementById('businessChatModal');
+  const chatClose = document.getElementById('businessChatClose');
+  const chatMessages = document.getElementById('businessChatMessages');
+  const chatInput = document.getElementById('businessChatInputField');
+  const chatSend = document.getElementById('businessChatSend');
+  const chatInfo = document.getElementById('businessChatInfo');
+  const chatTitle = document.getElementById('businessChatTitle');
+  
+  let unsubscribeChat = null;
+  let currentBusinessId = null;
+  
+  // Check if Firestore is available
+  function isFirestoreAvailable() {
+    return FIREBASE_ENABLED && firebaseFirestore !== null;
+  }
+  
+  // Toggle chat modal
+  chatBtn.onclick = function() {
+    const isVisible = chatModal.style.display === 'flex';
+    chatModal.style.display = isVisible ? 'none' : 'flex';
+    
+    if (!isVisible) {
+      // Opening chat - load messages for current business
+      loadChatForBusiness();
+    } else {
+      // Closing chat - unsubscribe from updates
+      if (unsubscribeChat) {
+        unsubscribeChat();
+        unsubscribeChat = null;
+      }
+    }
+  };
+  
+  chatClose.onclick = function() {
+    chatModal.style.display = 'none';
+    if (unsubscribeChat) {
+      unsubscribeChat();
+      unsubscribeChat = null;
+    }
+  };
+  
+  // Load chat messages for current business
+  function loadChatForBusiness() {
+    // Clear previous subscription
+    if (unsubscribeChat) {
+      unsubscribeChat();
+      unsubscribeChat = null;
+    }
+    
+    // Get current business
+    const bizId = selectedBizId;
+    const biz = findBiz(bizId);
+    
+    if (!bizId || !biz) {
+      chatMessages.innerHTML = '<div class="business-chat-loading">Please select a business first.</div>';
+      chatInfo.textContent = 'No business selected';
+      chatInfo.style.display = 'block';
+      chatInput.disabled = true;
+      chatSend.disabled = true;
+      return;
+    }
+    
+    currentBusinessId = bizId;
+    chatTitle.textContent = 'Chat: ' + biz.name;
+    chatInfo.textContent = 'Business: ' + biz.name;
+    chatInfo.style.display = 'block';
+    chatInput.disabled = false;
+    chatSend.disabled = false;
+    
+    // Check Firestore availability
+    if (!isFirestoreAvailable()) {
+      chatMessages.innerHTML = '<div class="business-chat-loading">Firestore not configured. Chat disabled.</div>';
+      chatInput.disabled = true;
+      chatSend.disabled = true;
+      return;
+    }
+    
+    // Show loading
+    chatMessages.innerHTML = '<div class="business-chat-loading">Loading messages...</div>';
+    
+    // Subscribe to real-time messages for this business
+    try {
+      const messagesRef = firebaseFirestore
+        .collection('businesses')
+        .doc(bizId)
+        .collection('messages')
+        .orderBy('timestamp', 'asc')
+        .limit(50);
+      
+      unsubscribeChat = messagesRef.onSnapshot(function(snapshot) {
+        chatMessages.innerHTML = '';
+        
+        if (snapshot.empty) {
+          chatMessages.innerHTML = '<div class="business-chat-loading">No messages yet. Start the conversation!</div>';
+          return;
+        }
+        
+        snapshot.forEach(function(doc) {
+          const msg = doc.data();
+          renderMessage(msg);
+        });
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }, function(error) {
+        console.error('Error loading chat messages:', error);
+        chatMessages.innerHTML = '<div class="business-chat-loading">Error loading messages: ' + error.message + '</div>';
+      });
+    } catch (error) {
+      console.error('Error setting up chat listener:', error);
+      chatMessages.innerHTML = '<div class="business-chat-loading">Error: ' + error.message + '</div>';
+    }
+  }
+  
+  // Render a single message
+  function renderMessage(msg) {
+    const div = document.createElement('div');
+    const currentUser = state.users.find(u => u.id === selectedUserId);
+    const isSent = msg.userId === selectedUserId || msg.userEmail === (currentUser ? currentUser.email : '');
+    
+    div.className = 'business-chat-msg ' + (isSent ? 'sent' : 'received');
+    
+    let html = '';
+    if (!isSent && msg.userName) {
+      html += '<div class="msg-author">' + escapeHtml(msg.userName) + '</div>';
+    }
+    html += '<div class="msg-text">' + escapeHtml(msg.text || '') + '</div>';
+    
+    if (msg.timestamp) {
+      const date = msg.timestamp.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp);
+      html += '<div class="msg-time">' + formatMessageTime(date) + '</div>';
+    }
+    
+    div.innerHTML = html;
+    chatMessages.appendChild(div);
+  }
+  
+  // Format message timestamp
+  function formatMessageTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    
+    // Less than 1 minute
+    if (diff < 60000) {
+      return 'Just now';
+    }
+    
+    // Less than 1 hour
+    if (diff < 3600000) {
+      const mins = Math.floor(diff / 60000);
+      return mins + ' min' + (mins > 1 ? 's' : '') + ' ago';
+    }
+    
+    // Today
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    
+    // Yesterday
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    
+    // Older
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  
+  // Escape HTML to prevent XSS
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
+  // Send a message
+  async function sendMessage() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    
+    if (!isFirestoreAvailable()) {
+      alert('Firestore not configured. Chat disabled.');
+      return;
+    }
+    
+    if (!currentBusinessId) {
+      alert('Please select a business first.');
+      return;
+    }
+    
+    const currentUser = state.users.find(u => u.id === selectedUserId);
+    if (!currentUser) {
+      alert('Please log in to send messages.');
+      return;
+    }
+    
+    // Disable input while sending
+    chatInput.disabled = true;
+    chatSend.disabled = true;
+    
+    try {
+      await firebaseFirestore
+        .collection('businesses')
+        .doc(currentBusinessId)
+        .collection('messages')
+        .add({
+          text: text,
+          userId: selectedUserId,
+          userName: currentUser.displayName || currentUser.username || 'Anonymous',
+          userEmail: currentUser.email || '',
+          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+          businessId: currentBusinessId
+        });
+      
+      // Clear input
+      chatInput.value = '';
+      
+      // Re-enable input
+      chatInput.disabled = false;
+      chatSend.disabled = false;
+      chatInput.focus();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Failed to send message: ' + error.message);
+      chatInput.disabled = false;
+      chatSend.disabled = false;
+    }
+  }
+  
+  // Send button click
+  chatSend.onclick = sendMessage;
+  
+  // Enter key to send
+  chatInput.onkeydown = function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+  
+  // Update chat when business changes
+  const originalBusinessSelect = document.getElementById('businessSelect');
+  if (originalBusinessSelect) {
+    originalBusinessSelect.addEventListener('change', function() {
+      // If chat is open, reload for new business
+      if (chatModal.style.display === 'flex') {
+        loadChatForBusiness();
+      }
+    });
+  }
+})();
 </script>
 </body>
   </html>
