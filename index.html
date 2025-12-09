@@ -139,6 +139,10 @@
   <!-- Firebase compat SDK for Authentication -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <!-- Stripe.js -->
+  <script src="https://js.stripe.com/v3/"></script>
 
   <script>
   /**
@@ -169,6 +173,7 @@
   // Firebase initialization (only if configured)
   var firebaseApp = null;
   var firebaseAuth = null;
+  var firebaseFirestore = null;
   
   // Check if firebaseConfig is defined and has required properties
   function isFirebaseConfigValid() {
@@ -183,7 +188,8 @@
     try {
       firebaseApp = firebase.initializeApp(firebaseConfig);
       firebaseAuth = firebase.auth();
-      console.log('Firebase Authentication initialized successfully');
+      firebaseFirestore = firebase.firestore();
+      console.log('Firebase Authentication and Firestore initialized successfully');
     } catch (e) {
       console.warn('Firebase initialization failed, falling back to local auth:', e.message);
       FIREBASE_ENABLED = false;
@@ -392,6 +398,243 @@
     } catch (e) {
       console.warn('Failed to map local user to Firebase UID:', e);
     }
+  }
+
+  /**
+   * Stripe Configuration
+   * Get your publishable key from https://dashboard.stripe.com/apikeys
+   * Use pk_test_... for testing and pk_live_... for production
+   */
+  var STRIPE_PUBLISHABLE_KEY = 'REPLACE_WITH_YOUR_STRIPE_PUBLISHABLE_KEY'; // TODO: Set your actual key here
+  var stripe = null;
+  
+  // Initialize Stripe if key is configured (not placeholder and starts with pk_)
+  if (typeof Stripe !== 'undefined' && STRIPE_PUBLISHABLE_KEY && 
+      STRIPE_PUBLISHABLE_KEY.startsWith('pk_') && 
+      !STRIPE_PUBLISHABLE_KEY.includes('REPLACE_WITH')) {
+    try {
+      stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
+      console.log('Stripe initialized successfully');
+    } catch (e) {
+      console.warn('Stripe initialization failed:', e.message);
+    }
+  }
+
+  /**
+   * Create Stripe Checkout Session for subscription upgrade
+   * @param {string} plan - Plan type (individual, enterprise, company)
+   * @param {number} price - Price in Naira
+   * @param {boolean} includeAddon - Whether to include self-filing addon
+   * @returns {Promise<void>}
+   */
+  async function createStripeCheckoutSession(plan, price, includeAddon) {
+    if (!stripe) {
+      console.error('Stripe is not initialized');
+      alert('Payment system not available. Please contact support.');
+      return;
+    }
+
+    if (!isFirebaseAuthEnabled() || !firebaseAuth.currentUser) {
+      console.error('User must be authenticated with Firebase');
+      alert('Please sign in before purchasing.');
+      return;
+    }
+
+    var user = firebaseAuth.currentUser;
+    
+    try {
+      // Call your Cloud Function to create a Checkout Session
+      // TODO: Replace 'your-firebase-project-id' with your actual Firebase project ID
+      // NOTE: The region (us-central1) should match where your functions are deployed
+      // You can find your project ID in Firebase Console → Project Settings
+      var cloudFunctionUrl = 'https://us-central1-your-firebase-project-id.cloudfunctions.net/createCheckoutSession';
+      
+      var response = await fetch(cloudFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          userEmail: user.email,
+          plan: plan,
+          price: price,
+          includeAddon: includeAddon,
+          successUrl: window.location.origin + '/index.html?session_id={CHECKOUT_SESSION_ID}',
+          cancelUrl: window.location.origin + '/index.html'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create checkout session');
+      }
+
+      var data = await response.json();
+      
+      // Redirect to Stripe Checkout
+      var result = await stripe.redirectToCheckout({
+        sessionId: data.sessionId
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+    } catch (error) {
+      console.error('Error creating checkout session:', error);
+      alert('Failed to start checkout. Please try again or contact support.');
+    }
+  }
+
+  /**
+   * Listen for subscription activation in Firestore
+   * This function sets up a real-time listener for the user's subscription status
+   */
+  function listenForSubscriptionActivation() {
+    if (!isFirebaseAuthEnabled() || !firebaseAuth.currentUser || !firebaseFirestore) {
+      console.log('Firestore listener not available');
+      return;
+    }
+
+    var user = firebaseAuth.currentUser;
+    var userDocRef = firebaseFirestore.collection('users').doc(user.uid);
+
+    // Listen for changes to the user document
+    userDocRef.onSnapshot(function(doc) {
+      if (doc.exists) {
+        var userData = doc.data();
+        
+        // Check if subscription was just activated
+        if (userData.subscriptionStatus === 'active' && userData.subscriptionActivatedAt) {
+          var activatedAt = userData.subscriptionActivatedAt.toDate();
+          var now = new Date();
+          
+          // If activated within the last minute, show notification
+          if ((now - activatedAt) < 60000) {
+            showSubscriptionActivatedNotification(userData);
+            updateLocalUserSubscription(userData);
+          }
+        }
+      }
+    }, function(error) {
+      console.error('Error listening to user subscription:', error);
+    });
+  }
+
+  /**
+   * Show notification that subscription has been activated
+   * @param {object} userData - User data from Firestore
+   */
+  function showSubscriptionActivatedNotification(userData) {
+    // Sanitize plan name to prevent XSS
+    var plan = String(userData.subscriptionPlan || 'subscription').replace(/[<>&"']/g, '');
+    var expiresAt = userData.subscriptionExpiresAt ? userData.subscriptionExpiresAt.toDate() : null;
+    
+    // Create and show a notification
+    var notification = document.createElement('div');
+    notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#10b981;color:#fff;padding:16px 24px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:10000;max-width:350px;';
+    
+    // Use textContent for security (prevents XSS)
+    var strong = document.createElement('strong');
+    strong.textContent = '🎉 Your ' + plan + ' subscription is now active!';
+    if (expiresAt) {
+      strong.textContent += ' Valid until ' + expiresAt.toLocaleDateString();
+    }
+    
+    var small = document.createElement('small');
+    small.textContent = 'You now have access to all premium features for 1 year.';
+    
+    notification.appendChild(strong);
+    notification.appendChild(document.createElement('br'));
+    notification.appendChild(small);
+    
+    document.body.appendChild(notification);
+
+    // Auto-remove after 8 seconds
+    setTimeout(function() {
+      notification.style.transition = 'opacity 0.5s';
+      notification.style.opacity = '0';
+      setTimeout(function() {
+        // Safely remove notification if it still exists
+        if (notification.parentNode === document.body) {
+          document.body.removeChild(notification);
+        }
+      }, 500);
+    }, 8000);
+  }
+
+  /**
+   * Update local user state with subscription info from Firestore
+   * @param {object} userData - User data from Firestore
+   */
+  function updateLocalUserSubscription(userData) {
+    var storageKey = (typeof STORAGE_KEY !== 'undefined') ? STORAGE_KEY : 'ntc_full_accounting_v2';
+    
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      
+      var appState = JSON.parse(raw);
+      var currentUserUid = firebaseAuth && firebaseAuth.currentUser ? firebaseAuth.currentUser.uid : null;
+      var user = (appState.users || []).find(function(u) { 
+        return u.firebaseUid === userData.uid || (currentUserUid && u.firebaseUid === currentUserUid); 
+      });
+      
+      if (user) {
+        user.subscriptionStatus = userData.subscriptionStatus;
+        user.subscriptionPlan = userData.subscriptionPlan;
+        user.subscriptionExpiresAt = userData.subscriptionExpiresAt ? userData.subscriptionExpiresAt.toDate().toISOString() : null;
+        user.trialEndsAt = null; // Clear trial since they're now subscribed
+        
+        localStorage.setItem(storageKey, JSON.stringify(appState));
+        console.log('Local user subscription updated');
+        
+        // Refresh UI if needed
+        if (typeof updateAuthUI === 'function') {
+          updateAuthUI();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to update local user subscription:', e);
+    }
+  }
+
+  /**
+   * Check for successful Stripe checkout on page load
+   * Looks for session_id in URL query parameters
+   */
+  function checkStripeCheckoutSuccess() {
+    var urlParams = new URLSearchParams(window.location.search);
+    var sessionId = urlParams.get('session_id');
+    
+    if (sessionId) {
+      // Show loading notification
+      var notification = document.createElement('div');
+      notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#0b76d1;color:#fff;padding:16px 24px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:10000;';
+      
+      // Use DOM methods for security consistency
+      var strong = document.createElement('strong');
+      strong.textContent = 'Processing your payment...';
+      var small = document.createElement('small');
+      small.textContent = 'Please wait while we activate your subscription.';
+      
+      notification.appendChild(strong);
+      notification.appendChild(document.createElement('br'));
+      notification.appendChild(small);
+      document.body.appendChild(notification);
+      
+      // Clear the session_id from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // The subscription will be activated by the webhook + Cloud Function
+      // The Firestore listener will detect the change and update the UI
+    }
+  }
+
+  // Initialize Stripe checkout success check when page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', checkStripeCheckoutSuccess);
+  } else {
+    checkStripeCheckoutSuccess();
   }
   </script>
 </head>
@@ -5995,6 +6238,11 @@
             updateAuthUI();
             renderAll();
           }
+          
+          // Start listening for subscription activation
+          if (typeof listenForSubscriptionActivation === 'function') {
+            listenForSubscriptionActivation();
+          }
         } else {
           // User is signed out of Firebase
           if (state.auth.currentUserId) {
@@ -6196,6 +6444,43 @@
     setInterval(updateCountdown, 1000);
     initCheckboxListeners();
     updateAllTotals();
+    
+    // Wire up Buy Now buttons to use Stripe Checkout
+    function initBuyNowButtons() {
+      ['individual', 'enterprise', 'company'].forEach(function(planName) {
+        var buyBtn = document.getElementById(planName + 'BuyLink');
+        if (!buyBtn) return;
+        
+        buyBtn.addEventListener('click', function(e) {
+          // Only use Stripe if configured; otherwise fall back to default link
+          if (typeof createStripeCheckoutSession !== 'function') {
+            // No Stripe configured, use default Paystack link
+            return true;
+          }
+          
+          e.preventDefault();
+          
+          var applyOfferCheckbox = document.getElementById(planName + 'ApplyOffer');
+          var addonCheckbox = document.getElementById(planName + 'Addon');
+          
+          var plan = PLANS[planName];
+          if (!plan) return;
+          
+          var applyOffer = applyOfferCheckbox ? applyOfferCheckbox.checked : false;
+          var includeAddon = addonCheckbox ? addonCheckbox.checked : false;
+          
+          var basePrice = applyOffer ? plan.offerPrice : plan.fullPrice;
+          var addonPrice = includeAddon ? plan.addonPrice : 0;
+          var totalPrice = basePrice + addonPrice;
+          
+          // Call Stripe Checkout
+          createStripeCheckoutSession(planName, totalPrice, includeAddon);
+        });
+      });
+    }
+    
+    // Initialize Buy Now buttons
+    initBuyNowButtons();
     
     // Hero self-filing plan dropdown handler
     const heroSelfFilingPlan = document.getElementById('heroSelfFilingPlan');
@@ -6614,4 +6899,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </body>
-  </html>
+      </html>
