@@ -4,7 +4,19 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 
 // Initialize Stripe with secret key from Firebase config
-const stripe = require('stripe')(functions.config().stripe.secret_key);
+// Make sure to set this: firebase functions:config:set stripe.secret_key="sk_test_..."
+let stripe;
+try {
+  const stripeSecretKey = functions.config().stripe?.secret_key;
+  if (!stripeSecretKey) {
+    console.error('Stripe secret key not configured. Run: firebase functions:config:set stripe.secret_key="sk_test_..."');
+    throw new Error('Stripe configuration missing');
+  }
+  stripe = require('stripe')(stripeSecretKey);
+} catch (error) {
+  console.error('Failed to initialize Stripe:', error.message);
+  // Stripe will be undefined, functions will return errors
+}
 
 /**
  * Cloud Function: Create Stripe Checkout Session
@@ -23,6 +35,12 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
 
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  // Check if Stripe is configured
+  if (!stripe) {
+    res.status(500).json({ error: 'Stripe is not configured. Please set up API keys.' });
     return;
   }
 
@@ -75,8 +93,21 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
  * Processes Stripe events and updates user subscription status
  */
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+  // Check if Stripe is configured
+  if (!stripe) {
+    console.error('Stripe is not configured');
+    res.status(500).send('Stripe is not configured');
+    return;
+  }
+
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = functions.config().stripe.webhook_secret;
+  const webhookSecret = functions.config().stripe?.webhook_secret;
+
+  if (!webhookSecret) {
+    console.error('Webhook secret not configured. Run: firebase functions:config:set stripe.webhook_secret="whsec_..."');
+    res.status(500).send('Webhook secret not configured');
+    return;
+  }
 
   let event;
 
