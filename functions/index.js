@@ -112,7 +112,10 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
+    // Firebase Cloud Functions automatically provides req.rawBody for webhook verification
+    // This is the raw request body as a Buffer, needed for Stripe signature verification
+    const payload = req.rawBody || req.body;
+    event = stripe.webhooks.constructEvent(payload, sig, webhookSecret);
   } catch (err) {
     console.error('Webhook signature verification failed:', err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);

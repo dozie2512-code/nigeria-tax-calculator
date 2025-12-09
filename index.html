@@ -402,16 +402,16 @@
 
   /**
    * Stripe Configuration
-   * Replace with your actual Stripe publishable key from https://dashboard.stripe.com/apikeys
+   * Get your publishable key from https://dashboard.stripe.com/apikeys
    * Use pk_test_... for testing and pk_live_... for production
    */
-  var STRIPE_PUBLISHABLE_KEY = 'pk_test_YOUR_STRIPE_PUBLISHABLE_KEY_HERE'; // TODO: Set your Stripe publishable key here
+  var STRIPE_PUBLISHABLE_KEY = 'REPLACE_WITH_YOUR_STRIPE_PUBLISHABLE_KEY'; // TODO: Set your actual key here
   var stripe = null;
   
   // Initialize Stripe if key is configured (not placeholder and starts with pk_)
   if (typeof Stripe !== 'undefined' && STRIPE_PUBLISHABLE_KEY && 
       STRIPE_PUBLISHABLE_KEY.startsWith('pk_') && 
-      !STRIPE_PUBLISHABLE_KEY.includes('YOUR_STRIPE')) {
+      !STRIPE_PUBLISHABLE_KEY.includes('REPLACE_WITH')) {
     try {
       stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
       console.log('Stripe initialized successfully');
@@ -445,6 +445,8 @@
     try {
       // Call your Cloud Function to create a Checkout Session
       // TODO: Replace 'your-firebase-project-id' with your actual Firebase project ID
+      // NOTE: The region (us-central1) should match where your functions are deployed
+      // You can find your project ID in Firebase Console → Project Settings
       var cloudFunctionUrl = 'https://us-central1-your-firebase-project-id.cloudfunctions.net/createCheckoutSession';
       
       var response = await fetch(cloudFunctionUrl, {
@@ -523,18 +525,28 @@
    * @param {object} userData - User data from Firestore
    */
   function showSubscriptionActivatedNotification(userData) {
-    var plan = userData.subscriptionPlan || 'subscription';
+    // Sanitize plan name to prevent XSS
+    var plan = String(userData.subscriptionPlan || 'subscription').replace(/[<>&"']/g, '');
     var expiresAt = userData.subscriptionExpiresAt ? userData.subscriptionExpiresAt.toDate() : null;
     
-    var message = '🎉 Your ' + plan + ' subscription is now active!';
-    if (expiresAt) {
-      message += ' Valid until ' + expiresAt.toLocaleDateString();
-    }
-
     // Create and show a notification
     var notification = document.createElement('div');
     notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#10b981;color:#fff;padding:16px 24px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:10000;max-width:350px;';
-    notification.innerHTML = '<strong>' + message + '</strong><br/><small>You now have access to all premium features for 1 year.</small>';
+    
+    // Use textContent for security (prevents XSS)
+    var strong = document.createElement('strong');
+    strong.textContent = '🎉 Your ' + plan + ' subscription is now active!';
+    if (expiresAt) {
+      strong.textContent += ' Valid until ' + expiresAt.toLocaleDateString();
+    }
+    
+    var small = document.createElement('small');
+    small.textContent = 'You now have access to all premium features for 1 year.';
+    
+    notification.appendChild(strong);
+    notification.appendChild(document.createElement('br'));
+    notification.appendChild(small);
+    
     document.body.appendChild(notification);
 
     // Auto-remove after 8 seconds
@@ -562,8 +574,9 @@
       if (!raw) return;
       
       var appState = JSON.parse(raw);
+      var currentUserUid = firebaseAuth && firebaseAuth.currentUser ? firebaseAuth.currentUser.uid : null;
       var user = (appState.users || []).find(function(u) { 
-        return u.firebaseUid === userData.uid || u.firebaseUid === firebaseAuth.currentUser.uid; 
+        return u.firebaseUid === userData.uid || (currentUserUid && u.firebaseUid === currentUserUid); 
       });
       
       if (user) {
