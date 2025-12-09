@@ -1,8 +1,10 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 admin.initializeApp();
+
+// Initialize Stripe with secret key from Firebase config
+const stripe = require('stripe')(functions.config().stripe.secret_key);
 
 /**
  * Cloud Function: Create Stripe Checkout Session
@@ -74,7 +76,7 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
  */
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const webhookSecret = functions.config().stripe.webhook_secret;
 
   let event;
 
