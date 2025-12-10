@@ -8,10 +8,11 @@ A tax calculation application with Firebase authentication and Stripe payment in
 - Store publishable keys via environment variables or provide them at build time; **never commit secret keys** (sk_, mk_ or similar) into the repository.
 - Create a local `.env` from `.env.example` for local development and **never commit it**.
 - If secrets were pushed to history, consider using `git-filter-repo` or BFG Repo-Cleaner to purge history and coordinate force-push with collaborators:
-  - Using `git-filter-repo`: `git filter-repo --path index.html --invert-paths --force` (example - adjust as needed)
-  - Using BFG: `bfg --delete-files index.html` (example - adjust as needed)
+  - **⚠️ WARNING: These commands are DESTRUCTIVE and will rewrite git history. Do NOT run without understanding implications.**
+  - Using `git-filter-repo` (example - requires customization): `git filter-repo --path index.html --invert-paths --force`
+  - Using BFG (example - requires customization): `bfg --delete-files index.html`
   - After purging: `git push origin --force --all`
-  - **Note:** Do not run these commands without understanding the implications and coordinating with your team.
+  - **CRITICAL**: Coordinate with ALL collaborators before force-pushing. They will need to re-clone the repository.
 
 ## Setup
 
