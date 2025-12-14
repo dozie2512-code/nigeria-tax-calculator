@@ -175,7 +175,7 @@ Before going to production:
 
 ---
 
-**Last Updated:** December 14, 2025
+**Last Updated:** December 14, 2024
 
 **Status:** Awaiting Firebase project creation and credential update
 

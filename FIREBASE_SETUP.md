@@ -218,4 +218,4 @@ For Firebase-specific issues:
 
 ---
 
-Last Updated: December 14, 2025
+Last Updated: December 14, 2024
