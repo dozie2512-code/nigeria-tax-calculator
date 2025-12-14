@@ -56,7 +56,12 @@ FIREBASE_APP_ID=your_app_id
 FIREBASE_MEASUREMENT_ID=your_measurement_id
 ```
 
-**Note**: To use environment variables, you'll need to modify `index.html` to read from `process.env` or inject them during build time.
+**Important**: Browser-based applications cannot access `process.env` at runtime. To use environment variables, you need:
+1. **Build-time injection**: Use a build script to replace placeholders with actual values
+2. **Server-side rendering**: Use SSR to inject variables into HTML
+3. **API endpoint**: Fetch config from a backend `/api/config` endpoint
+
+For this static site, the easiest approach is hardcoding credentials (Option 2) with proper Firebase security rules.
 
 ### Option 2: Hardcode Credentials (Quick Start - Not Recommended for Production)
 
