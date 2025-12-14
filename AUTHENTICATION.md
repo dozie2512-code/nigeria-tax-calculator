@@ -16,7 +16,7 @@ The application uses Firebase Authentication (Firebase compat SDK v10.7.1) for s
 - Session management
 - Token-based authentication
 
-**Location:** Integrated directly in `index.html` (lines 162-476)
+**Location:** Integrated directly in `index.html` (Firebase Configuration section)
 
 **Features:**
 - Secure credential storage (managed by Firebase)
