@@ -144,15 +144,14 @@
   /**
    * Firebase Configuration
    * 
-   * Firebase Authentication is enabled with the config below.
-   * To customize or disable:
-   * 1. Update the firebaseConfig values with your Firebase project credentials
-   * 2. Set FIREBASE_ENABLED to false to use local prototype authentication instead
+   * Firebase Authentication is the primary authentication method.
+   * Email/Password authentication must be enabled in Firebase Console:
+   * Authentication → Sign-in method → Email/Password
    * 
-   * For setup: Enable Email/Password under Authentication → Sign-in method in Firebase Console.
+   * Update firebaseConfig values with your Firebase project credentials.
    */
   
-  // Set to true to enable Firebase Authentication (requires firebaseConfig to be defined)
+  // Firebase Authentication is always enabled
   var FIREBASE_ENABLED = true;
 
   // Firebase web config — verify values in Firebase Console (storageBucket commonly ends with ".appspot.com")
@@ -185,9 +184,13 @@
       firebaseAuth = firebase.auth();
       console.log('Firebase Authentication initialized successfully');
     } catch (e) {
-      console.warn('Firebase initialization failed, falling back to local auth:', e.message);
+      console.error('Firebase initialization failed:', e.message);
+      alert('Authentication system unavailable. Please check your internet connection or contact support.');
       FIREBASE_ENABLED = false;
     }
+  } else if (FIREBASE_ENABLED) {
+    console.error('Firebase configuration is invalid. Please verify your Firebase settings.');
+    alert('Authentication configuration error. Please contact support.');
   }
   
   /**
@@ -529,8 +532,8 @@
 
       <!-- Login panel -->
       <div id="authLoginPanel" class="auth-panel prelogin-form">
-        <label>Username or Email:
-          <input type="text" id="preLoginUsername" placeholder="Enter username or email" autocomplete="username" />
+        <label>Email:
+          <input type="email" id="preLoginUsername" placeholder="Enter your email address" autocomplete="email" />
         </label>
         <label>Password:
           <input type="password" id="preLoginPassword" placeholder="Enter password" autocomplete="current-password" />
@@ -566,7 +569,7 @@
         <p id="authSignupMsg" class="auth-msg"></p>
       </div>
 
-      <p class="prelogin-note" id="authModeNote">Note: This is a prototype. Credentials stored locally. Passwords hashed with SHA-256.</p>
+      <p class="prelogin-note" id="authModeNote">Secure authentication powered by Firebase. Your data is stored locally in your browser.</p>
     </div>
   </div>
 
@@ -1036,7 +1039,7 @@
       <label>Username: <input type="text" id="loginUsername" /></label>
       <label>Password: <input type="password" id="loginPassword" placeholder="(optional)" /></label>
     </div>
-    <small class="note">Note: Prototype. Credentials stored locally. Passwords hashed with SHA-256.</small>
+    <small class="note">Secure authentication powered by Firebase.</small>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
       <button id="loginCancel">Cancel</button>
       <button class="primary" id="loginSubmit">Login</button>
@@ -1062,7 +1065,7 @@
     </label>
   </div>
   <small class="note">Account valid for 7 days from signup. A notification will be sent to salesrepng@gmail.com.</small>
-  <small class="note" style="display:block;margin-top:4px;color:#555;">⚠️ Prototype only: Credentials are stored locally in your browser (localStorage). Passwords are hashed client-side using SHA-256.</small>
+  <small class="note" style="display:block;margin-top:4px;color:#555;">Secure authentication powered by Firebase. Your credentials are safely managed by Firebase Authentication.</small>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
     <button id="signupCancel">Cancel</button>
     <button class="primary" id="signupSubmit">Create account</button>
@@ -1148,19 +1151,9 @@
   const MAX_USERS_PER_BUSINESS = 3;
 
   /**
-   * Computes SHA-256 hex hash of a string using Web Crypto API.
-   * Used for client-side password hashing before storage.
-   * @param {string} str - The string to hash
-   * @returns {Promise<string>} - Hex digest of the hash
+   * SHA-256 hashing function removed - Firebase Authentication handles password security
+   * Firebase uses industry-standard security practices for password storage and authentication
    */
-  async function sha256Hex(str) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return hashHex;
-  }
 
   // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
@@ -1793,28 +1786,28 @@
     }
   });
 
-  // Login/Logout functions - Updated to use password hashing
+  // Login function - now redirects to pre-login overlay for Firebase authentication
   async function handleLogin(){
+    // This modal is for user switching after initial login
+    // For security, require re-authentication via pre-login overlay
     const username = (loginUsername.value || '').trim();
-    const password = (loginPassword.value || '');
     
     if(!username) return alert('Username required');
     const user = state.users.find(u => u.username === username);
     if(!user) return alert('User not found');
     
-    // Check password if user has passwordHash (new users)
-    // Otherwise allow login for backward compatibility (demo users)
-    if(user.passwordHash) {
-      if(!password) return alert('Password required');
-      const inputHash = await sha256Hex(password);
-      if(inputHash !== user.passwordHash) {
-        return alert('Invalid password');
-      }
+    // For users with Firebase UID, require Firebase re-authentication
+    if(user.firebaseUid) {
+      alert('Please log out and sign in again with your email and password for security.');
+      closeModal(loginModal);
+      return;
     }
     
+    // For legacy users without Firebase (backward compatibility)
+    // Allow direct login - these will be migrated to Firebase on next login
     state.auth.currentUserId = user.id;
     saveState();
-    addAudit('auth.login', 'user', user.id, 'User logged in');
+    addAudit('auth.login', 'user', user.id, 'User switched (legacy)');
     closeModal(loginModal);
     loginUsername.value = '';
     loginPassword.value = '';
@@ -1822,14 +1815,15 @@
     renderAll();
   }
 
-  function handleLogout(){
+  async function handleLogout(){
     if(!state.auth.currentUserId) return;
     
-    // Firebase sign out if enabled
+    // Firebase sign out
     if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
-      firebaseSignOut().catch(function(e) {
-        console.warn('Firebase sign out error:', e);
-      });
+      const result = await firebaseSignOut();
+      if (!result.success) {
+        console.warn('Firebase sign out error:', result.error);
+      }
     }
     
     addAudit('auth.logout', 'user', state.auth.currentUserId, 'User logged out');
@@ -1839,129 +1833,94 @@
     renderAll();
   }
 
-  // Pre-login overlay handler - authenticates user from the blocking overlay form
+  // Pre-login overlay handler - authenticates user using Firebase Authentication
   async function handlePreLogin(){
-    const loginInput = (preLoginUsername && preLoginUsername.value ? preLoginUsername.value : '').trim();
+    const email = (preLoginUsername && preLoginUsername.value ? preLoginUsername.value : '').trim();
     const password = (preLoginPassword && preLoginPassword.value ? preLoginPassword.value : '');
     
-    if(!loginInput) {
-      if(authLoginMsg) { authLoginMsg.textContent = 'Username or email required'; authLoginMsg.style.color = '#b00'; }
+    if(!email) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Email address required'; authLoginMsg.style.color = '#b00'; }
       return;
     }
     
-    // Firebase authentication if enabled and input looks like email
-    // loginInput is guaranteed to be a non-empty string at this point
-    const isEmailInput = loginInput.indexOf('@') !== -1;
-    
-    if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && isEmailInput) {
-      if(!password) {
-        if(authLoginMsg) { authLoginMsg.textContent = 'Password required'; authLoginMsg.style.color = '#b00'; }
-        return;
-      }
-      
-      if(authLoginMsg) { authLoginMsg.textContent = 'Signing in...'; authLoginMsg.style.color = 'var(--muted)'; }
-      
-      const fbResult = await firebaseSignIn(loginInput.toLowerCase(), password);
-      
-      if (fbResult.success) {
-        const firebaseUid = fbResult.user.uid;
-        const email = fbResult.user.email;
-        
-        // Find local user by Firebase UID or email
-        let user = state.users.find(u => u.firebaseUid === firebaseUid);
-        if (!user) {
-          user = state.users.find(u => u.email === email);
-          // Map the Firebase UID to existing user
-          if (user && !user.firebaseUid) {
-            user.firebaseUid = firebaseUid;
-            saveState();
-          }
-        }
-        
-        if (!user) {
-          // User exists in Firebase but not locally - create local user
-          const userId = uid('user');
-          user = {
-            id: userId,
-            username: email.split('@')[0], // Use email prefix as username
-            display: email.split('@')[0],
-            email: email,
-            firebaseUid: firebaseUid,
-            role: 'User',
-            isAdmin: false,
-            permissions: { view: true, edit: true, delete: false },
-            plan: 'Individual',
-            createdAt: Date.now(),
-            trialStart: Date.now(),
-            tourSeen: false,
-            createdByAdmin: false
-          };
-          state.users.push(user);
-        }
-        
-        state.auth.currentUserId = user.id;
-        saveState();
-        addAudit('auth.login', 'user', user.id, 'User logged in via Firebase');
-        preLoginUsername.value = '';
-        preLoginPassword.value = '';
-        if(authLoginMsg) { authLoginMsg.textContent = ''; }
-        
-        setTimeout(() => {
-          updateAuthUI();
-          renderAll();
-          
-          // Check if user needs to see video tour (first time after signup)
-          if(user.tourSeen !== true) {
-            showTourModal(user.id);
-          }
-        }, 400);
-        return;
-      } else {
-        // Firebase login failed - show error
-        if(authLoginMsg) { authLoginMsg.textContent = fbResult.error || 'Sign in failed'; authLoginMsg.style.color = '#b00'; }
-        return;
-      }
-    }
-    
-    // Fallback to local authentication
-    // Support login by username or email (merged from auth.js)
-    const loginLower = loginInput.toLowerCase();
-    const user = state.users.find(u => u.username === loginInput || u.username === loginLower || u.email === loginLower);
-    if(!user) {
-      if(authLoginMsg) { authLoginMsg.textContent = 'No matching user found'; authLoginMsg.style.color = '#b00'; }
+    if(!password) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Password required'; authLoginMsg.style.color = '#b00'; }
       return;
     }
     
-    // Check password if user has passwordHash (new users)
-    // Otherwise allow login for backward compatibility (demo users)
-    if(user.passwordHash) {
-      if(!password) {
-        if(authLoginMsg) { authLoginMsg.textContent = 'Password required'; authLoginMsg.style.color = '#b00'; }
-        return;
-      }
-      const inputHash = await sha256Hex(password);
-      if(inputHash !== user.passwordHash) {
-        if(authLoginMsg) { authLoginMsg.textContent = 'Invalid credentials'; authLoginMsg.style.color = '#b00'; }
-        return;
-      }
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Please enter a valid email address'; authLoginMsg.style.color = '#b00'; }
+      return;
     }
     
-    state.auth.currentUserId = user.id;
-    saveState();
-    addAudit('auth.login', 'user', user.id, 'User logged in via pre-login overlay (local)');
-    preLoginUsername.value = '';
-    preLoginPassword.value = '';
-    if(authLoginMsg) { authLoginMsg.textContent = ''; } // Removed "Signed in — loading..." message
+    // Check if Firebase is available
+    if (!isFirebaseAuthEnabled()) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Authentication service unavailable'; authLoginMsg.style.color = '#b00'; }
+      return;
+    }
     
-    setTimeout(() => {
-      updateAuthUI();
-      renderAll();
+    if(authLoginMsg) { authLoginMsg.textContent = 'Signing in...'; authLoginMsg.style.color = 'var(--muted)'; }
+    
+    const fbResult = await firebaseSignIn(email.toLowerCase(), password);
+    
+    if (fbResult.success) {
+      const firebaseUid = fbResult.user.uid;
+      const email = fbResult.user.email;
       
-      // Check if user needs to see video tour (first time after signup)
-      if(user.tourSeen !== true) {
-        showTourModal(user.id);
+      // Find local user by Firebase UID or email
+      let user = state.users.find(u => u.firebaseUid === firebaseUid);
+      if (!user) {
+        user = state.users.find(u => u.email === email);
+        // Map the Firebase UID to existing user
+        if (user && !user.firebaseUid) {
+          user.firebaseUid = firebaseUid;
+          saveState();
+        }
       }
-    }, 400);
+      
+      if (!user) {
+        // User exists in Firebase but not locally - create local user
+        const userId = uid('user');
+        user = {
+          id: userId,
+          username: email.split('@')[0], // Use email prefix as username
+          display: email.split('@')[0],
+          email: email,
+          firebaseUid: firebaseUid,
+          role: 'User',
+          isAdmin: false,
+          permissions: { view: true, edit: true, delete: false },
+          plan: 'Individual',
+          createdAt: Date.now(),
+          trialStart: Date.now(),
+          tourSeen: false,
+          createdByAdmin: false
+        };
+        state.users.push(user);
+      }
+      
+      state.auth.currentUserId = user.id;
+      saveState();
+      addAudit('auth.login', 'user', user.id, 'User logged in via Firebase');
+      preLoginUsername.value = '';
+      preLoginPassword.value = '';
+      if(authLoginMsg) { authLoginMsg.textContent = ''; }
+      
+      setTimeout(() => {
+        updateAuthUI();
+        renderAll();
+        
+        // Check if user needs to see video tour (first time after signup)
+        if(user.tourSeen !== true) {
+          showTourModal(user.id);
+        }
+      }, 400);
+    } else {
+      // Firebase login failed - show error
+      if(authLoginMsg) { authLoginMsg.textContent = fbResult.error || 'Sign in failed'; authLoginMsg.style.color = '#b00'; }
+    }
   }
 
   function updateAuthUI(){
@@ -2220,7 +2179,7 @@
       });
     }
     
-    // Auth signup form handler (merged from auth.js)
+    // Auth signup form handler - uses Firebase Authentication
     if (authSignupSubmit) {
       authSignupSubmit.addEventListener('click', async function(e) {
         e.preventDefault();
@@ -2261,45 +2220,45 @@
           return;
         }
         
-        // Firebase signup if enabled
-        let firebaseUid = null;
-        if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
-          if (authSignupMsg) { authSignupMsg.textContent = 'Creating account...'; authSignupMsg.style.color = 'var(--muted)'; }
-          
-          const fbResult = await firebaseSignUp(email, pass);
-          if (!fbResult.success) {
-            if (authSignupMsg) { authSignupMsg.textContent = fbResult.error || 'Firebase signup failed'; authSignupMsg.style.color = '#b00'; }
-            return;
-          }
-          firebaseUid = fbResult.user.uid;
+        // Check if Firebase is available
+        if (!isFirebaseAuthEnabled()) {
+          if (authSignupMsg) { authSignupMsg.textContent = 'Authentication service unavailable'; authSignupMsg.style.color = '#b00'; }
+          return;
         }
         
-        // Hash password for local storage (backup/fallback)
-        const passwordHash = await sha256Hex(pass);
+        // Firebase signup
+        if (authSignupMsg) { authSignupMsg.textContent = 'Creating account...'; authSignupMsg.style.color = 'var(--muted)'; }
         
-        // Create user
+        const fbResult = await firebaseSignUp(email, pass);
+        if (!fbResult.success) {
+          if (authSignupMsg) { authSignupMsg.textContent = fbResult.error || 'Sign up failed'; authSignupMsg.style.color = '#b00'; }
+          return;
+        }
+        
+        const firebaseUid = fbResult.user.uid;
+        
+        // Create local user (linked to Firebase)
         const userId = uid('user');
         const newUser = {
           id: userId,
           username: username,
           display: name,
           email: email,
-          passwordHash: passwordHash,
-          firebaseUid: firebaseUid, // Map to Firebase UID if available
+          firebaseUid: firebaseUid, // Linked to Firebase user
           role: 'User',
           isAdmin: false,
           permissions: { view: true, edit: true, delete: false },
           plan: 'Individual',
-          createdAt: Date.now(), // Use timestamp for 7-day offer check
+          createdAt: Date.now(),
           trialStart: Date.now(),
           tourSeen: false,
-          createdByAdmin: false // Signed up themselves, not created by admin
+          createdByAdmin: false
         };
         
         state.users.push(newUser);
         state.auth.currentUserId = userId;
         saveState();
-        addAudit('user.signup', 'user', userId, 'User signed up via auth panel: ' + username + (firebaseUid ? ' (Firebase)' : ' (Local)'));
+        addAudit('user.signup', 'user', userId, 'User signed up via Firebase: ' + username);
         
         // Clear form
         if (authSignupName) authSignupName.value = '';
@@ -2308,7 +2267,7 @@
         if (authSignupPassword) authSignupPassword.value = '';
         if (authSignupPassword2) authSignupPassword2.value = '';
         
-        if (authSignupMsg) { authSignupMsg.textContent = ''; } // Removed "Account created — loading..." message
+        if (authSignupMsg) { authSignupMsg.textContent = ''; }
         
         // Show entity selection modal for new user
         setTimeout(() => {
@@ -2388,14 +2347,23 @@
               }
             }
 
-            // Hash password using sha256Hex if available, otherwise store plain (prototype only)
-            var passwordHash = password;
-            if (typeof sha256Hex === 'function') {
+            // Use Firebase Authentication for signup
+            var firebaseUid = null;
+            if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && typeof firebaseSignUp === 'function') {
               try {
-                passwordHash = await sha256Hex(password);
-              } catch (hashErr) {
-                console.warn('Password hashing failed, using plain password:', hashErr);
+                var fbResult = await firebaseSignUp(email.toLowerCase(), password);
+                if (!fbResult.success) {
+                  alert('Firebase signup failed: ' + (fbResult.error || 'Unknown error'));
+                  return;
+                }
+                firebaseUid = fbResult.user.uid;
+              } catch (fbErr) {
+                alert('Signup failed: ' + fbErr.message);
+                return;
               }
+            } else {
+              alert('Authentication service is unavailable. Please check your internet connection.');
+              return;
             }
 
             // Generate user ID using uid() or fallback
@@ -2407,14 +2375,14 @@
               userId = 'user_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
             }
 
-            // Create user object
+            // Create user object (linked to Firebase)
             var newUser = {
               id: userId,
               username: username,
               display: name,
               email: email,
               phone: phone,
-              passwordHash: passwordHash,
+              firebaseUid: firebaseUid,
               role: 'User',
               isAdmin: false,
               permissions: { view: true, edit: true, delete: false },
@@ -5978,7 +5946,8 @@
       if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
         authModeNote.textContent = 'Secure authentication powered by Firebase. Your data is stored locally in your browser.';
       } else {
-        authModeNote.textContent = 'Note: This is a prototype. Credentials stored locally. Passwords hashed with SHA-256.';
+        authModeNote.textContent = 'Authentication service unavailable. Please check your internet connection.';
+        authModeNote.style.color = '#b00';
       }
     }
     
@@ -6614,4 +6583,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </body>
-  </html>
+          </html>
