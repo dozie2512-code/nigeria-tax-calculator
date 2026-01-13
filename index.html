@@ -4780,14 +4780,28 @@
     // INDIVIDUAL ENTITY: Special display
     const isIndividual = b.entity === 'Individual';
     
-    // PIT for Individual (gross values, deduct WHT receivable)
+    // PIT for Individual (compute properly with statutory deductions and WHT receivable)
     if(isIndividual && b.pitEnabled){
-      // Use gross income (revenue) for PIT computation
-      if(revenue > 0){
-        pitCharge = computePAYEOnAnnualIncome(revenue);
-        // Deduct WHT receivable from PIT
-        pitCharge = Math.max(0, pitCharge - whtReceivable);
+      // Compute total gross income from all Revenue transactions
+      let totalGrossIncome = 0;
+      for(const t of arr){
+        if(t.accountCategory === 'Revenue') {
+          totalGrossIncome += Number(t.amount || 0);
+        }
       }
+      
+      // Get statutory deductions
+      const ded = getStatutoryDeductions(b, null);
+      const totalDed = totalStatutoryDeductions(ded);
+      
+      // Taxable income (gross income less statutory deductions)
+      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
+      
+      // Compute PIT using bands on taxable income
+      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
+      
+      // Deduct WHT receivable from PIT
+      pitCharge = Math.max(0, pitLiability - whtReceivable);
     }
     
     let html = '';
@@ -4800,7 +4814,7 @@
       // For Individual: show only WHT Receivable and PIT
       html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
       html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
-      html += `<div class="small-note">PIT is computed on gross income less WHT receivable</div>`;
+      html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions) and WHT receivable is deducted</div>`;
     } else {
       // For Company/Enterprise: show full summary
       html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
