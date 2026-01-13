@@ -11,7 +11,18 @@
 // Firebase Authentication is always enabled
 var FIREBASE_ENABLED = true;
 
-// Firebase web config — verify values in Firebase Console (storageBucket commonly ends with ".appspot.com")
+/**
+ * Firebase web configuration
+ * 
+ * SECURITY NOTE: In production, consider moving these credentials to:
+ * - Environment variables (for server-side rendering)
+ * - A separate config file excluded from version control
+ * - A secure configuration service
+ * 
+ * These keys are for client-side Firebase SDK and are designed to be included
+ * in client code. Security rules in Firebase Console control access to resources.
+ * Ensure proper Firebase Security Rules are configured for your project.
+ */
 var firebaseConfig = {
   apiKey: "AIzaSyDyLT58G18M7XPNLd3J6YnAMnLcKeEPmto",
   authDomain: "aaaa-b8178.firebaseapp.com",
