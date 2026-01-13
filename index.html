@@ -600,7 +600,7 @@
             <option value="InventoryPurchase">Inventory Purchase</option>
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
-            <option value="Income">Income</option>
+            <option value="Revenue">Revenue</option>
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
@@ -815,14 +815,6 @@
     </section>
 
     <section class="panel section grid" id="quickPanels">
-      <div>
-        <h3>Inventory (Quick)</h3>
-        <div id="inventoryList" class="table-scroll panel" style="padding:8px;"></div>
-      </div>
-      <div>
-        <h3>Assets (Quick)</h3>
-        <div id="assetList" class="table-scroll panel" style="padding:8px;"></div>
-      </div>
       <div>
         <h3>Profit & Loss Snapshot (Quick)</h3>
         <div id="plSnapshotQuick" class="panel" style="padding:8px;"></div>
@@ -1118,7 +1110,7 @@
    * CHANGELOG:
    * - Renamed SoleProprietor → Enterprise
    * - Added Individual entity type with restricted UI/tax rules
-   * - Renamed Revenue action → Income
+   * - Updated transaction action from Income to Revenue (backwards compatible migration included)
    * - Added turnoverThreshold configuration (0, 50M, 100M)
    * - Enhanced asset management with opening balances
    * - Improved tax calculations for PIT, CIT, CGT with thresholds
@@ -1425,6 +1417,7 @@
   const plSnapshotDiv = document.getElementById('plSnapshot');
   const plSnapshotQuick = document.getElementById('plSnapshotQuick');
 
+  // These elements may not exist in the DOM if quick panels were removed from the UI
   const inventoryListDiv = document.getElementById('inventoryList');
   const assetListDiv = document.getElementById('assetList');
 
@@ -1639,15 +1632,15 @@
       });
     });
     
-    // MIGRATION: Map Revenue action to Income in transactions
+    // MIGRATION: Map Income action to Revenue in transactions (for backwards compatibility)
     for (const u of state.users) {
       state.transactions[u.id] = state.transactions[u.id] || {};
       for (const b of state.businesses) {
         state.transactions[u.id][b.id] = state.transactions[u.id][b.id] || [];
-        // Convert Revenue → Income
+        // Convert Income → Revenue
         state.transactions[u.id][b.id].forEach(txn => {
-          if (txn.action === 'Revenue') {
-            txn.action = 'Income';
+          if (txn.action === 'Income') {
+            txn.action = 'Revenue';
           }
         });
       }
@@ -1702,8 +1695,6 @@
     const salaries = { id: uid('acct'), name: 'Salaries', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
     const rent = { id: uid('acct'), name: 'Rent', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false, rentFreq:'monthly' };
     const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
-    const chargeInc = { id: uid('acct'), name: 'Chargeable asset income', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false };
-    const chargeCost = { id: uid('acct'), name: 'Chargeable asset cost', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
 
     state = {
       users: [{ id: u, username: 'admin', display:'Admin User', role:'Admin', isAdmin:true, permissions:{ view:true, edit:true, delete:true }, tourSeen: true, createdAt: Date.now() }],
@@ -1720,7 +1711,7 @@
         vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
         caRateDefault: DEFAULTS.caRateDefault,
         depRateDefault: DEFAULTS.depRateDefault,
-        accounts: [cogs, purchases, salaries, rent, bank, chargeInc, chargeCost], // Removed sales
+        accounts: [cogs, purchases, salaries, rent, bank], // Removed sales and chargeable asset accounts
         inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
         assets: [
           { id: uid('asset'), name: 'Office PC', category: 'Furniture & Fittings', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, accumulatedDepreciation:0, capitalAllowances: [], disposed:false, disposal:{}, openingAccDep:0 },
@@ -1741,7 +1732,7 @@
     };
     state.transactions[u] = {};
     state.transactions[u][b] = [
-      { id: uid('txn'), date: today(), action: 'Income', accountId: cogs.id, accountName: 'COGS', accountCategory: 'Expense', description: 'Demo expense', amount: 50000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
+      { id: uid('txn'), date: today(), action: 'Revenue', accountId: cogs.id, accountName: 'COGS', accountCategory: 'Expense', description: 'Demo expense', amount: 50000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
       { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', whtApplied:false, paye:true, contact:'John Employee', receiptId:null },
       { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
     ];
@@ -3079,13 +3070,11 @@
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
       };
-      // Removed Sales account as per requirements
+      // Removed Sales account and chargeable asset accounts as per requirements
       newBiz.accounts.push({ id: uid('acct'), name:'COGS', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset income', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
-      newBiz.accounts.push({ id: uid('acct'), name:'Chargeable asset cost', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -3135,18 +3124,14 @@
     
     if (isIndividual) {
       // Hide panels and elements for Individual
-      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
-      if(inventoryQuick) inventoryQuick.style.display = 'none';
-      if(assetsQuick) assetsQuick.style.display = 'none';
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
       if(plQuick) plQuick.style.display = 'none';
       
-      // Restrict actions - only show Income for Individuals
+      // Restrict actions - only show Revenue for Individuals
       Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Income') {
+        if (opt.value && opt.value !== 'Revenue') {
           opt.style.display = 'none';
-        } else if (opt.value === 'Income') {
+        } else if (opt.value === 'Revenue') {
           opt.style.display = '';
         }
       });
@@ -3164,11 +3149,7 @@
       });
     } else {
       // Show all panels for non-Individual entities
-      const inventoryQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      const assetsQuick = document.querySelector('#quickPanels > div:nth-child(2)');
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(3)');
-      if(inventoryQuick) inventoryQuick.style.display = 'block';
-      if(assetsQuick) assetsQuick.style.display = 'block';
+      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
       if(plQuick) plQuick.style.display = 'block';
       
       // Show all actions and accounts for non-Individual entities
@@ -4246,12 +4227,12 @@
   }
 
   function renderQuickPanels(){
-    inventoryListDiv.innerHTML = '';
-    assetListDiv.innerHTML = '';
+    if(inventoryListDiv) inventoryListDiv.innerHTML = '';
+    if(assetListDiv) assetListDiv.innerHTML = '';
     plSnapshotQuick.innerHTML = '';
     const b = findBiz(selectedBizId);
     if(!b) return;
-    if(b.inventory && b.inventory.length){
+    if(inventoryListDiv && b.inventory && b.inventory.length){
       for(const it of b.inventory){
         const d = document.createElement('div'); d.className='account-row'; d.innerHTML = `<div><strong>${it.name}</strong><div class="small-muted">Qty: ${it.qty || 0} | Avg cost: ${fmt(it.avgCost||0)}</div></div>`;
         inventoryListDiv.appendChild(d);
@@ -4259,7 +4240,7 @@
     }
     
     // Group assets by category and compute totals
-    if(b.assets && b.assets.length){
+    if(assetListDiv && b.assets && b.assets.length){
       const assetsByCategory = {};
       for(const a of b.assets){
         const cat = a.category || 'Other Asset';
@@ -4747,14 +4728,14 @@
     }
 
     // CIT calculation with turnover threshold
-    // Compute turnover from Income transactions for the business
+    // Compute turnover from Revenue transactions for the business
     let computedTurnover = 0;
     for(const t of arr){
-      if(t.action === 'Income') {
+      if(t.action === 'Revenue') {
         computedTurnover += Number(t.amount || 0);
       }
     }
-    const turnoverForCIT = computedTurnover; // Use derived Income turnover
+    const turnoverForCIT = computedTurnover; // Use derived Revenue turnover
     
     let citCharge = 0;
     let whtCarryForward = 0;
@@ -4799,14 +4780,28 @@
     // INDIVIDUAL ENTITY: Special display
     const isIndividual = b.entity === 'Individual';
     
-    // PIT for Individual (gross values, deduct WHT receivable)
+    // PIT for Individual (compute properly with statutory deductions and WHT receivable)
     if(isIndividual && b.pitEnabled){
-      // Use gross income (revenue) for PIT computation
-      if(revenue > 0){
-        pitCharge = computePAYEOnAnnualIncome(revenue);
-        // Deduct WHT receivable from PIT
-        pitCharge = Math.max(0, pitCharge - whtReceivable);
+      // Compute total gross income from all Revenue transactions
+      let totalGrossIncome = 0;
+      for(const t of arr){
+        if(t.accountCategory === 'Revenue') {
+          totalGrossIncome += Number(t.amount || 0);
+        }
       }
+      
+      // Get statutory deductions
+      const ded = getStatutoryDeductions(b, null);
+      const totalDed = totalStatutoryDeductions(ded);
+      
+      // Taxable income (gross income less statutory deductions)
+      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
+      
+      // Compute PIT using bands on taxable income
+      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
+      
+      // Deduct WHT receivable from PIT
+      pitCharge = Math.max(0, pitLiability - whtReceivable);
     }
     
     let html = '';
@@ -4819,7 +4814,7 @@
       // For Individual: show only WHT Receivable and PIT
       html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
       html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
-      html += `<div class="small-note">PIT is computed on gross income less WHT receivable</div>`;
+      html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions). WHT receivable is then deducted from the PIT liability.</div>`;
     } else {
       // For Company/Enterprise: show full summary
       html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
@@ -6823,4 +6818,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </body>
-   </html>
+             </html>
