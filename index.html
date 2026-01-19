@@ -4985,7 +4985,9 @@
     let pitCharge = 0;
     if(b.entity === 'Enterprise' && b.pitEnabled){
       if(taxableProfit > 0){
-        pitCharge = computePAYEOnAnnualIncome(taxableProfit);
+        const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
+        // Auto-deduct WHT Receivable from PIT
+        pitCharge = Math.max(0, pitLiability - whtReceivable);
       }
     }
 
@@ -5052,6 +5054,10 @@
         }
       } else {
         html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+        if(whtReceivable > 0 && b.pitEnabled) {
+          const pitBeforeWHT = pitCharge + whtReceivable;
+          html += `<div class="small-note">PIT before WHT credit: ${fmt(pitBeforeWHT)} | WHT Receivable deducted: ${fmt(whtReceivable)}</div>`;
+        }
         if(totalCarryforwardLosses > 0) {
           html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
         }
@@ -5782,30 +5788,60 @@
     if(name === 'vatReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       let html = `<h3>VAT Report</h3>`;
-      html += `<h4>Sales (VAT Collected)</h4>`;
-      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
+      
+      // VAT Collected (Sales)
+      html += `<h4>VAT Collected (Sales)</h4>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount (Gross)</th><th>VAT Collected</th></tr></thead><tbody>`;
       let totalVATCollected = 0;
+      let totalSalesAmount = 0;
       for(const t of arr){
         if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Revenue'){
           const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
           totalVATCollected += vat;
+          totalSalesAmount += Number(t.amount||0);
           html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
         }
       }
-      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Collected</th><th>${fmt(totalVATCollected)}</th></tr></tfoot></table>`;
+      if (totalVATCollected === 0) {
+        html += `<tr><td colspan="5" class="muted" style="text-align:center;padding:12px;">No VAT collected transactions</td></tr>`;
+      }
+      html += `</tbody><tfoot><tr><th colspan="3">Total</th><th>${fmt(totalSalesAmount)}</th><th>${fmt(totalVATCollected)}</th></tr></tfoot></table>`;
       
-      html += `<h4 style="margin-top:16px;">Purchases (VAT Paid)</h4>`;
-      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
+      // VAT Paid (Purchases)
+      html += `<h4 style="margin-top:20px;">VAT Paid (Purchases)</h4>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount (Gross)</th><th>VAT Paid</th></tr></thead><tbody>`;
       let totalVATPaid = 0;
+      let totalPurchasesAmount = 0;
       for(const t of arr){
         if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Expense'){
           const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
           totalVATPaid += vat;
+          totalPurchasesAmount += Number(t.amount||0);
           html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
         }
       }
-      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Paid</th><th>${fmt(totalVATPaid)}</th></tr></tfoot></table>`;
-      html += `<div style="margin-top:16px;"><strong>VAT Net (Collected - Paid):</strong> ${fmt(totalVATCollected - totalVATPaid)}</div>`;
+      if (totalVATPaid === 0) {
+        html += `<tr><td colspan="5" class="muted" style="text-align:center;padding:12px;">No VAT paid transactions</td></tr>`;
+      }
+      html += `</tbody><tfoot><tr><th colspan="3">Total</th><th>${fmt(totalPurchasesAmount)}</th><th>${fmt(totalVATPaid)}</th></tr></tfoot></table>`;
+      
+      // Net Flow Summary
+      const netFlow = totalVATCollected - totalVATPaid;
+      html += `<div style="margin-top:20px;padding:12px;background:#f2f6fa;border-radius:6px;border:1px solid #e1e4e8;">`;
+      html += `<h4 style="margin:0 0 8px 0;">VAT Net Flow Summary</h4>`;
+      html += `<table style="width:100%;"><tbody>`;
+      html += `<tr><td>VAT Collected:</td><td style="text-align:right;font-weight:600;">${fmt(totalVATCollected)}</td></tr>`;
+      html += `<tr><td>VAT Paid:</td><td style="text-align:right;font-weight:600;">(${fmt(totalVATPaid)})</td></tr>`;
+      html += `<tr style="border-top:2px solid #333;"><td><strong>Net VAT ${netFlow >= 0 ? 'Payable' : 'Refundable'}:</strong></td><td style="text-align:right;font-weight:700;color:${netFlow >= 0 ? '#b00' : 'green'};">${fmt(Math.abs(netFlow))}</td></tr>`;
+      html += `</tbody></table>`;
+      if (netFlow > 0) {
+        html += `<div class="small-note" style="margin-top:8px;">Positive balance indicates VAT payable to tax authority.</div>`;
+      } else if (netFlow < 0) {
+        html += `<div class="small-note" style="margin-top:8px;">Negative balance indicates VAT refund expected from tax authority.</div>`;
+      } else {
+        html += `<div class="small-note" style="margin-top:8px;">No net VAT position.</div>`;
+      }
+      html += `</div>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'whtPayable'){
