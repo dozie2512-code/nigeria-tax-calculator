@@ -5621,12 +5621,16 @@
       reportsSection.style.display = 'none';
       quickPanels.style.display = 'block';
       btnLedgerTab.classList.add('active'); btnReportsTab.classList.remove('active');
+      // Show ledger list section when on ledger tab
+      if(ledgerListSection) ledgerListSection.style.display = 'block';
       renderAll();
     } else {
       ledgerSection.style.display = 'none';
       reportsSection.style.display = 'block';
       quickPanels.style.display = 'none';
       btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active');
+      // Hide ledger list section (including ledger table and tax summary) when on reports tab
+      if(ledgerListSection) ledgerListSection.style.display = 'none';
       updateReportTabVisibility(); // Update report tab visibility based on entity
       document.querySelectorAll('#reportsSection .tab').forEach(t=>t.classList.remove('active'));
       const tb = document.querySelector('#reportsSection .tab[data-report="vatReport"]');
@@ -5890,15 +5894,42 @@
       const currentYear = new Date().getFullYear();
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       
-      // Compute P&L values
-      let revenue = 0, expenses = 0;
+      // Compute P&L values with proper breakdown
+      let revenue = 0, costOfSales = 0, otherExpenses = 0;
+      const expenseBreakdown = {};
+      
       for(const t of arr){
-        if(t.accountCategory === 'Revenue') revenue += Number(t.amount || 0);
-        if(t.accountCategory === 'Expense') expenses += Number(t.amount || 0);
+        if(t.accountCategory === 'Revenue') {
+          revenue += Number(t.amount || 0);
+        }
+        if(t.accountCategory === 'Expense') {
+          const amount = Number(t.amount || 0);
+          // Check if this is COGS/Cost of Sales
+          if(t.accountName && (t.accountName === 'COGS' || t.accountName.toLowerCase().includes('cost of sales'))) {
+            costOfSales += amount;
+          } else {
+            otherExpenses += amount;
+            // Track expense breakdown by account name
+            const accountName = t.accountName || 'Other Expenses';
+            expenseBreakdown[accountName] = (expenseBreakdown[accountName] || 0) + amount;
+          }
+        }
       }
+      
       const depreciation = computeTotalDepreciation();
-      expenses += depreciation;
-      const grossProfit = revenue - expenses;
+      expenseBreakdown['Depreciation'] = depreciation;
+      otherExpenses += depreciation;
+      
+      const grossProfit = revenue - costOfSales;
+      const profitBeforeTax = grossProfit - otherExpenses;
+      
+      // Calculate tax (simplified - using CIT if available)
+      let taxAmount = 0;
+      if(b.entityType === 'Company' && b.citEnabled) {
+        // Simplified CIT calculation at 30% (or use actual CIT computation)
+        taxAmount = Math.max(0, profitBeforeTax * 0.30);
+      }
+      const profitAfterTax = profitBeforeTax - taxAmount;
       
       // Balance sheet values from accounts
       let totalAssets = 0, totalLiabilities = 0, totalCapital = 0;
@@ -5929,13 +5960,21 @@
       html += `<p><strong>Company Name:</strong> ${b.name}</p>`;
       html += `<p><strong>Financial Year Ended:</strong> ${currentYear}</p>`;
       
-      // Statement of Profit or Loss
+      // Statement of Profit or Loss - New Format
       html += `<h4 style="margin-top:20px;">Statement of Profit or Loss</h4>`;
       html += `<table style="width:100%;border-collapse:collapse;"><tbody>`;
-      html += `<tr><td>Revenue</td><td style="text-align:right;">${fmt(revenue)}</td></tr>`;
-      html += `<tr><td>Cost of Sales / Expenses</td><td style="text-align:right;">(${fmt(expenses - depreciation)})</td></tr>`;
-      html += `<tr><td>Depreciation</td><td style="text-align:right;">(${fmt(depreciation)})</td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>Profit/(Loss) for the Year</strong></td><td style="text-align:right;"><strong>${fmt(grossProfit)}</strong></td></tr>`;
+      html += `<tr><td><strong>Revenue</strong></td><td style="text-align:right;"><strong>${fmt(revenue)}</strong></td></tr>`;
+      html += `<tr><td>Less: Cost of Sales</td><td style="text-align:right;">(${fmt(costOfSales)})</td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>Gross Profit</strong></td><td style="text-align:right;"><strong>${fmt(grossProfit)}</strong></td></tr>`;
+      
+      // Less: Expenses (detailed breakdown)
+      html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Expenses</strong></td></tr>`;
+      for(const expName in expenseBreakdown) {
+        html += `<tr><td style="padding-left:20px;">${expName}</td><td style="text-align:right;">(${fmt(expenseBreakdown[expName])})</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Profit Before Tax (PBT)</strong></td><td style="text-align:right;"><strong>${fmt(profitBeforeTax)}</strong></td></tr>`;
+      html += `<tr><td>Less: Tax</td><td style="text-align:right;">(${fmt(taxAmount)})</td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Profit After Tax (PAT)</strong></td><td style="text-align:right;"><strong>${fmt(profitAfterTax)}</strong></td></tr>`;
       html += `</tbody></table>`;
       
       // Statement of Financial Position
@@ -5949,8 +5988,8 @@
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Liabilities & Capital</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Total Liabilities</td><td style="text-align:right;">${fmt(totalLiabilities)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Share Capital</td><td style="text-align:right;">${fmt(totalCapital)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Retained Earnings</td><td style="text-align:right;">${fmt(grossProfit)}</td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities & Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital + grossProfit)}</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Retained Earnings</td><td style="text-align:right;">${fmt(profitAfterTax)}</td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities & Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital + profitAfterTax)}</strong></td></tr>`;
       html += `</tbody></table>`;
       
       // Fixed Assets Schedule summary
@@ -6214,17 +6253,13 @@
       headerDiv.appendChild(delBtn);
       div.appendChild(headerDiv);
       
-      // Show balance fields for eligible accounts
+      // Show balance fields for eligible accounts (only closing balance, opening removed)
       if(balanceAccounts.includes(a.name)){
         const balDiv = document.createElement('div');
         balDiv.style.display = 'flex';
         balDiv.style.gap = '8px';
         balDiv.innerHTML = `
-          <label class="small-note">Opening: 
-            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
-              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
-          </label>
-          <label class="small-note">Closing: 
+          <label class="small-note">Closing Balance: 
             <input type="number" class="smallInput" value="${a.closingBalance||0}" 
               onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
           </label>
@@ -6242,9 +6277,7 @@
     const account = b.accounts.find(a => a.id === accountId);
     if(!account) return;
     
-    if(type === 'opening'){
-      account.openingBalance = Number(value || 0);
-    } else if(type === 'closing'){
+    if(type === 'closing'){
       account.closingBalance = Number(value || 0);
     }
     saveState();
