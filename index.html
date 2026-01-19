@@ -4831,40 +4831,20 @@
     const vatNet = vatCollected - vatPaid;
     
     let html = '';
-    // For Company/Enterprise: show full summary
+    // For Company/Enterprise: show simplified summary
     html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
     html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
-    html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
-    html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
     html += `<hr/>`;
-    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
+    html += `<div><strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
     html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+    html += `<div><strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
     if(b.entity === 'Company'){
-      html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
-      if(whtCarryForward > 0) {
-        html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
-      }
+      html += `<div><strong>CIT Charge:</strong> ${fmt(citCharge)}</div>`;
       html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
-      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
-      if(totalCarryforwardLosses > 0) {
-        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-      }
     } else {
       html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
-      if(totalCarryforwardLosses > 0) {
-        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-      }
     }
     
-    
-    if(b.showLines){
-      html += `<div style="margin-top:8px;"><strong>Notes:</strong> PAYE shown as totals (monthly & annual). Full PAYE contact breakdown is in Reports & PAYE Report.</div>`;
-      if(carriedForwardCA > 0) {
-        html += `<div class="notice" style="margin-top:6px;"><strong>CA Carryforward:</strong> ${fmt(carriedForwardCA)} will be carried forward to next period (non-taxable income ≥ 10% of revenue).</div>`;
-      }
-    }
 
     taxSummaryDiv.innerHTML = html;
   }
@@ -5766,7 +5746,23 @@
       html += `<tr><td>Revenue</td><td style="text-align:right;">${fmt(revenue)}</td></tr>`;
       html += `<tr><td>Cost of Sales / Expenses</td><td style="text-align:right;">(${fmt(expenses - depreciation)})</td></tr>`;
       html += `<tr><td>Depreciation</td><td style="text-align:right;">(${fmt(depreciation)})</td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>Profit/(Loss) for the Year</strong></td><td style="text-align:right;"><strong>${fmt(grossProfit)}</strong></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>Profit Before Tax (PBT)</strong></td><td style="text-align:right;"><strong>${fmt(grossProfit)}</strong></td></tr>`;
+      
+      // Calculate tax (CIT or PIT depending on entity type)
+      let taxCharge = 0;
+      if(b.entity === 'Company'){
+        // For Company: use CIT
+        const plRes = computePLAndTaxes(selectedBizId);
+        taxCharge = plRes.citCharge || 0;
+      } else {
+        // For Enterprise: use PIT
+        const plRes = computePLAndTaxes(selectedBizId);
+        taxCharge = plRes.pitCharge || 0;
+      }
+      
+      html += `<tr><td>Tax</td><td style="text-align:right;">(${fmt(taxCharge)})</td></tr>`;
+      const profitAfterTax = grossProfit - taxCharge;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Profit After Tax (PAT)</strong></td><td style="text-align:right;"><strong>${fmt(profitAfterTax)}</strong></td></tr>`;
       html += `</tbody></table>`;
       
       // Statement of Financial Position
@@ -6045,17 +6041,13 @@
       headerDiv.appendChild(delBtn);
       div.appendChild(headerDiv);
       
-      // Show balance fields for eligible accounts
+      // Show balance fields for eligible accounts (only closing balance, no opening balance)
       if(balanceAccounts.includes(a.name)){
         const balDiv = document.createElement('div');
         balDiv.style.display = 'flex';
         balDiv.style.gap = '8px';
         balDiv.innerHTML = `
-          <label class="small-note">Opening: 
-            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
-              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
-          </label>
-          <label class="small-note">Closing: 
+          <label class="small-note">Closing Balance: 
             <input type="number" class="smallInput" value="${a.closingBalance||0}" 
               onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
           </label>
