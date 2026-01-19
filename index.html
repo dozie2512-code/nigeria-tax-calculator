@@ -5748,16 +5748,37 @@
       html += `<tr><td>Depreciation</td><td style="text-align:right;">(${fmt(depreciation)})</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Profit Before Tax (PBT)</strong></td><td style="text-align:right;"><strong>${fmt(grossProfit)}</strong></td></tr>`;
       
-      // Calculate tax (CIT or PIT depending on entity type)
+      // Calculate tax (simplified - use accounting profit as taxable profit estimate)
       let taxCharge = 0;
-      if(b.entity === 'Company'){
-        // For Company: use CIT
-        const plRes = computePLAndTaxes(selectedBizId);
-        taxCharge = plRes.citCharge || 0;
-      } else {
-        // For Enterprise: use PIT
-        const plRes = computePLAndTaxes(selectedBizId);
-        taxCharge = plRes.pitCharge || 0;
+      const taxableProfit = grossProfit; // Simplified: use accounting profit
+      
+      if(b.entity === 'Company' && b.citEnabled){
+        const threshold = b.turnoverThreshold || 100000000; // Default to 100M
+        // Compute turnover from Revenue transactions
+        let turnover = 0;
+        for(const t of arr){
+          if(t.accountCategory === 'Revenue' && t.action !== 'AssetDisposal') {
+            turnover += Number(t.amount || 0);
+          }
+        }
+        
+        // Apply CIT rates based on threshold
+        if(threshold === 50000000) {
+          // 50M threshold: 0% if ≤50M, 25% if >50M
+          if(turnover > 50000000) {
+            taxCharge = 0.25 * Math.max(0, taxableProfit);
+          }
+        } else if(threshold === 100000000) {
+          // 100M threshold: 0% if ≤100M, 30% if >100M
+          if(turnover > 100000000) {
+            taxCharge = 0.30 * Math.max(0, taxableProfit);
+          }
+        }
+      } else if(b.entity === 'Enterprise' && b.pitEnabled){
+        // For Enterprise: apply PIT on positive profit
+        if(taxableProfit > 0){
+          taxCharge = computePAYEOnAnnualIncome(taxableProfit);
+        }
       }
       
       html += `<tr><td>Tax</td><td style="text-align:right;">(${fmt(taxCharge)})</td></tr>`;
