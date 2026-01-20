@@ -2009,11 +2009,14 @@
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
     
-    // Disable business management buttons for non-admins
+    // Allow Business and Manage Accounts buttons for Enterprise/Company plans regardless of admin status
+    const allowBusinessEdit = isAdmin || (user && (user.plan === 'Enterprise' || user.plan === 'Company'));
+    
+    // Disable business management buttons for non-admins (except Enterprise/Company for specific buttons)
     btnAddBusiness.disabled = !isAdmin;
-    btnEditBusiness.disabled = !isAdmin;
+    btnEditBusiness.disabled = !allowBusinessEdit;
     btnDeleteBusiness.disabled = !isAdmin;
-    btnManageAccounts.disabled = !isAdmin;
+    btnManageAccounts.disabled = !allowBusinessEdit;
     
     // Always disable sensitive operations for non-admins
     btnDeleteUser.disabled = !isAdmin;
@@ -2021,11 +2024,18 @@
     
     if(!isAdmin){
       btnAddBusiness.classList.add('disabled');
-      btnEditBusiness.classList.add('disabled');
       btnDeleteBusiness.classList.add('disabled');
-      btnManageAccounts.classList.add('disabled');
       btnDeleteUser.classList.add('disabled');
       btnClearAll.classList.add('disabled');
+      
+      // Conditionally enable/disable Business and Manage Account buttons based on plan
+      if(allowBusinessEdit) {
+        btnEditBusiness.classList.remove('disabled');
+        btnManageAccounts.classList.remove('disabled');
+      } else {
+        btnEditBusiness.classList.add('disabled');
+        btnManageAccounts.classList.add('disabled');
+      }
     } else {
       btnAddBusiness.classList.remove('disabled');
       btnEditBusiness.classList.remove('disabled');
@@ -4779,34 +4789,36 @@
   }
 
   /**
-   * Updates report tab visibility based on selected business entity type.
-   * - Individual: VAT, PIT (Individual), Audit Trail, Receipts Folder
+   * Updates report tab visibility based on selected business entity type and user plan.
+   * Plan visibility: Business and Company plans hide Reports tab, Enterprise shows it
    * - Enterprise: VAT, WHT Payable, WHT Receivable, PAYE, Inventory, Assets, PIT (Enterprise), Audit Trail, Receipts Folder, CGT (hide Company Accounts)
    * - Company: All except PIT reports, includes Company Accounts and CGT
    */
   function updateReportTabVisibility() {
     const b = findBiz(selectedBizId);
-    if(!b) return;
+    const user = state.users.find(u => u.id === state.auth.currentUserId);
+    if (!b || !user) return;
+    
+    // Check plan-level visibility first
+    if (user.plan === 'Business' || user.plan === 'Company') {
+      // Hide entire Reports tab for Business and Company plans
+      if (btnReportsTab) btnReportsTab.style.display = 'none';
+      // Switch to Ledger tab if currently on Reports
+      if (activeTab === 'reports') {
+        activeTab = 'ledger';
+        renderTab();
+      }
+      return;
+    } else {
+      // Show Reports tab for Enterprise and other plans
+      if (btnReportsTab) btnReportsTab.style.display = 'inline-block';
+    }
     
     const entity = b.entity || 'Company';
     const reportTabs = document.querySelectorAll('#reportsSection .tab[data-report]');
     
-    // Define visibility per entity
+    // Define visibility per entity (removed Individual)
     const visibilityRules = {
-      'Individual': {
-        'vatReport': true,
-        'whtPayable': false,
-        'whtReceivable': false,
-        'payeReport': false,
-        'inventoryReport': false,
-        'assetsReport': false,
-        'pitIndividual': true,
-        'pitEnterprise': false,
-        'cgtReport': false,
-        'companyAccounts': false,
-        'auditTrail': true,
-        'receiptsFolder': true
-      },
       'Enterprise': {
         'vatReport': true,
         'whtPayable': true,
@@ -4814,7 +4826,6 @@
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitIndividual': false,
         'pitEnterprise': true,
         'cgtReport': true,
         'companyAccounts': false,
@@ -4828,7 +4839,6 @@
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitIndividual': false,
         'pitEnterprise': false,
         'cgtReport': true,
         'companyAccounts': true,
