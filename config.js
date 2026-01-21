@@ -13,13 +13,13 @@
 
 // Firebase configuration - Replace with your actual values or use environment variables
 const firebaseConfig = {
-  apiKey: window.ENV?.FIREBASE_API_KEY || "AIzaSyDyLT58G18M7XPNLd3J6YnAMnLcKeEPmto",
-  authDomain: window.ENV?.FIREBASE_AUTH_DOMAIN || "aaaa-b8178.firebaseapp.com",
-  projectId: window.ENV?.FIREBASE_PROJECT_ID || "aaaa-b8178",
-  storageBucket: window.ENV?.FIREBASE_STORAGE_BUCKET || "aaaa-b8178.firebasestorage.app",
-  messagingSenderId: window.ENV?.FIREBASE_MESSAGING_SENDER_ID || "313899934004",
-  appId: window.ENV?.FIREBASE_APP_ID || "1:313899934004:web:cb2b729fb3b42c57e00561",
-  measurementId: window.ENV?.FIREBASE_MEASUREMENT_ID || "G-X18YDSXSZV"
+  apiKey: window.ENV?.FIREBASE_API_KEY || "YOUR_FIREBASE_API_KEY",
+  authDomain: window.ENV?.FIREBASE_AUTH_DOMAIN || "your-project-id.firebaseapp.com",
+  projectId: window.ENV?.FIREBASE_PROJECT_ID || "your-project-id",
+  storageBucket: window.ENV?.FIREBASE_STORAGE_BUCKET || "your-project-id.appspot.com",
+  messagingSenderId: window.ENV?.FIREBASE_MESSAGING_SENDER_ID || "YOUR_MESSAGING_SENDER_ID",
+  appId: window.ENV?.FIREBASE_APP_ID || "YOUR_APP_ID",
+  measurementId: window.ENV?.FIREBASE_MEASUREMENT_ID || "YOUR_MEASUREMENT_ID"
 };
 
 // Firebase Authentication is always enabled

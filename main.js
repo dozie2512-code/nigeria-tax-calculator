@@ -9,7 +9,10 @@
    * @returns {string} - Sanitized input
    */
   function sanitizeInput(input) {
-    if (typeof input !== 'string') return input;
+    // Convert to string if not already
+    if (typeof input !== 'string') {
+      input = String(input || '');
+    }
     
     const div = document.createElement('div');
     div.textContent = input;
@@ -320,9 +323,25 @@
   const MAX_USERS_PER_BUSINESS = 3;
 
   /**
-   * SHA-256 hashing function removed - Firebase Authentication handles password security
-   * Firebase uses industry-standard security practices for password storage and authentication
+   * SHA-256 hashing function for backward compatibility with localStorage-based auth
+   * Firebase Authentication handles password security for primary auth method
+   * This function is only used for the localStorage fallback authentication
    */
+  async function sha256Hex(message) {
+    if (!message) return '';
+    
+    // Convert string to Uint8Array
+    const msgBuffer = new TextEncoder().encode(message);
+    
+    // Hash the message
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    
+    // Convert ArrayBuffer to hex string
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    return hashHex;
+  }
 
   // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
@@ -831,15 +850,23 @@
   /**
    * Pre-seeds the admin account if no users exist.
    * This is called at app initialization to ensure there's always an admin account.
-   * Default admin: username "Owner" (password set per deployment requirements)
-   * Uses sha256Hex helper to hash the password.
+   * SECURITY NOTE: Admin password should be configured via environment variables
+   * or set during first-time setup. Never hardcode passwords in source code.
    */
   async function seedAdminIfNeeded() {
     if (!state.users || state.users.length === 0) {
-      // Hash the default admin password (as specified in deployment requirements)
-      // SECURITY NOTE: In production, use environment variables or secure configuration
-      const DEFAULT_ADMIN_PASS = 'chukwuedozie25$'; // Specified by deployment requirements
-      const hashedPassword = await sha256Hex(DEFAULT_ADMIN_PASS);
+      // For security, admin password should be set via:
+      // 1. Environment variable (window.ENV?.ADMIN_PASSWORD)
+      // 2. First-time setup flow (prompt user to create admin)
+      // 3. Firebase Authentication (recommended approach)
+      const adminPassword = window.ENV?.ADMIN_PASSWORD || null;
+      
+      if (!adminPassword) {
+        console.warn('No admin password configured. Users should sign up via Firebase Authentication.');
+        return;
+      }
+      
+      const hashedPassword = await sha256Hex(adminPassword);
       
       const adminId = uid('user');
       const adminUser = {
