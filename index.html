@@ -860,7 +860,7 @@
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
         <button class="small tab active" data-report="vatReport">VAT Report</button>
         <button class="small tab" data-report="whtPayable">WHT Payable</button>
-        <button class="small tab" data-report="whtReceivable">WHT Receivable</button>
+        <button class="small tab" data-report="whtReceivable">WHT Remitted</button>
         <button class="small tab" data-report="payeReport">PAYE Report</button>
         <button class="small tab" data-report="inventoryReport">Inventory Report</button>
         <button class="small tab" data-report="assetsReport">Assets Report</button>
@@ -2899,9 +2899,43 @@
   }
 
   function renderFeatureVisibility(){
-    // No entity-specific restrictions - show all features for all entity types
-    const b = findBiz(selectedBizId);
-    if (!b) return;
+    // Control feature visibility based on user plan
+    const user = findUser(selectedUserId);
+    if (!user) return;
+    
+    const plan = user.plan || 'Individual';
+    
+    // Business Edit button - show for Enterprise, Business, Company
+    if (btnEditBusiness) {
+      if (['Enterprise', 'Business', 'Company'].includes(plan)) {
+        btnEditBusiness.style.display = '';
+      } else {
+        btnEditBusiness.style.display = 'none';
+      }
+    }
+    
+    // Manage Accounts button - show for Enterprise, Business, Company
+    if (btnManageAccounts) {
+      if (['Enterprise', 'Business', 'Company'].includes(plan)) {
+        btnManageAccounts.style.display = '';
+      } else {
+        btnManageAccounts.style.display = 'none';
+      }
+    }
+    
+    // Reports tab - show ONLY for Enterprise
+    if (btnReportsTab) {
+      if (plan === 'Enterprise') {
+        btnReportsTab.style.display = '';
+      } else {
+        btnReportsTab.style.display = 'none';
+        // If user is on reports tab and plan is not Enterprise, switch to ledger
+        if (activeTab === 'reports') {
+          activeTab = 'ledger';
+          renderTab();
+        }
+      }
+    }
   }
 
   function txnActionChanged(){
@@ -4379,7 +4413,18 @@
     
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
-    const accountingProfit = revenue - expenses;
+    
+    // Add WHT receivable to accounting profit for net-basis transactions
+    // When dividends/interest/royalties are posted net of WHT, add back the WHT for accounting profit
+    let whtAdjustmentForProfit = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue' && t.whtBasis === 'net') {
+        const rate = (t.whtRate || b.whtRate) / 100;
+        whtAdjustmentForProfit += Number(t.amount||0) * (rate / (1 - rate));
+      }
+    }
+    
+    const accountingProfit = revenue - expenses + whtAdjustmentForProfit;
     
     // Get adjustment values from P&L snapshot
     const plSnapshot = computePLSnapshot();
@@ -4528,12 +4573,12 @@
     html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
     html += `<hr/>`;
     html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Remitted:</strong> ${fmt(whtReceivable)}</div>`;
     html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
     if(b.entity === 'Company'){
       html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
       if(whtCarryForward > 0) {
-        html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+        html += `<div class="small-note">WHT Remitted Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
       }
       html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
@@ -4847,7 +4892,18 @@
     
     // Calculations
     const accountingProfit = revenue - expenses;
-    const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
+    
+    // Add WHT receivable to accounting profit for net-basis transactions
+    let whtAdjustmentForProfit = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue' && t.whtBasis === 'net') {
+        const rate = (t.whtRate || b.whtRate) / 100;
+        whtAdjustmentForProfit += Number(t.amount||0) * (rate / (1 - rate));
+      }
+    }
+    
+    const adjustedAccountingProfit = accountingProfit + whtAdjustmentForProfit;
+    const adjustedProfit = adjustedAccountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
     const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
@@ -4875,7 +4931,7 @@
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     
     // Accounting profit
-    html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(adjustedAccountingProfit)}</strong></td></tr>`;
     
     // Disallowable expenses
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
@@ -5004,7 +5060,18 @@
     
     // Calculations
     const accountingProfit = revenue - expenses;
-    const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
+    
+    // Add WHT receivable to accounting profit for net-basis transactions
+    let whtAdjustmentForProfit = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue' && t.whtBasis === 'net') {
+        const rate = (t.whtRate || b.whtRate) / 100;
+        whtAdjustmentForProfit += Number(t.amount||0) * (rate / (1 - rate));
+      }
+    }
+    
+    const adjustedAccountingProfit = accountingProfit + whtAdjustmentForProfit;
+    const adjustedProfit = adjustedAccountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
     const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
@@ -5042,7 +5109,7 @@
     html += `<p><strong>Financial Year Ended:</strong> ${currentYear}</p>`;
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     
-    html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(adjustedAccountingProfit)}</strong></td></tr>`;
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Depreciation</td><td style="text-align:right;">${fmt(depreciation)}</td></tr>`;
@@ -5345,8 +5412,8 @@
       
     } else if(name === 'whtReceivable'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
-      let html = `<h3>WHT Receivable Report</h3>`;
-      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Contact</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT Receivable</th></tr></thead><tbody>`;
+      let html = `<h3>WHT Remitted Report</h3>`;
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Contact</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT Remitted</th></tr></thead><tbody>`;
       let totalWHT = 0;
       for(const t of arr){
         if(t.whtApplied && t.accountCategory === 'Revenue'){
@@ -5357,7 +5424,7 @@
           html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
         }
       }
-      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Receivable</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Remitted</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'payeReport'){
@@ -5515,7 +5582,7 @@
       html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Less: WHT Remitted</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
       html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
       html += `</tbody></table>`;
       reportContent.innerHTML = html;
