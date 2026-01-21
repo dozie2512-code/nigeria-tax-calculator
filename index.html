@@ -2935,46 +2935,9 @@
   }
 
   function renderFeatureVisibility(){
-    // Handle Individual entity restrictions
+    // No entity-specific restrictions - show all features for all entity types
     const b = findBiz(selectedBizId);
     if (!b) return;
-    
-    const isIndividual = b.entity === 'Individual';
-    
-    if (isIndividual) {
-      // Hide panels and elements for Individual
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'none';
-      
-      // Restrict actions - only show Revenue for Individuals
-      Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Revenue') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Revenue') {
-          opt.style.display = '';
-        }
-      });
-      
-      // Restrict accounts - show Individual income accounts, hide Salary
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (accountText === 'Salary') {
-          opt.style.display = 'none';  // Hide Salary for Individual
-        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
-          opt.style.display = '';  // Show Individual income accounts
-        } else {
-          opt.style.display = 'none';
-        }
-      });
-    } else {
-      // Show all panels for non-Individual entities
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'block';
-      
-      // Show all actions and accounts for non-Individual entities
-      Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
-    }
   }
 
   function txnActionChanged(){
@@ -4593,70 +4556,31 @@
 
     const vatNet = vatCollected - vatPaid;
     
-    // INDIVIDUAL ENTITY: Special display
-    const isIndividual = b.entity === 'Individual';
-    
-    // PIT for Individual (compute properly with statutory deductions and WHT receivable)
-    if(isIndividual && b.pitEnabled){
-      // Compute total gross income from all Revenue transactions
-      let totalGrossIncome = 0;
-      for(const t of arr){
-        if(t.accountCategory === 'Revenue') {
-          totalGrossIncome += Number(t.amount || 0);
-        }
-      }
-      
-      // Get statutory deductions
-      const ded = getStatutoryDeductions(b, null);
-      const totalDed = totalStatutoryDeductions(ded);
-      
-      // Taxable income (gross income less statutory deductions)
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
-      
-      // Compute PIT using bands on taxable income
-      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
-      
-      // Deduct WHT receivable from PIT
-      pitCharge = Math.max(0, pitLiability - whtReceivable);
-    }
-    
     let html = '';
-    if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
-      html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
-      html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
-      html += `<hr/>`;
-      // For Individual: show only WHT Receivable and PIT
-      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
-      html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions). WHT receivable is then deducted from the PIT liability.</div>`;
+    // Show full summary for all entity types
+    html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
+    html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
+    html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
+    html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
+    html += `<hr/>`;
+    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
+    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+    if(b.entity === 'Company'){
+      html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+      if(whtCarryForward > 0) {
+        html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+      }
+      html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
+      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
+      if(totalCarryforwardLosses > 0) {
+        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
+      }
     } else {
-      // For Company/Enterprise: show full summary
-      html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
-      html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
-      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
-      html += `<hr/>`;
-      html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
-      if(b.entity === 'Company'){
-        html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
-        if(whtCarryForward > 0) {
-          html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
-        }
-        html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
-        const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-        html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
-        if(totalCarryforwardLosses > 0) {
-          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-        }
-      } else {
-        html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
-        if(totalCarryforwardLosses > 0) {
-          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-        }
+      html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      if(totalCarryforwardLosses > 0) {
+        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
     }
     
