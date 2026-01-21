@@ -25,7 +25,7 @@
 
   function getUserByLogin(login){
     const users = loadUsers();
-    return users.find(u => u.username === login || u.email === login || u.username === login.toLowerCase());
+    return users.find(u => u.username === login || u.username === login.toLowerCase());
   }
 
   function showMsg(el, msg, success){ el.textContent = msg || ''; el.style.color = success? 'green':'#b00'; }
@@ -83,7 +83,7 @@
     loginForm.addEventListener('submit', async (e)=>{
       e.preventDefault(); loginMsg.textContent='';
       const login = loginUser.value.trim(); const pass = loginPass.value;
-      if(!login||!pass) return showMsg(loginMsg,'Provide username/email and password');
+      if(!login||!pass) return showMsg(loginMsg,'Provide username and password');
       const user = getUserByLogin(login);
       if(!user) return showMsg(loginMsg,'No matching user');
       const passHash = await sha256Hex(pass);
