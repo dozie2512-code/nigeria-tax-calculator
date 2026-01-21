@@ -2431,14 +2431,14 @@
       accountId: txnAccount.value,
       accountName: findAccount(b, txnAccount.value)?.name || '',
       accountCategory: findAccount(b, txnAccount.value)?.category || '',
-      description: txnDesc.value || '',
+      description: sanitizeInput(txnDesc.value || ''),
       amount: Number(txnAmount.value || 0),
       vatType: txnVatType.value || 'none',
       whtApplied: !!txnWht.checked,
       whtRate: Number(txnWhtRate.value || 0),
       whtBasis: txnWhtBasis.value || 'gross',
       paye: !!txnSalary.checked,
-      contact: txnContact.value || '',
+      contact: sanitizeInput(txnContact.value || ''),
       receiptId: null
     };
     if(txnReceipt.files && txnReceipt.files[0]){
@@ -2477,7 +2477,7 @@
     let isNewItem = false;
     
     if(selectedItemId === '__new__'){
-      const name = (invNewName.value || '').trim();
+      const name = sanitizeInput((invNewName.value || '').trim());
       if(!name) return alert('New item name required');
       const item = { id: uid('item'), name, qty: Number(invQty.value||0), avgCost: Number(invUnitPrice.value || 0) };
       if(Number(invOpeningQty.value)){
@@ -2525,7 +2525,7 @@
       vatType: invVatType.value || 'none', 
       whtApplied: false, 
       paye: false, 
-      contact: invContact.value || '', 
+      contact: sanitizeInput(invContact.value || ''), 
       receiptId: null, 
       inventoryItemId: inventoryItemId, 
       inventoryPrevState: prevState 
@@ -2645,7 +2645,7 @@
       vatType:'none', 
       whtApplied:false, 
       paye:false, 
-      contact: assetContact.value || '', 
+      contact: sanitizeInput(assetContact.value || ''), 
       receiptId:null,
       assetId: item.id, // Store asset ID for undo/delete reversal
       assetPrevState: { isNewAsset: true, assetId: item.id } // Store that this was a new asset creation
