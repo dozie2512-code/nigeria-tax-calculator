@@ -863,7 +863,7 @@
         </table>
       </div>
 
-      <div id="plSnapshot" class="totals"></div>
+      <div id="plSnapshot" class="totals" style="display:none;"></div>
       <div id="taxSummary" class="tax-summary"></div>
     </section>
 
@@ -1994,8 +1994,8 @@
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
     
-    // Allow Business and Manage Accounts buttons for Enterprise/Company plans regardless of admin status
-    const allowBusinessEdit = isAdmin || (user && (user.plan === 'Enterprise' || user.plan === 'Company'));
+    // Allow Business and Manage Accounts buttons for Enterprise/Business/Company plans regardless of admin status
+    const allowBusinessEdit = isAdmin || (user && (user.plan === 'Enterprise' || user.plan === 'Business' || user.plan === 'Company'));
     
     // Disable business management buttons for non-admins (except Enterprise/Company for specific buttons)
     btnAddBusiness.disabled = !isAdmin;
@@ -4441,7 +4441,7 @@
     taxSummaryDiv.innerHTML = '';
     if(!b) return;
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
-    let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0;
+    let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0, whtRemitted=0;
     const payeByContact = {};
     
     for(const t of arr){
@@ -4480,6 +4480,11 @@
         } else {
           whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
         }
+      }
+      
+      // Track WHT Remitted (actual payments made to tax authority)
+      if(t.action === 'WHTRemitted') {
+        whtRemitted += Number(t.amount||0);
       }
       
       if(t.paye && t.contact){
@@ -4609,12 +4614,12 @@
       }
       // If threshold is 0 (NONE), CIT = 0
       
-      // Deduct WHT receivable only if CIT was actually computed (turnover above threshold and CIT > 0)
+      // Deduct WHT remitted only if CIT was actually computed (turnover above threshold and CIT > 0)
       if(citCharge > 0) {
-        citCharge = Math.max(0, citCharge - whtReceivable);
+        citCharge = Math.max(0, citCharge - whtRemitted);
       } else {
-        // CIT is 0% (turnover below threshold): carry forward WHT receivable to next period
-        whtCarryForward = whtReceivable;
+        // CIT is 0% (turnover below threshold): carry forward WHT remitted to next period
+        whtCarryForward = whtRemitted;
       }
     }
 
@@ -4623,8 +4628,8 @@
     if(b.entity === 'Enterprise' && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        // Deduct WHT receivable from PIT charge
-        pitCharge = Math.max(0, pitLiability - whtReceivable);
+        // Deduct WHT remitted from PIT charge
+        pitCharge = Math.max(0, pitLiability - whtRemitted);
       }
     }
 
@@ -4650,8 +4655,8 @@
       // Compute PIT using bands on taxable income
       const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
       
-      // Deduct WHT receivable from PIT
-      pitCharge = Math.max(0, pitLiability - whtReceivable);
+      // Deduct WHT remitted from PIT
+      pitCharge = Math.max(0, pitLiability - whtRemitted);
     }
     
     let html = '';
@@ -4662,12 +4667,12 @@
       html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
       html += `<hr/>`;
       html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)} | <strong>WHT Remitted:</strong> ${fmt(whtRemitted)}</div>`;
       html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
       if(b.entity === 'Company'){
-        html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+        html += `<div><strong>CIT Charge (after WHT Remitted):</strong> ${fmt(citCharge)}</div>`;
         if(whtCarryForward > 0) {
-          html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+          html += `<div class="small-note">WHT Remitted Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
         }
         html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
