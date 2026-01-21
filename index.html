@@ -868,7 +868,7 @@
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
         <button class="small tab active" data-report="vatReport">VAT Report</button>
         <button class="small tab" data-report="whtPayable">WHT Payable</button>
-        <button class="small tab" data-report="whtReceivable">WHT Receivable</button>
+        <button class="small tab" data-report="whtReceivable">WHT Remitted</button>
         <button class="small tab" data-report="payeReport">PAYE Report</button>
         <button class="small tab" data-report="inventoryReport">Inventory Report</button>
         <button class="small tab" data-report="assetsReport">Assets Report</button>
@@ -887,13 +887,6 @@
       </div>
 
       <div id="reportContent" style="min-height:160px;"></div>
-    </section>
-
-    <section class="panel section grid" id="quickPanels">
-      <div>
-        <h3>Profit & Loss Snapshot (Quick)</h3>
-        <div id="plSnapshotQuick" class="panel" style="padding:8px;"></div>
-      </div>
     </section>
   </main>
 
@@ -934,6 +927,7 @@
       <label>Name: <input type="text" id="bizName" /></label>
       <label>Owner: <select id="bizOwner"></select></label>
     </div>
+    <small class="note" id="bizExtraCostNote" style="display:none;margin-bottom:8px;color:#666;"></small>
     <div class="row">
       <label>Entity type:
         <select id="bizEntity">
@@ -1133,7 +1127,7 @@
       </select>
     </label>
   </div>
-  <small class="note">This will create a default business for your account with the selected entity type.</small>
+  <small class="note" id="entitySelectNote">This will create default business(es) for your account with the selected entity type.</small>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
     <button class="primary" id="entitySelectConfirm">Confirm & Continue</button>
   </div>
@@ -1179,8 +1173,39 @@
   // Video tour YouTube hash - replace with actual video hash
   const TOUR_VIDEO_HASH = 'REPLACE_ME_YOUTUBE_HASH';
   
-  // Maximum users allowed per business (including owner)
-  const MAX_USERS_PER_BUSINESS = 3;
+  // Plan configurations
+  const PLAN_CONFIG = {
+    Business: {
+      maxUsers: 2,
+      defaultBusinesses: 1,
+      trialDays: 7,
+      extraBusinessCost: {
+        Enterprise: 40000,
+        Company: 40000
+      }
+    },
+    Company: {
+      maxUsers: 3,
+      defaultBusinesses: 1,
+      trialDays: 7,
+      extraBusinessCost: {
+        Enterprise: 50000,
+        Company: 50000
+      }
+    },
+    Enterprise: {
+      maxUsers: 3,
+      defaultBusinesses: 3,
+      trialDays: 7,
+      extraBusinessCost: {
+        Enterprise: 30000,
+        Company: 40000
+      }
+    }
+  };
+  
+  // Maximum users allowed per business (including owner) - now plan-dependent
+  const MAX_USERS_PER_BUSINESS = 3; // Default, overridden by plan config
 
   /**
    * SHA-256 hashing function removed - Firebase Authentication handles password security
@@ -1288,7 +1313,7 @@
   }
 
   /**
-   * Checks if a business can accept more users (enforces 3-user limit).
+   * Checks if a business can accept more users (enforces plan-dependent user limit).
    * @param {string} bizId - The business ID to check
    * @returns {boolean} - True if more users can be added, false if limit reached
    */
@@ -1296,8 +1321,15 @@
     const biz = state.businesses.find(b => b.id === bizId);
     if (!biz) return false;
     
+    // Get the owner to check their plan
+    const owner = state.users.find(u => u.id === biz.ownerId);
+    if (!owner) return false;
+    
+    // Get plan-specific max users
+    const userPlan = owner.plan || 'Enterprise';
+    const maxUsers = PLAN_CONFIG[userPlan]?.maxUsers || MAX_USERS_PER_BUSINESS;
+    
     // Count users associated with this business
-    // Include owner + any users in userIds array
     let userCount = 0;
     
     // Count from userIds array if it exists
@@ -1308,7 +1340,7 @@
       userCount = 1;
     }
     
-    return userCount < MAX_USERS_PER_BUSINESS;
+    return userCount < maxUsers;
   }
 
   /**
@@ -1324,6 +1356,57 @@
       return biz.userIds.length;
     }
     return 1; // At least the owner
+  }
+
+  /**
+   * Checks if a user can create more businesses based on their plan.
+   * @param {string} userId - The user's ID
+   * @returns {boolean} - True if more businesses can be created
+   */
+  function canUserCreateMoreBusinesses(userId) {
+    const user = state.users.find(u => u.id === userId);
+    if (!user) return false;
+    
+    // Count businesses owned by this user
+    const ownedBusinesses = state.businesses.filter(b => b.ownerId === userId).length;
+    
+    // No hard limit enforced - users can create additional businesses
+    // (they will be charged extra per the pricing model)
+    return true;
+  }
+
+  /**
+   * Gets the extra business cost for a user based on their plan and entity type.
+   * @param {string} userId - The user's ID
+   * @param {string} entityType - The entity type (Enterprise/Company)
+   * @returns {number} - Cost in Naira
+   */
+  function getExtraBusinessCost(userId, entityType) {
+    const user = state.users.find(u => u.id === userId);
+    if (!user) return 0;
+    
+    const userPlan = user.plan || 'Enterprise';
+    const planConfig = PLAN_CONFIG[userPlan];
+    
+    if (!planConfig) return 0;
+    
+    return planConfig.extraBusinessCost[entityType] || 0;
+  }
+
+  /**
+   * Gets the max users allowed for a business based on owner's plan.
+   * @param {string} bizId - The business ID
+   * @returns {number} - Maximum users allowed
+   */
+  function getMaxUsersForBusiness(bizId) {
+    const biz = state.businesses.find(b => b.id === bizId);
+    if (!biz) return MAX_USERS_PER_BUSINESS;
+    
+    const owner = state.users.find(u => u.id === biz.ownerId);
+    if (!owner) return MAX_USERS_PER_BUSINESS;
+    
+    const userPlan = owner.plan || 'Enterprise';
+    return PLAN_CONFIG[userPlan]?.maxUsers || MAX_USERS_PER_BUSINESS;
   }
 
   /**
@@ -2716,10 +2799,11 @@
     const userPassword = document.getElementById('userPassword');
     if (userPassword) userPassword.value = '';
     
-    // Check 3-user limit per business when adding new users
+    // Check plan-specific user limit per business when adding new users
     if(!editId && selectedBizId) {
       if(!canAddUserToBusiness(selectedBizId)) {
-        alert('User limit reached! This business already has the maximum of ' + MAX_USERS_PER_BUSINESS + ' users. Cannot add more users.');
+        const maxUsers = getMaxUsersForBusiness(selectedBizId);
+        alert('User limit reached! This business already has the maximum of ' + maxUsers + ' users. Cannot add more users.');
         return;
       }
     }
@@ -2755,9 +2839,10 @@
         return alert('Password is required for new users (minimum 6 characters)');
       }
       
-      // Check 3-user limit per business before adding
+      // Check plan-specific user limit per business before adding
       if(selectedBizId && !canAddUserToBusiness(selectedBizId)) {
-        return alert('User limit reached! This business already has the maximum of ' + MAX_USERS_PER_BUSINESS + ' users. Cannot add more users.');
+        const maxUsers = getMaxUsersForBusiness(selectedBizId);
+        return alert('User limit reached! This business already has the maximum of ' + maxUsers + ' users. Cannot add more users.');
       }
       
       // Check username uniqueness
@@ -2834,6 +2919,26 @@
     
     // Enable entity type selection for new businesses
     bizEntity.disabled = false;
+    
+    // Show extra business cost note
+    const bizExtraCostNote = document.getElementById('bizExtraCostNote');
+    if (bizExtraCostNote && currentUser) {
+      const ownedBusinessesCount = state.businesses.filter(b => b.ownerId === currentUser.id).length;
+      const userPlan = currentUser.plan || 'Enterprise';
+      const planConfig = PLAN_CONFIG[userPlan];
+      const defaultBusinesses = planConfig?.defaultBusinesses || 1;
+      
+      if (ownedBusinessesCount >= defaultBusinesses) {
+        // User is creating an extra business beyond their plan's default
+        const enterpriseCost = planConfig?.extraBusinessCost?.Enterprise || 0;
+        const companyCost = planConfig?.extraBusinessCost?.Company || 0;
+        
+        bizExtraCostNote.style.display = 'block';
+        bizExtraCostNote.textContent = `Extra business cost: ₦${enterpriseCost.toLocaleString()}/year for Enterprise entity, ₦${companyCost.toLocaleString()}/year for Company entity.`;
+      } else {
+        bizExtraCostNote.style.display = 'none';
+      }
+    }
     
     openModal(businessModal);
   }
@@ -4627,8 +4732,8 @@
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
       html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
       html += `<hr/>`;
-      // For Individual: show only WHT Receivable and PIT
-      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      // For Individual: show only WHT Remitted and PIT
+      html += `<div><strong>WHT Remitted:</strong> ${fmt(whtReceivable)}</div>`;
       html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
       html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions). WHT receivable is then deducted from the PIT liability.</div>`;
     } else {
@@ -4639,12 +4744,12 @@
       html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
       html += `<hr/>`;
       html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Remitted:</strong> ${fmt(whtReceivable)}</div>`;
       html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
       if(b.entity === 'Company'){
         html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
         if(whtCarryForward > 0) {
-          html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+          html += `<div class="small-note">WHT Remitted Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
         }
         html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
@@ -4739,7 +4844,7 @@
 
   /**
    * Updates report tab visibility based on selected business entity type.
-   * - Enterprise: VAT, WHT Payable, WHT Receivable, PAYE, Inventory, Assets, PIT (Enterprise), Audit Trail, Receipts Folder, CGT (hide Company Accounts)
+   * - Enterprise: VAT, WHT Payable, WHT Remitted, PAYE, Inventory, Assets, PIT (Enterprise), Audit Trail, Receipts Folder, CGT (hide Company Accounts)
    * - Company: All except PIT reports, includes Company Accounts and CGT
    */
   function updateReportTabVisibility() {
@@ -5038,7 +5143,7 @@
     // PIT computation
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply PIT Band</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     // Final liability
@@ -5196,7 +5301,7 @@
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
@@ -5487,7 +5592,7 @@
           html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
         }
       }
-      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Receivable</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Remitted</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'payeReport'){
@@ -5645,7 +5750,7 @@
       html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+      html += `<tr><td style="padding-left:20px;">Less: WHT Remitted</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
       html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
       html += `</tbody></table>`;
       reportContent.innerHTML = html;
@@ -6617,11 +6722,17 @@
     
     const entitySelectModal = document.getElementById('entitySelectModal');
     const entitySelectType = document.getElementById('entitySelectType');
+    const entitySelectNote = document.getElementById('entitySelectNote');
     const preLoginOverlay = document.getElementById('preLoginOverlay');
     
     if (!entitySelectModal || !entitySelectType) {
       // Fallback: create business directly without modal
-      createBusinessForUser(userId, preselectedPlan || 'Enterprise');
+      const user = state.users.find(u => u.id === userId);
+      const userPlan = user?.plan || 'Enterprise';
+      const defaultBusinesses = PLAN_CONFIG[userPlan]?.defaultBusinesses || 1;
+      for (let i = 0; i < defaultBusinesses; i++) {
+        createBusinessForUser(userId, preselectedPlan || 'Enterprise');
+      }
       completeSignupFlow(userId);
       return;
     }
@@ -6633,6 +6744,19 @@
     
     // Pre-select based on signup plan
     entitySelectType.value = preselectedPlan || 'Enterprise';
+    
+    // Update note to show how many businesses will be created
+    if (entitySelectNote) {
+      const user = state.users.find(u => u.id === userId);
+      const userPlan = user?.plan || 'Enterprise';
+      const defaultBusinesses = PLAN_CONFIG[userPlan]?.defaultBusinesses || 1;
+      
+      if (defaultBusinesses > 1) {
+        entitySelectNote.textContent = `This will create ${defaultBusinesses} default businesses for your account with the selected entity type.`;
+      } else {
+        entitySelectNote.textContent = 'This will create 1 default business for your account with the selected entity type.';
+      }
+    }
     
     // Block page leaving with beforeunload (user must confirm entity)
     window.addEventListener('beforeunload', blockPageLeaveUntilEntitySelected);
@@ -6683,13 +6807,28 @@
       }
       
       const entityType = entitySelectType ? entitySelectType.value : 'Enterprise';
+      const user = state.users.find(u => u.id === pendingSignupUserId);
       
-      // Create default business for the user
-      const bizId = createBusinessForUser(pendingSignupUserId, entityType);
+      if (!user) {
+        closeModal(entitySelectModal);
+        return;
+      }
       
-      // Set as selected business
-      if (bizId) {
-        selectedBizId = bizId;
+      // Get plan config for default business count
+      const userPlan = user.plan || 'Enterprise';
+      const planConfig = PLAN_CONFIG[userPlan];
+      const defaultBusinesses = planConfig?.defaultBusinesses || 1;
+      
+      // Create default businesses for the user based on their plan
+      let firstBizId = null;
+      for (let i = 0; i < defaultBusinesses; i++) {
+        const bizId = createBusinessForUser(pendingSignupUserId, entityType);
+        if (i === 0) firstBizId = bizId;
+      }
+      
+      // Set the first business as selected
+      if (firstBizId) {
+        selectedBizId = firstBizId;
         selectedUserId = pendingSignupUserId;
       }
       
