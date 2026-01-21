@@ -1192,7 +1192,7 @@
    * 
    * CHANGELOG:
    * - Renamed SoleProprietor → Enterprise
-   * - Added Individual entity type with restricted UI/tax rules
+   * - Individual entity type removed (legacy support for existing data only)
    * - Updated transaction action from Income to Revenue (backwards compatible migration included)
    * - Added turnoverThreshold configuration (0, 50M, 100M)
    * - Enhanced asset management with opening balances
@@ -1266,7 +1266,7 @@
   /**
    * Creates a default business for a user after signup.
    * @param {string} userId - The user's ID
-   * @param {string} entityType - The entity type (Individual/Enterprise/Company)
+   * @param {string} entityType - The entity type (Enterprise/Company)
    * @returns {string} - The created business ID
    */
   function createBusinessForUser(userId, entityType) {
@@ -1685,13 +1685,8 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' }  // Added for Individual
+        { name: 'Sales Revenue', category: 'Revenue' }
       ];
-      
-      // Add Rent as Revenue for Individual entities only
-      if(b.entity === 'Individual'){
-        accountsToAdd.push({ name: 'Rent', category: 'Revenue' });
-      }
       
       for (const acct of accountsToAdd) {
         if (!existingAccountNames.includes(acct.name)) {
@@ -3206,46 +3201,17 @@
   }
 
   function renderFeatureVisibility(){
-    // Handle Individual entity restrictions
+    // Since Individual entity is removed, all businesses get full feature access
     const b = findBiz(selectedBizId);
     if (!b) return;
     
-    const isIndividual = b.entity === 'Individual';
+    // Show all panels for all entities
+    const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+    if(plQuick) plQuick.style.display = 'block';
     
-    if (isIndividual) {
-      // Hide panels and elements for Individual
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'none';
-      
-      // Restrict actions - only show Revenue for Individuals
-      Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Revenue') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Revenue') {
-          opt.style.display = '';
-        }
-      });
-      
-      // Restrict accounts - show Individual income accounts, hide Salary
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (accountText === 'Salary') {
-          opt.style.display = 'none';  // Hide Salary for Individual
-        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
-          opt.style.display = '';  // Show Individual income accounts
-        } else {
-          opt.style.display = 'none';
-        }
-      });
-    } else {
-      // Show all panels for non-Individual entities
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'block';
-      
-      // Show all actions and accounts for non-Individual entities
-      Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
-    }
+    // Show all actions and accounts for all entities
+    Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
+    Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
   }
 
   function txnActionChanged(){
@@ -3895,7 +3861,7 @@
         // CGT: Apply entity-specific rules for net (post-offset) gain
         if(netGainAfterOffset > 0 && !isShareExempt) {
           if(b.entity === 'Individual' || b.entity === 'Enterprise') {
-            // Individual or Enterprise: include netGain in taxable profit
+            // Individual (legacy) or Enterprise: include netGain in taxable profit
             includedInTaxableProfit = true;
             addAudit('cgt.taxable_profit', 'asset', asset.id, 
               `Chargeable gain ${fmt(netGainAfterOffset)} included in taxable profit for ${b.entity}`,
@@ -4286,7 +4252,7 @@
     
     // Show/hide Report tab based on user plan (only Enterprise Plan users can see it)
     if(btnReportsTab && currentUser) {
-      if(currentUser.plan === 'Enterprise Plan') {
+      if(currentUser.plan === 'Enterprise') {
         btnReportsTab.style.display = '';
       } else {
         btnReportsTab.style.display = 'none';
@@ -4884,10 +4850,10 @@
 
     const vatNet = vatCollected - vatPaid;
     
-    // INDIVIDUAL ENTITY: Special display
+    // Note: Individual entity has been removed. Legacy data may still have 'Individual' entity type.
     const isIndividual = b.entity === 'Individual';
     
-    // PIT for Individual (compute properly with statutory deductions and WHT receivable)
+    // PIT for Individual (legacy support only - new businesses cannot be created as Individual)
     if(isIndividual && b.pitEnabled){
       // Compute total gross income from all Revenue transactions
       let totalGrossIncome = 0;
@@ -4913,7 +4879,7 @@
     
     let html = '';
     if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
+      // For Individual (legacy): show simplified summary - no WHT Payable, no PAYE, no CA details
       html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
       html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
       html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
