@@ -552,8 +552,8 @@
 
       <!-- Login panel -->
       <div id="authLoginPanel" class="auth-panel prelogin-form">
-        <label>Email:
-          <input type="email" id="preLoginUsername" placeholder="Enter your email address" autocomplete="email" />
+        <label>Username:
+          <input type="text" id="preLoginUsername" placeholder="Enter your username" autocomplete="username" />
         </label>
         <label>Password:
           <input type="password" id="preLoginPassword" placeholder="Enter password" autocomplete="current-password" />
@@ -572,9 +572,6 @@
         </label>
         <label>Username:
           <input type="text" id="authSignupUsername" placeholder="Choose a username" autocomplete="username" required />
-        </label>
-        <label>Email:
-          <input type="email" id="authSignupEmail" placeholder="your@email.com" autocomplete="email" required />
         </label>
         <label>Password (min 6 chars):
           <input type="password" id="authSignupPassword" placeholder="Choose a password" autocomplete="new-password" minlength="6" required />
@@ -1076,7 +1073,6 @@
   <div class="row">
     <label>Name: <input type="text" id="signupName" required></label>
     <label>Username: <input type="text" id="signupUsername" required></label>
-    <label>Email: <input type="email" id="signupEmail" required placeholder="your@email.com"></label>
   </div>
   <div class="row">
     <label>Phone: <input type="tel" id="signupPhone" placeholder="e.g. +234..."></label>
@@ -1100,11 +1096,11 @@
 <div id="forgotModal" class="modal">
   <h3>Forgot Password</h3>
   <div class="row">
-    <label>Email: <input type="email" id="forgotEmail" placeholder="Enter your email address"></label>
+    <label>Username: <input type="text" id="forgotEmail" placeholder="Enter your username"></label>
   </div>
   <div id="forgotModeNote">
-    <small class="note" id="forgotNoteFirebase" style="display:none;">Enter your email address and we'll send you a password reset link.</small>
-    <small class="note" id="forgotNoteLocal">We will open an email request to the admin/sales team to process the reset. If you are the user, contact your admin to reset.</small>
+    <small class="note" id="forgotNoteFirebase" style="display:none;">Enter your username and we'll send you a password reset link.</small>
+    <small class="note" id="forgotNoteLocal">We will open a request to the admin/sales team to process the reset. If you are the user, contact your admin to reset.</small>
   </div>
   <p id="forgotMsg" class="auth-msg"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
@@ -1554,7 +1550,6 @@
   const authSignupMsg = document.getElementById('authSignupMsg');
   const authSignupName = document.getElementById('authSignupName');
   const authSignupUsername = document.getElementById('authSignupUsername');
-  const authSignupEmail = document.getElementById('authSignupEmail');
   const authSignupPassword = document.getElementById('authSignupPassword');
   const authSignupPassword2 = document.getElementById('authSignupPassword2');
   const authSignupSubmit = document.getElementById('authSignupSubmit');
@@ -1642,7 +1637,14 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' }
+        { name: 'Sales Revenue', category: 'Revenue' },
+        { name: 'WHT Payable', category: 'Liability' },
+        { name: 'VAT Payable', category: 'Liability' },
+        { name: 'PAYE Payable', category: 'Liability' },
+        { name: 'CIT Payable', category: 'Liability' },
+        { name: 'PIT Payable', category: 'Liability' },
+        { name: 'WHT Remitted', category: 'Asset' },
+        { name: 'VAT Refundable', category: 'Asset' }
       ];
       
       
@@ -1662,7 +1664,7 @@
       
       // Ensure balance accounts have balance fields
       b.accounts.forEach(a => {
-        if (['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'].includes(a.name)) {
+        if (['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment', 'WHT Payable', 'VAT Payable', 'PAYE Payable', 'CIT Payable', 'PIT Payable', 'WHT Remitted', 'VAT Refundable'].includes(a.name)) {
           a.openingBalance = a.openingBalance || 0;
           a.closingBalance = a.closingBalance || 0;
         }
@@ -1857,11 +1859,11 @@
 
   // Pre-login overlay handler - authenticates user using Firebase Authentication
   async function handlePreLogin(){
-    const email = (preLoginUsername && preLoginUsername.value ? preLoginUsername.value : '').trim();
+    const username = (preLoginUsername && preLoginUsername.value ? preLoginUsername.value : '').trim().toLowerCase();
     const password = (preLoginPassword && preLoginPassword.value ? preLoginPassword.value : '');
     
-    if(!email) {
-      if(authLoginMsg) { authLoginMsg.textContent = 'Email address required'; authLoginMsg.style.color = '#b00'; }
+    if(!username) {
+      if(authLoginMsg) { authLoginMsg.textContent = 'Username required'; authLoginMsg.style.color = '#b00'; }
       return;
     }
     
@@ -1870,12 +1872,8 @@
       return;
     }
     
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      if(authLoginMsg) { authLoginMsg.textContent = 'Please enter a valid email address'; authLoginMsg.style.color = '#b00'; }
-      return;
-    }
+    // Convert username to email format for Firebase
+    const email = username + '@taxpro.local';
     
     // Check if Firebase is available
     if (!isFirebaseAuthEnabled()) {
@@ -1885,16 +1883,16 @@
     
     if(authLoginMsg) { authLoginMsg.textContent = 'Signing in...'; authLoginMsg.style.color = 'var(--muted)'; }
     
-    const fbResult = await firebaseSignIn(email.toLowerCase(), password);
+    const fbResult = await firebaseSignIn(email, password);
     
     if (fbResult.success) {
       const firebaseUid = fbResult.user.uid;
-      const email = fbResult.user.email;
+      const fbEmail = fbResult.user.email;
       
-      // Find local user by Firebase UID or email
+      // Find local user by Firebase UID or username
       let user = state.users.find(u => u.firebaseUid === firebaseUid);
       if (!user) {
-        user = state.users.find(u => u.email === email);
+        user = state.users.find(u => u.username === username);
         // Map the Firebase UID to existing user
         if (user && !user.firebaseUid) {
           user.firebaseUid = firebaseUid;
@@ -2223,12 +2221,11 @@
         if (authSignupMsg) authSignupMsg.textContent = '';
         
         const name = authSignupName ? authSignupName.value.trim() : '';
-        const username = authSignupUsername ? authSignupUsername.value.trim() : '';
-        const email = authSignupEmail ? authSignupEmail.value.trim().toLowerCase() : '';
+        const username = authSignupUsername ? authSignupUsername.value.trim().toLowerCase() : '';
         const pass = authSignupPassword ? authSignupPassword.value : '';
         const pass2 = authSignupPassword2 ? authSignupPassword2.value : '';
         
-        if (!name || !username || !email || !pass) {
+        if (!name || !username || !pass) {
           if (authSignupMsg) { authSignupMsg.textContent = 'Please fill all fields'; authSignupMsg.style.color = '#b00'; }
           return;
         }
@@ -2240,20 +2237,11 @@
           if (authSignupMsg) { authSignupMsg.textContent = 'Password must be at least 6 characters'; authSignupMsg.style.color = '#b00'; }
           return;
         }
-        if (!isValidEmail(email)) {
-          if (authSignupMsg) { authSignupMsg.textContent = 'Please enter a valid email address'; authSignupMsg.style.color = '#b00'; }
-          return;
-        }
         
-        // Check username and email uniqueness (local check)
+        // Check username uniqueness (local check)
         const existingUsername = state.users.find(u => u.username === username);
         if (existingUsername) {
           if (authSignupMsg) { authSignupMsg.textContent = 'Username already exists'; authSignupMsg.style.color = '#b00'; }
-          return;
-        }
-        const existingEmail = state.users.find(u => u.email === email);
-        if (existingEmail) {
-          if (authSignupMsg) { authSignupMsg.textContent = 'Email already registered'; authSignupMsg.style.color = '#b00'; }
           return;
         }
         
@@ -2263,9 +2251,10 @@
           return;
         }
         
-        // Firebase signup
+        // Firebase signup - convert username to email format
         if (authSignupMsg) { authSignupMsg.textContent = 'Creating account...'; authSignupMsg.style.color = 'var(--muted)'; }
         
+        const email = username + '@taxpro.local';
         const fbResult = await firebaseSignUp(email, pass);
         if (!fbResult.success) {
           if (authSignupMsg) { authSignupMsg.textContent = fbResult.error || 'Sign up failed'; authSignupMsg.style.color = '#b00'; }
@@ -2280,7 +2269,6 @@
           id: userId,
           username: username,
           display: name,
-          email: email,
           firebaseUid: firebaseUid, // Linked to Firebase user
           role: 'User',
           isAdmin: false,
@@ -2300,7 +2288,6 @@
         // Clear form
         if (authSignupName) authSignupName.value = '';
         if (authSignupUsername) authSignupUsername.value = '';
-        if (authSignupEmail) authSignupEmail.value = '';
         if (authSignupPassword) authSignupPassword.value = '';
         if (authSignupPassword2) authSignupPassword2.value = '';
         
@@ -2330,35 +2317,19 @@
             // Get form field references defensively
             var nameEl = document.getElementById('signupName');
             var usernameEl = document.getElementById('signupUsername');
-            var emailEl = document.getElementById('signupEmail');
             var phoneEl = document.getElementById('signupPhone');
             var passwordEl = document.getElementById('signupPassword');
             var planEl = document.getElementById('signupPlan');
 
             var name = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
-            var username = (usernameEl && usernameEl.value) ? usernameEl.value.trim() : '';
-            var email = (emailEl && emailEl.value) ? emailEl.value.trim() : '';
+            var username = (usernameEl && usernameEl.value) ? usernameEl.value.trim().toLowerCase() : '';
             var phone = (phoneEl && phoneEl.value) ? phoneEl.value.trim() : '';
             var password = (passwordEl && passwordEl.value) ? passwordEl.value : '';
             var plan = (planEl && planEl.value) ? planEl.value : 'Individual';
 
             // Validate required fields
-            if (!name || !username || !email || !password) {
-              alert('Name, Username, Email, and Password are required.');
-              return;
-            }
-
-            // Validate email format
-            var emailValid = false;
-            if (typeof isValidEmail === 'function') {
-              emailValid = isValidEmail(email);
-            } else {
-              // Fallback email validation
-              var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-              emailValid = emailRegex.test(email);
-            }
-            if (!emailValid) {
-              alert('Please enter a valid email address.');
+            if (!name || !username || !password) {
+              alert('Name, Username, and Password are required.');
               return;
             }
 
@@ -2375,20 +2346,14 @@
                 alert('Username already exists. Please choose a different username.');
                 return;
               }
-
-              // Check email uniqueness
-              var existingUserByEmail = state.users.find(function(u) { return u.email === email; });
-              if (existingUserByEmail) {
-                alert('This email address is already registered. Please use a different email or login with your existing account.');
-                return;
-              }
             }
 
-            // Use Firebase Authentication for signup
+            // Use Firebase Authentication for signup - convert username to email format
             var firebaseUid = null;
+            var email = username + '@taxpro.local';
             if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled() && typeof firebaseSignUp === 'function') {
               try {
-                var fbResult = await firebaseSignUp(email.toLowerCase(), password);
+                var fbResult = await firebaseSignUp(email, password);
                 if (!fbResult.success) {
                   alert('Firebase signup failed: ' + (fbResult.error || 'Unknown error'));
                   return;
@@ -2461,7 +2426,7 @@
             // Log audit entry via addAudit() if available
             if (typeof addAudit === 'function') {
               try {
-                addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ', Email: ' + email + ')');
+                addAudit('user.signup', 'user', userId, 'User signed up: ' + username + ' (Plan: ' + plan + ')');
               } catch (auditErr) {
                 console.warn('addAudit() failed:', auditErr);
               }
@@ -2470,7 +2435,6 @@
             // Clear form fields
             if (nameEl) nameEl.value = '';
             if (usernameEl) usernameEl.value = '';
-            if (emailEl) emailEl.value = '';
             if (phoneEl) phoneEl.value = '';
             if (passwordEl) passwordEl.value = '';
             if (planEl) planEl.value = 'Individual';
@@ -6607,19 +6571,15 @@
     
     if (forgotSubmit) {
       forgotSubmit.addEventListener('click', async function() {
-        const email = (forgotEmail && forgotEmail.value) ? forgotEmail.value.trim().toLowerCase() : '';
+        const username = (forgotEmail && forgotEmail.value) ? forgotEmail.value.trim().toLowerCase() : '';
         
-        if (!email) {
-          if (forgotMsg) { forgotMsg.textContent = 'Please enter your email address.'; forgotMsg.style.color = '#b00'; }
+        if (!username) {
+          if (forgotMsg) { forgotMsg.textContent = 'Please enter your username.'; forgotMsg.style.color = '#b00'; }
           return;
         }
         
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-          if (forgotMsg) { forgotMsg.textContent = 'Please enter a valid email address.'; forgotMsg.style.color = '#b00'; }
-          return;
-        }
+        // Convert username to email format for Firebase
+        const email = username + '@taxpro.local';
         
         // Use Firebase password reset if available
         if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
@@ -6628,8 +6588,8 @@
           const result = await firebaseSendPasswordReset(email);
           
           if (result.success) {
-            if (forgotMsg) { forgotMsg.textContent = 'Password reset email sent! Check your inbox.'; forgotMsg.style.color = 'green'; }
-            addAudit('user.forgot_password_firebase', 'auth', null, 'Firebase password reset email sent to: ' + email);
+            if (forgotMsg) { forgotMsg.textContent = 'Password reset request sent! Please contact support.'; forgotMsg.style.color = 'green'; }
+            addAudit('user.forgot_password_firebase', 'auth', null, 'Firebase password reset requested for username: ' + username);
             
             // Clear form and close modal after delay
             setTimeout(function() {
@@ -6642,14 +6602,14 @@
           }
         } else {
           // Fallback to local behavior
-          // Check if user exists with this email
-          const user = state.users.find(function(u) { return u.email === email; });
+          // Check if user exists with this username
+          const user = state.users.find(function(u) { return u.username === username; });
           if (!user) {
-            if (forgotMsg) { forgotMsg.textContent = 'No account found with this email.'; forgotMsg.style.color = '#b00'; }
+            if (forgotMsg) { forgotMsg.textContent = 'No account found with this username.'; forgotMsg.style.color = '#b00'; }
             return;
           }
           
-          addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for: ' + email);
+          addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for username: ' + username);
           
           if (forgotMsg) { 
             forgotMsg.textContent = 'Reset request logged. Please contact your admin or salesrepng@gmail.com.'; 
