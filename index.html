@@ -654,6 +654,9 @@
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
             <option value="Revenue">Revenue</option>
+            <option value="InvestmentIncome">Investment Income</option>
+            <option value="TaxIncome">Tax Income</option>
+            <option value="TaxPayment">Tax Payment</option>
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
@@ -716,18 +719,6 @@
                   Employee
                   <select class="contact-name-select" data-type="Employee" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
                     <option value="">Select employee...</option>
-                  </select>
-                </button>
-                <button type="button" class="contact-type-option" data-type="Customer" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Customers
-                  <select class="contact-name-select" data-type="Customer" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select customer...</option>
-                  </select>
-                </button>
-                <button type="button" class="contact-type-option" data-type="Vendor" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Vendors
-                  <select class="contact-name-select" data-type="Vendor" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select vendor...</option>
                   </select>
                 </button>
               </div>
@@ -1001,8 +992,6 @@
         <div class="row">
           <input type="text" id="newContactName" placeholder="Contact name" />
           <select id="newContactType">
-            <option value="Customer">Customer</option>
-            <option value="Vendor">Vendor</option>
             <option value="Employee">Employee</option>
             <option value="SoleTrader">SoleTrader</option>
           </select>
@@ -1052,8 +1041,6 @@
       <label>Name: <input type="text" id="contactEditName" /></label>
       <label>Type:
         <select id="contactEditType">
-          <option value="Customer">Customer</option>
-          <option value="Vendor">Vendor</option>
           <option value="Employee">Employee</option>
           <option value="SoleTrader">SoleTrader</option>
         </select>
@@ -1664,7 +1651,15 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' }
+        { name: 'Sales Revenue', category: 'Revenue' },
+        { name: 'VAT Refunded', category: 'Asset' },
+        { name: 'VAT Paid', category: 'Expense' },
+        { name: 'WHT Remitted', category: 'Expense' },
+        { name: 'WHT Paid', category: 'Expense' },
+        { name: 'PAYE Paid', category: 'Expense' },
+        { name: 'PIT Paid', category: 'Expense' },
+        { name: 'CGT Paid', category: 'Expense' },
+        { name: 'CIT Paid', category: 'Expense' }
       ];
       
       for (const acct of accountsToAdd) {
@@ -4942,13 +4937,26 @@
     
     // Add loss on disposal to disallowable
     disallowableExpenses += lossOnDisposal;
+    // WHT receivable (for net basis revenues)
+    let whtReceivable = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue') {
+        const rate = Number(t.whtRate || b.whtRate) / 100;
+        if(t.whtBasis === 'net') {
+          // For net basis, add back the WHT to get gross amount
+          whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+        } else {
+          whtReceivable += Number(t.amount || 0) * rate;
+        }
+      }
+    }
     
     // Get statutory deductions
     const ded = getStatutoryDeductions(b, contactId);
     const totalDed = totalStatutoryDeductions(ded);
     
-    // Calculations
-    const accountingProfit = revenue - expenses;
+    // Calculations - Add back WHT receivable for net basis revenues to accounting profit
+    const accountingProfit = revenue - expenses + whtReceivable;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -4959,16 +4967,18 @@
     // Compute PIT using bands
     const pitLiability = computePAYEOnAnnualIncome(grossTaxableProfit);
     
-    // WHT receivable
-    let whtReceivable = 0;
-    for(const t of arr){
-      if(t.whtApplied && t.accountCategory === 'Revenue') {
-        const rate = Number(t.whtRate || b.whtRate) / 100;
-        whtReceivable += Number(t.amount || 0) * rate;
+    // WHT remitted (for tracking tax payments)
+    let whtRemitted = 0;
+    const whtRemittedAccount = b.accounts.find(a => a.name === 'WHT Remitted');
+    if(whtRemittedAccount) {
+      for(const t of arr){
+        if(t.accountId === whtRemittedAccount.id) {
+          whtRemitted += Number(t.amount || 0);
+        }
       }
     }
     
-    const finalLiability = Math.max(0, pitLiability - whtReceivable);
+    const finalLiability = Math.max(0, pitLiability - whtReceivable - whtRemitted);
     const effectiveRate = grossTaxableProfit > 0 ? ((finalLiability / grossTaxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Enterprise</h3>`;
@@ -5029,6 +5039,7 @@
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply PIT Band</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     // Final liability
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
@@ -5104,8 +5115,22 @@
     
     disallowableExpenses += lossOnDisposal;
     
-    // Calculations
-    const accountingProfit = revenue - expenses;
+    // WHT receivable (for net basis revenues)
+    let whtReceivable = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue') {
+        const rate = Number(t.whtRate || b.whtRate) / 100;
+        if(t.whtBasis === 'net') {
+          // For net basis, add back the WHT to get gross amount
+          whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+        } else {
+          whtReceivable += Number(t.amount || 0) * rate;
+        }
+      }
+    }
+    
+    // Calculations - Add back WHT receivable for net basis revenues to accounting profit
+    const accountingProfit = revenue - expenses + whtReceivable;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -5127,16 +5152,18 @@
     
     const citLiability = taxableProfit * citRate;
     
-    // WHT receivable
-    let whtReceivable = 0;
-    for(const t of arr){
-      if(t.whtApplied && t.accountCategory === 'Revenue') {
-        const rate = Number(t.whtRate || b.whtRate) / 100;
-        whtReceivable += Number(t.amount || 0) * rate;
+    // WHT remitted (for tracking tax payments)
+    let whtRemitted = 0;
+    const whtRemittedAccount = b.accounts.find(a => a.name === 'WHT Remitted');
+    if(whtRemittedAccount) {
+      for(const t of arr){
+        if(t.accountId === whtRemittedAccount.id) {
+          whtRemitted += Number(t.amount || 0);
+        }
       }
     }
     
-    const finalLiability = Math.max(0, citLiability - whtReceivable);
+    const finalLiability = Math.max(0, citLiability - whtReceivable - whtRemitted);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Company Income Tax Computation</h3>`;
@@ -5170,6 +5197,7 @@
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
@@ -5639,6 +5667,20 @@
       let revenue = 0, costOfSales = 0, otherExpenses = 0;
       const expenseBreakdown = {};
       
+      // WHT receivable (for net basis revenues)
+      let whtReceivable = 0;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          const rate = Number(t.whtRate || b.whtRate) / 100;
+          if(t.whtBasis === 'net') {
+            // For net basis, add back the WHT to get gross amount
+            whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount || 0) * rate;
+          }
+        }
+      }
+      
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
           revenue += Number(t.amount || 0);
@@ -5656,6 +5698,9 @@
           }
         }
       }
+      
+      // Add back WHT receivable for net basis revenues
+      revenue += whtReceivable;
       
       const depreciation = computeTotalDepreciation();
       expenseBreakdown['Depreciation'] = depreciation;
@@ -5900,7 +5945,7 @@
     
     contactEditId.value = contact.id;
     contactEditName.value = contact.name || '';
-    contactEditType.value = contact.type || 'Customer';
+    contactEditType.value = contact.type || 'Employee';
     
     // Populate deductions if they exist
     const ded = contact.deductions || {};
@@ -6106,17 +6151,21 @@
       const b = findBiz(selectedBizId);
       if (!b || !b.contacts) return;
       
-      // Group contacts by type
+      // Group contacts by type (only Employee type now)
       const contactsByType = {
-        Employee: [],
-        Customer: [],
-        Vendor: []
+        Employee: []
       };
       
       b.contacts.forEach(function(contact) {
-        const type = contact.type || 'Customer';
-        if (contactsByType[type]) {
+        const type = contact.type || 'Employee';
+        // Handle legacy Customer/Vendor by mapping to Employee
+        if (type === 'Customer' || type === 'Vendor') {
+          contactsByType.Employee.push(contact);
+        } else if (contactsByType[type]) {
           contactsByType[type].push(contact);
+        } else {
+          // For other types like SoleTrader, add to Employee dropdown
+          contactsByType.Employee.push(contact);
         }
       });
       
