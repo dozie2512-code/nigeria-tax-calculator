@@ -656,6 +656,7 @@
             <option value="VATRefunded">VAT Refunded</option>
             <option value="VATPaid">VAT Paid</option>
             <option value="WHTPaid">WHT Paid</option>
+            <option value="WHTRemitted">WHT Remitted</option>
             <option value="PAYEPaid">PAYE Paid</option>
             <option value="PITPaid">PIT Paid</option>
             <option value="CGTPaid">CGT Paid</option>
@@ -724,18 +725,7 @@
                     <option value="">Select employee...</option>
                   </select>
                 </button>
-                <button type="button" class="contact-type-option" data-type="Customer" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Customers
-                  <select class="contact-name-select" data-type="Customer" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select customer...</option>
-                  </select>
-                </button>
-                <button type="button" class="contact-type-option" data-type="Vendor" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Vendors
-                  <select class="contact-name-select" data-type="Vendor" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select vendor...</option>
-                  </select>
-                </button>
+
               </div>
             </div>
           </div>
@@ -873,7 +863,7 @@
         </table>
       </div>
 
-      <div id="plSnapshot" class="totals"></div>
+      <div id="plSnapshot" class="totals" style="display:none;"></div>
       <div id="taxSummary" class="tax-summary"></div>
     </section>
 
@@ -1192,7 +1182,6 @@
    * 
    * CHANGELOG:
    * - Renamed SoleProprietor → Enterprise
-   * - Added Individual entity type with restricted UI/tax rules
    * - Updated transaction action from Income to Revenue (backwards compatible migration included)
    * - Added turnoverThreshold configuration (0, 50M, 100M)
    * - Enhanced asset management with opening balances
@@ -2005,8 +1994,8 @@
     const user = state.users.find(u => u.id === state.auth.currentUserId);
     const isAdmin = user && user.isAdmin;
     
-    // Allow Business and Manage Accounts buttons for Enterprise/Company plans regardless of admin status
-    const allowBusinessEdit = isAdmin || (user && (user.plan === 'Enterprise' || user.plan === 'Company'));
+    // Allow Business and Manage Accounts buttons for Enterprise/Business/Company plans regardless of admin status
+    const allowBusinessEdit = isAdmin || (user && (user.plan === 'Enterprise' || user.plan === 'Business' || user.plan === 'Company'));
     
     // Disable business management buttons for non-admins (except Enterprise/Company for specific buttons)
     btnAddBusiness.disabled = !isAdmin;
@@ -4452,7 +4441,7 @@
     taxSummaryDiv.innerHTML = '';
     if(!b) return;
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
-    let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0;
+    let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0, whtRemitted=0;
     const payeByContact = {};
     
     for(const t of arr){
@@ -4491,6 +4480,11 @@
         } else {
           whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
         }
+      }
+      
+      // Track WHT Remitted (actual payments made to tax authority)
+      if(t.action === 'WHTRemitted') {
+        whtRemitted += Number(t.amount||0);
       }
       
       if(t.paye && t.contact){
@@ -4620,12 +4614,12 @@
       }
       // If threshold is 0 (NONE), CIT = 0
       
-      // Deduct WHT receivable only if CIT was actually computed (turnover above threshold and CIT > 0)
+      // Deduct WHT remitted only if CIT was actually computed (turnover above threshold and CIT > 0)
       if(citCharge > 0) {
-        citCharge = Math.max(0, citCharge - whtReceivable);
+        citCharge = Math.max(0, citCharge - whtRemitted);
       } else {
-        // CIT is 0% (turnover below threshold): carry forward WHT receivable to next period
-        whtCarryForward = whtReceivable;
+        // CIT is 0% (turnover below threshold): carry forward WHT remitted to next period
+        whtCarryForward = whtRemitted;
       }
     }
 
@@ -4634,8 +4628,8 @@
     if(b.entity === 'Enterprise' && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        // Deduct WHT receivable from PIT charge
-        pitCharge = Math.max(0, pitLiability - whtReceivable);
+        // Deduct WHT remitted from PIT charge
+        pitCharge = Math.max(0, pitLiability - whtRemitted);
       }
     }
 
@@ -4661,35 +4655,24 @@
       // Compute PIT using bands on taxable income
       const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
       
-      // Deduct WHT receivable from PIT
-      pitCharge = Math.max(0, pitLiability - whtReceivable);
+      // Deduct WHT remitted from PIT
+      pitCharge = Math.max(0, pitLiability - whtRemitted);
     }
     
     let html = '';
-    if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
-      html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
-      html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
-      html += `<hr/>`;
-      // For Individual: show only WHT Receivable and PIT
-      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
-      html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions). WHT receivable is then deducted from the PIT liability.</div>`;
-    } else {
-      // For Company/Enterprise: show full summary
-      html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
+    // For Company/Enterprise: show full summary
+    html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
       html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
       html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
       html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
       html += `<hr/>`;
       html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)} | <strong>WHT Remitted:</strong> ${fmt(whtRemitted)}</div>`;
       html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
       if(b.entity === 'Company'){
-        html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+        html += `<div><strong>CIT Charge (after WHT Remitted):</strong> ${fmt(citCharge)}</div>`;
         if(whtCarryForward > 0) {
-          html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+          html += `<div class="small-note">WHT Remitted Carryforward: ${fmt(whtCarryForward)} (turnover below CIT threshold, WHT carries forward to next period)</div>`;
         }
         html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
@@ -4703,7 +4686,6 @@
           html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
         }
       }
-    }
     
     if(b.showLines){
       if(carriedForwardCA > 0) {
@@ -4941,12 +4923,30 @@
     let revenue = 0, expenses = 0;
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
+    let whtOnInvestmentIncome = 0; // WHT on dividends, interest, royalties
     
     for(const t of arr){
       if(t.accountCategory === 'Revenue') {
         revenue += Number(t.amount || 0);
-        // Check for non-taxable
+        
+        // Check if this is investment income with WHT applied
         const acct = findAccount(b, t.accountId);
+        const acctName = acct ? acct.name.toLowerCase() : '';
+        // Note: Investment income detection uses account name matching and action type
+        // For more robust detection, consider adding an explicit flag to account definitions
+        const isInvestmentIncome = acctName.includes('dividend') || acctName.includes('interest') || acctName.includes('royalty') || t.action === 'InvestmentIncome';
+        
+        if(isInvestmentIncome && t.whtApplied) {
+          // Add back WHT to get gross investment income for accounting profit
+          const rate = Number(t.whtRate || b.whtRate) / 100;
+          if(t.whtBasis === 'net') {
+            whtOnInvestmentIncome += Number(t.amount || 0) * (rate / (1 - rate));
+          } else {
+            whtOnInvestmentIncome += Number(t.amount || 0) * rate;
+          }
+        }
+        
+        // Check for non-taxable
         if(acct && acct.nonTaxableDefault) {
           nonTaxableIncome += Number(t.amount || 0);
         }
@@ -5003,7 +5003,7 @@
     const totalDed = totalStatutoryDeductions(ded);
     
     // Calculations
-    const accountingProfit = revenue - expenses;
+    const accountingProfit = revenue + whtOnInvestmentIncome - expenses;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -5033,6 +5033,9 @@
     
     // Accounting profit
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    if(whtOnInvestmentIncome > 0) {
+      html += `<tr><td colspan="2" class="small-muted" style="padding-left:20px;">Note: Includes WHT on investment income (${fmt(whtOnInvestmentIncome)}) added back to gross up net amounts</td></tr>`;
+    }
     
     // Disallowable expenses
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
@@ -5736,6 +5739,55 @@
         else if(acct.category === 'Capital') totalCapital += closing;
       }
       
+      // Calculate VAT and WHT from transactions
+      let vatCollected = 0, vatPaid = 0, whtPayable = 0, whtReceivable = 0;
+      for(const t of arr){
+        // VAT calculation with inclusive option
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') {
+          vatCollected += (Number(t.amount||0) * (b.vatRate/100));
+        } else if(t.vatType === 'inclusive' && t.accountCategory === 'Revenue') {
+          vatCollected += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+        }
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') {
+          vatPaid += (Number(t.amount||0) * (b.vatRate/100));
+        } else if(t.vatType === 'inclusive' && t.accountCategory === 'Expense') {
+          vatPaid += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+        }
+        
+        // WHT calculation
+        if(t.whtApplied && t.accountCategory === 'Expense') {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || b.whtRate) / 100;
+            whtPayable += Number(t.amount||0) * (rate / (1 - rate));
+          } else {
+            whtPayable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+          }
+        }
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || b.whtRate) / 100;
+            whtReceivable += Number(t.amount||0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+          }
+        }
+      }
+      
+      const vatNet = vatCollected - vatPaid;
+      // Add VAT Payable as liability (if positive) or VAT Refundable as asset (if negative)
+      if(vatNet > 0) {
+        totalLiabilities += vatNet;
+      } else if(vatNet < 0) {
+        totalAssets += Math.abs(vatNet);
+      }
+      
+      // Add WHT Payable as liability and WHT Receivable as asset
+      totalLiabilities += whtPayable;
+      totalAssets += whtReceivable;
+      
+      // Add tax liability (CIT/PIT) as liability
+      totalLiabilities += taxAmount;
+      
       // Add fixed assets NBV
       let fixedAssetsNBV = 0;
       for(const a of b.assets || []){
@@ -5779,10 +5831,31 @@
       html += `<tr><td colspan="2"><strong>Assets</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Fixed Assets (NBV)</td><td style="text-align:right;">${fmt(fixedAssetsNBV)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Inventory</td><td style="text-align:right;">${fmt(inventoryValue)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Other Assets</td><td style="text-align:right;">${fmt(totalAssets - fixedAssetsNBV - inventoryValue)}</td></tr>`;
+      if(whtReceivable > 0) {
+        html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(whtReceivable)}</td></tr>`;
+      }
+      if(vatNet < 0) {
+        html += `<tr><td style="padding-left:20px;">VAT Refundable</td><td style="text-align:right;">${fmt(Math.abs(vatNet))}</td></tr>`;
+      }
+      const otherAssets = Math.max(0, totalAssets - fixedAssetsNBV - inventoryValue - whtReceivable - (vatNet < 0 ? Math.abs(vatNet) : 0));
+      if(otherAssets > 0) {
+        html += `<tr><td style="padding-left:20px;">Other Assets</td><td style="text-align:right;">${fmt(otherAssets)}</td></tr>`;
+      }
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssets)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Liabilities & Capital</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Total Liabilities</td><td style="text-align:right;">${fmt(totalLiabilities)}</td></tr>`;
+      if(whtPayable > 0) {
+        html += `<tr><td style="padding-left:20px;">WHT Payable</td><td style="text-align:right;">${fmt(whtPayable)}</td></tr>`;
+      }
+      if(vatNet > 0) {
+        html += `<tr><td style="padding-left:20px;">VAT Payable</td><td style="text-align:right;">${fmt(vatNet)}</td></tr>`;
+      }
+      if(taxAmount > 0) {
+        html += `<tr><td style="padding-left:20px;">${b.entity === 'Company' ? 'CIT' : 'PIT'} Payable</td><td style="text-align:right;">${fmt(taxAmount)}</td></tr>`;
+      }
+      const otherLiabilities = Math.max(0, totalLiabilities - whtPayable - (vatNet > 0 ? vatNet : 0) - taxAmount);
+      if(otherLiabilities > 0) {
+        html += `<tr><td style="padding-left:20px;">Other Liabilities</td><td style="text-align:right;">${fmt(otherLiabilities)}</td></tr>`;
+      }
       html += `<tr><td style="padding-left:20px;">Share Capital</td><td style="text-align:right;">${fmt(totalCapital)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Retained Earnings</td><td style="text-align:right;">${fmt(profitAfterTax)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities & Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital + profitAfterTax)}</strong></td></tr>`;
@@ -6293,10 +6366,10 @@
     // Pricing configuration with geography support
     const PLANS = {
       business: {
-        fullPrice: { GBP: 60, EUR: 75, USD: 90, NGN: 60000 },
-        offerPrice: { GBP: 40, EUR: 50, USD: 60, NGN: 40000 },
-        taxAccountantPrice: { GBP: 75, EUR: 93, USD: 112, NGN: 15000 },
-        additionalBusinessPrice: { GBP: 20, EUR: 25, USD: 30, annual: true },
+        fullPrice: { GBP: 30, EUR: 40, USD: 50, NGN: 25000 },
+        offerPrice: { GBP: 30, EUR: 40, USD: 50, NGN: 25000 },
+        taxAccountantPrice: { GBP: 50, EUR: 62, USD: 75, NGN: 75000 },
+        additionalBusinessPrice: { GBP: 20, EUR: 25, USD: 30, NGN: 30000, annual: true },
         defaultBusinesses: 1,
         trialDays: 7,
         maxUsers: 2,
@@ -6306,8 +6379,8 @@
       company: {
         fullPrice: { GBP: 80, EUR: 100, USD: 120, NGN: 80000 },
         offerPrice: { GBP: 60, EUR: 75, USD: 90, NGN: 60000 },
-        taxAccountantPrice: { GBP: 100, EUR: 125, USD: 150, NGN: 25000 },
-        additionalBusinessPrice: { GBP: 30, EUR: 37.5, USD: 40, annual: true },
+        taxAccountantPrice: { GBP: 67, EUR: 83, USD: 100, NGN: 100000 },
+        additionalBusinessPrice: { GBP: 30, EUR: 37.5, USD: 40, NGN: 50000, annual: true },
         defaultBusinesses: 1,
         trialDays: 7,
         maxUsers: 3,
@@ -6906,4 +6979,4 @@
 
   </script>
 </body>
-</html>
+  </html>
