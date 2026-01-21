@@ -4918,12 +4918,28 @@
     let revenue = 0, expenses = 0;
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
+    let whtOnInvestmentIncome = 0; // WHT on dividends, interest, royalties
     
     for(const t of arr){
       if(t.accountCategory === 'Revenue') {
         revenue += Number(t.amount || 0);
-        // Check for non-taxable
+        
+        // Check if this is investment income with WHT applied
         const acct = findAccount(b, t.accountId);
+        const acctName = acct ? acct.name.toLowerCase() : '';
+        const isInvestmentIncome = acctName.includes('dividend') || acctName.includes('interest') || acctName.includes('royalty') || t.action === 'InvestmentIncome';
+        
+        if(isInvestmentIncome && t.whtApplied) {
+          // Add back WHT to get gross investment income for accounting profit
+          const rate = Number(t.whtRate || b.whtRate) / 100;
+          if(t.whtBasis === 'net') {
+            whtOnInvestmentIncome += Number(t.amount || 0) * (rate / (1 - rate));
+          } else {
+            whtOnInvestmentIncome += Number(t.amount || 0) * rate;
+          }
+        }
+        
+        // Check for non-taxable
         if(acct && acct.nonTaxableDefault) {
           nonTaxableIncome += Number(t.amount || 0);
         }
@@ -4980,7 +4996,7 @@
     const totalDed = totalStatutoryDeductions(ded);
     
     // Calculations
-    const accountingProfit = revenue - expenses;
+    const accountingProfit = revenue + whtOnInvestmentIncome - expenses;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -5010,6 +5026,9 @@
     
     // Accounting profit
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    if(whtOnInvestmentIncome > 0) {
+      html += `<tr><td colspan="2" class="small-muted" style="padding-left:20px;">Note: Includes WHT on investment income (${fmt(whtOnInvestmentIncome)}) added back to gross up net amounts</td></tr>`;
+    }
     
     // Disallowable expenses
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
@@ -5713,6 +5732,55 @@
         else if(acct.category === 'Capital') totalCapital += closing;
       }
       
+      // Calculate VAT and WHT from transactions
+      let vatCollected = 0, vatPaid = 0, whtPayable = 0, whtReceivable = 0;
+      for(const t of arr){
+        // VAT calculation with inclusive option
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') {
+          vatCollected += (Number(t.amount||0) * (b.vatRate/100));
+        } else if(t.vatType === 'inclusive' && t.accountCategory === 'Revenue') {
+          vatCollected += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+        }
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') {
+          vatPaid += (Number(t.amount||0) * (b.vatRate/100));
+        } else if(t.vatType === 'inclusive' && t.accountCategory === 'Expense') {
+          vatPaid += (Number(t.amount||0) * (b.vatRate / (100 + b.vatRate)));
+        }
+        
+        // WHT calculation
+        if(t.whtApplied && t.accountCategory === 'Expense') {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || b.whtRate) / 100;
+            whtPayable += Number(t.amount||0) * (rate / (1 - rate));
+          } else {
+            whtPayable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+          }
+        }
+        if(t.whtApplied && t.accountCategory === 'Revenue') {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || b.whtRate) / 100;
+            whtReceivable += Number(t.amount||0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount||0) * ((t.whtRate || b.whtRate)/100);
+          }
+        }
+      }
+      
+      const vatNet = vatCollected - vatPaid;
+      // Add VAT Payable as liability (if positive) or VAT Refundable as asset (if negative)
+      if(vatNet > 0) {
+        totalLiabilities += vatNet;
+      } else if(vatNet < 0) {
+        totalAssets += Math.abs(vatNet);
+      }
+      
+      // Add WHT Payable as liability and WHT Receivable as asset
+      totalLiabilities += whtPayable;
+      totalAssets += whtReceivable;
+      
+      // Add tax liability (CIT/PIT) as liability
+      totalLiabilities += taxAmount;
+      
       // Add fixed assets NBV
       let fixedAssetsNBV = 0;
       for(const a of b.assets || []){
@@ -5756,10 +5824,31 @@
       html += `<tr><td colspan="2"><strong>Assets</strong></td></tr>`;
       html += `<tr><td style="padding-left:20px;">Fixed Assets (NBV)</td><td style="text-align:right;">${fmt(fixedAssetsNBV)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Inventory</td><td style="text-align:right;">${fmt(inventoryValue)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Other Assets</td><td style="text-align:right;">${fmt(totalAssets - fixedAssetsNBV - inventoryValue)}</td></tr>`;
+      if(whtReceivable > 0) {
+        html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(whtReceivable)}</td></tr>`;
+      }
+      if(vatNet < 0) {
+        html += `<tr><td style="padding-left:20px;">VAT Refundable</td><td style="text-align:right;">${fmt(Math.abs(vatNet))}</td></tr>`;
+      }
+      const otherAssets = totalAssets - fixedAssetsNBV - inventoryValue - whtReceivable - (vatNet < 0 ? Math.abs(vatNet) : 0);
+      if(otherAssets > 0) {
+        html += `<tr><td style="padding-left:20px;">Other Assets</td><td style="text-align:right;">${fmt(otherAssets)}</td></tr>`;
+      }
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssets)}</strong></td></tr>`;
       html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Liabilities & Capital</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Total Liabilities</td><td style="text-align:right;">${fmt(totalLiabilities)}</td></tr>`;
+      if(whtPayable > 0) {
+        html += `<tr><td style="padding-left:20px;">WHT Payable</td><td style="text-align:right;">${fmt(whtPayable)}</td></tr>`;
+      }
+      if(vatNet > 0) {
+        html += `<tr><td style="padding-left:20px;">VAT Payable</td><td style="text-align:right;">${fmt(vatNet)}</td></tr>`;
+      }
+      if(taxAmount > 0) {
+        html += `<tr><td style="padding-left:20px;">${b.entity === 'Company' ? 'CIT' : 'PIT'} Payable</td><td style="text-align:right;">${fmt(taxAmount)}</td></tr>`;
+      }
+      const otherLiabilities = totalLiabilities - whtPayable - (vatNet > 0 ? vatNet : 0) - taxAmount;
+      if(otherLiabilities > 0) {
+        html += `<tr><td style="padding-left:20px;">Other Liabilities</td><td style="text-align:right;">${fmt(otherLiabilities)}</td></tr>`;
+      }
       html += `<tr><td style="padding-left:20px;">Share Capital</td><td style="text-align:right;">${fmt(totalCapital)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;">Retained Earnings</td><td style="text-align:right;">${fmt(profitAfterTax)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities & Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital + profitAfterTax)}</strong></td></tr>`;
