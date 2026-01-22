@@ -434,7 +434,6 @@
             <li>2 Users + Tax Advisor</li>
             <li>Record Income &amp; Expenses &amp; Profits</li>
             <li>Track VAT, WHT, PAYE and PIT</li>
-            <li>Pay per client</li>
             <li>Tax Support via Chat and Email</li>
           </ul>
           <div class="plan-checkbox-row">
@@ -445,7 +444,11 @@
           <div style="margin-top:10px;padding:8px;background:#f9fafb;border-radius:6px;border:1px solid #e6e9ef;">
             <div class="plan-checkbox-row">
               <input type="checkbox" id="businessHireTaxAccountant" />
-              <label for="businessHireTaxAccountant">Add Tax Accountant Service <span class="addon-price">(+₦15,000/month)</span> (Monthend Adjustment &amp; Tax Filing)</label>
+              <label for="businessHireTaxAccountant">Add Tax Accountant Service <span class="addon-price">(+₦25,000/month)</span> (Monthend Adjustment &amp; Tax Filing)</label>
+            </div>
+            <div class="plan-checkbox-row" style="margin-top:8px;">
+              <input type="checkbox" id="businessBookkeepingService" />
+              <label for="businessBookkeepingService">Add Bookkeeping and Tax Service <span class="addon-price">(+₦75,000/month)</span></label>
             </div>
           </div>
 
@@ -489,6 +492,10 @@
               <input type="checkbox" id="companyHireTaxAccountant" />
               <label for="companyHireTaxAccountant">Add Tax Accountant Service <span class="addon-price">(+₦25,000/month)</span> (Monthend Adjustment &amp; Tax Filing)</label>
             </div>
+            <div class="plan-checkbox-row" style="margin-top:8px;">
+              <input type="checkbox" id="companyBookkeepingService" />
+              <label for="companyBookkeepingService">Add Bookkeeping and Tax Service <span class="addon-price">(+₦100,000/month)</span></label>
+            </div>
           </div>
 
           <div class="plan-total">
@@ -519,7 +526,7 @@
             <li>Designed for Accountants and Multi-Business</li>
             <li>Includes 3 Subscription Plans (Enterprise/Company)</li>
             <li>Track VAT, WHT, PAYE, CGT, PIT, and CIT</li>
-            <li>Pay per client</li>
+            <li>Tax Financial Report</li>
             <li>Earn Monthly Revenues on Tax Hire</li>
             <li>Tax Support via Chat and Email</li>
           </ul>
@@ -1206,6 +1213,9 @@
   const CGT_EXEMPTION_GAIN = 10000000; // ₦10,000,000
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
+  // Tax payment account names - used to exclude from P&L and track tax payments
+  const TAX_PAYMENT_ACCOUNTS = ['VAT Paid', 'VAT Refunded', 'WHT Remitted', 'WHT Paid', 'PAYE Paid', 'PIT Paid', 'CGT Paid', 'CIT Paid'];
+  
   // Common account names constants (no longer used for filtering)
   const COMMON_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
 
@@ -1230,47 +1240,67 @@
     const user = state.users.find(u => u.id === userId);
     if (!user) return null;
     
-    const bizId = uid('biz');
-    // Removed Sales (Revenue) default account as per requirements
-    const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
-    
-    const newBusiness = {
-      id: bizId,
-      name: (user.display || user.username) + "'s Business",
-      ownerId: userId,
-      entity: entityType,
-      vatRate: DEFAULTS.vatRate,
-      whtRate: DEFAULTS.whtRate,
-      citRate: DEFAULTS.citRate,
-      turnoverThreshold: DEFAULTS.turnoverThreshold,
-      vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
-      caRateDefault: DEFAULTS.caRateDefault,
-      depRateDefault: DEFAULTS.depRateDefault,
-      accounts: [cogs, bank], // Removed sales account
-      inventory: [],
-      assets: [],
-      contacts: [],
-      statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-      lossBroughtForward: 0, caCarryForward: 0,
-      defaultExpenseDisallowable: false, defaultRevenueNonTax: false,
-      userIds: [userId], // Track users associated with this business
-      chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
-      shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
-    };
-    
-    state.businesses.push(newBusiness);
-    
-    // Initialize transactions for this user/business combo
-    if (!state.transactions[userId]) {
-      state.transactions[userId] = {};
+    // Determine how many businesses to create based on entity type
+    let businessesToCreate = 1;
+    if (entityType === 'Enterprise Plus') {
+      businessesToCreate = 3;
     }
-    state.transactions[userId][bizId] = [];
+    
+    const createdBusinessIds = [];
+    
+    for (let i = 0; i < businessesToCreate; i++) {
+      const bizId = uid('biz');
+      // Removed Sales (Revenue) default account as per requirements
+      const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
+      const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
+      
+      const businessName = businessesToCreate > 1 
+        ? (user.display || user.username) + "'s Business " + (i + 1)
+        : (user.display || user.username) + "'s Business";
+      
+      const newBusiness = {
+        id: bizId,
+        name: businessName,
+        ownerId: userId,
+        entity: entityType,
+        vatRate: DEFAULTS.vatRate,
+        whtRate: DEFAULTS.whtRate,
+        citRate: DEFAULTS.citRate,
+        turnoverThreshold: DEFAULTS.turnoverThreshold,
+        vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
+        caRateDefault: DEFAULTS.caRateDefault,
+        depRateDefault: DEFAULTS.depRateDefault,
+        accounts: [cogs, bank], // Removed sales account
+        inventory: [],
+        assets: [],
+        contacts: [],
+        statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
+        lossBroughtForward: 0, caCarryForward: 0,
+        defaultExpenseDisallowable: false, defaultRevenueNonTax: false,
+        userIds: [userId], // Track users associated with this business
+        maxUsers: entityType === 'Business' ? 2 : 3, // 2 for Business, 3 for Company/Enterprise Plus
+        trialStart: Date.now(),
+        trialDays: 7,
+        chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
+        shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
+      };
+      
+      state.businesses.push(newBusiness);
+      
+      // Initialize transactions for this user/business combo
+      if (!state.transactions[userId]) {
+        state.transactions[userId] = {};
+      }
+      state.transactions[userId][bizId] = [];
+      
+      createdBusinessIds.push(bizId);
+      addAudit('business.create', 'business', bizId, 'Default business created for user: ' + user.username);
+    }
     
     saveState();
-    addAudit('business.create', 'business', bizId, 'Default business created for user: ' + user.username);
     
-    return bizId;
+    // Return the first business ID
+    return createdBusinessIds[0];
   }
 
   /**
@@ -1639,7 +1669,26 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' }
+        { name: 'Sales Revenue', category: 'Revenue' },
+        // Tax payment tracking accounts
+        { name: 'VAT Refunded', category: 'Asset' },
+        { name: 'VAT Paid', category: 'Expense' },
+        { name: 'WHT Remitted', category: 'Expense' },
+        { name: 'WHT Paid', category: 'Expense' },
+        { name: 'PAYE Paid', category: 'Expense' },
+        { name: 'PIT Paid', category: 'Expense' },
+        { name: 'CGT Paid', category: 'Expense' },
+        { name: 'CIT Paid', category: 'Expense' },
+        // Liabilities for tax payables
+        { name: 'WHT Payable', category: 'Liability' },
+        { name: 'VAT Payable', category: 'Liability' },
+        { name: 'PAYE Payable', category: 'Liability' },
+        { name: 'CIT Payable', category: 'Liability' },
+        { name: 'PIT Payable', category: 'Liability' },
+        { name: 'CGT Payable', category: 'Liability' },
+        // Assets for tax receivables
+        { name: 'WHT Receivable', category: 'Asset' },
+        { name: 'VAT Refundable', category: 'Asset' }
       ];
       
       for (const acct of accountsToAdd) {
@@ -4041,12 +4090,32 @@
   // PL computation
   function computePLSnapshot(){
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    const b = findBiz(selectedBizId);
     let revenue=0, expenses=0, depreciation=0;
     let disallowableExpense=0, nonTaxableIncome=0;
+    let whtReceivable=0;
     
     for(const t of arr){
-      if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
-      if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Exclude tax payments from revenue/expenses
+      if (!isTaxPayment) {
+        if(t.accountCategory === 'Revenue') {
+          revenue += Number(t.amount||0);
+          // Add back WHT receivable for revenue transactions (dividends, interests, royalties posted at net)
+          if(t.whtApplied) {
+            if(t.whtBasis === 'net') {
+              const rate = (t.whtRate || (b ? b.whtRate : 5)) / 100;
+              whtReceivable += Number(t.amount||0) * (rate / (1 - rate));
+            } else {
+              whtReceivable += Number(t.amount||0) * ((t.whtRate || (b ? b.whtRate : 5))/100);
+            }
+          }
+        }
+        if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      }
       
       // Handle adjustment transactions
       if(t.action === 'Adjustment' && t.adjustmentType){
@@ -4060,8 +4129,9 @@
     const dep = computeTotalDepreciation();
     depreciation = dep;
     expenses += depreciation;
-    const accountingProfit = revenue - expenses;
-    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome };
+    // Add back WHT receivable to accounting profit for revenues posted at net
+    const accountingProfit = revenue + whtReceivable - expenses;
+    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome, whtReceivable };
   }
 
   // compute daily depreciation for all assets
@@ -4348,9 +4418,31 @@
     let revenue=0, expenses=0, vatCollected=0, vatPaid=0, whtPayable=0, whtReceivable=0;
     const payeByContact = {};
     
+    // Tax payment tracking - these should reduce tax liabilities, not count as expenses
+    let vatPaidToAuthority = 0, vatRefunded = 0;
+    let whtPaidToAuthority = 0, payePaid = 0, pitPaid = 0, citPaid = 0, cgtPaid = 0;
+    
     for(const t of arr){
-      if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
-      if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      
+      // Check if this is a tax payment transaction
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Track tax payments separately
+      if (isTaxPayment) {
+        if (accountName === 'VAT Paid') vatPaidToAuthority += Number(t.amount||0);
+        else if (accountName === 'VAT Refunded') vatRefunded += Number(t.amount||0);
+        else if (accountName === 'WHT Remitted' || accountName === 'WHT Paid') whtPaidToAuthority += Number(t.amount||0);
+        else if (accountName === 'PAYE Paid') payePaid += Number(t.amount||0);
+        else if (accountName === 'PIT Paid') pitPaid += Number(t.amount||0);
+        else if (accountName === 'CIT Paid') citPaid += Number(t.amount||0);
+        else if (accountName === 'CGT Paid') cgtPaid += Number(t.amount||0);
+      } else {
+        // Regular transactions - exclude tax payments from revenue/expenses
+        if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
+        if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
+      }
       
       // VAT calculation with inclusive option
       if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') {
@@ -4391,9 +4483,18 @@
       }
     }
     
+    // Calculate WHT Remitted from transactions
+    let whtRemitted = 0;
+    for(const t of arr){
+      if(t.accountName === 'WHT Remitted' || (t.accountId && findAccount(b, t.accountId)?.name === 'WHT Remitted')){
+        whtRemitted += Number(t.amount||0);
+      }
+    }
+    
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
-    const accountingProfit = revenue - expenses;
+    // Add back WHT receivable to accounting profit for revenues posted at net
+    const accountingProfit = revenue + whtReceivable - expenses;
     
     // Get adjustment values from P&L snapshot
     const plSnapshot = computePLSnapshot();
@@ -4513,9 +4614,9 @@
       }
       // If threshold is 0 (NONE), CIT = 0
       
-      // Deduct WHT receivable only if CIT was actually computed (turnover above threshold and CIT > 0)
+      // Deduct WHT remitted (already paid) only if CIT was actually computed (turnover above threshold and CIT > 0)
       if(citCharge > 0) {
-        citCharge = Math.max(0, citCharge - whtReceivable);
+        citCharge = Math.max(0, citCharge - whtPaidToAuthority);
       } else {
         // CIT is 0% (turnover below threshold): carry forward WHT receivable to next period
         whtCarryForward = whtReceivable;
@@ -4527,12 +4628,17 @@
     if((b.entity === 'Business' || b.entity === 'Enterprise Plus') && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        // Deduct WHT receivable from PIT charge
-        pitCharge = Math.max(0, pitLiability - whtReceivable);
+        // Deduct WHT remitted (already paid) from PIT charge
+        pitCharge = Math.max(0, pitLiability - whtPaidToAuthority);
       }
     }
 
-    const vatNet = vatCollected - vatPaid;
+    // Adjust VAT net by payments
+    const vatNetAfterPayments = vatNet - vatPaidToAuthority + vatRefunded;
+    
+    // Adjust WHT by remitted amounts
+    const whtPayableNet = Math.max(0, whtPayable - whtPaidToAuthority);
+    const whtReceivableNet = Math.max(0, whtReceivable - whtPaidToAuthority);
     
     let html = '';
     // For Company/Business/Enterprise Plus: show full summary
@@ -4542,7 +4648,7 @@
     html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
     html += `<hr/>`;
     html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)} | <strong>WHT Remitted:</strong> ${fmt(whtPaidToAuthority)}</div>`;
     html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
     if(b.entity === 'Company'){
       html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
@@ -4655,6 +4761,9 @@
     // Define visibility per entity
     const visibilityRules = {
       'Business': {
+        'vatReport': false,
+        'whtPayable': true,
+        'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
@@ -4665,6 +4774,9 @@
         'receiptsFolder': true
       },
       'Enterprise Plus': {
+        'vatReport': false,
+        'whtPayable': true,
+        'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
@@ -4675,6 +4787,9 @@
         'receiptsFolder': true
       },
       'Company': {
+        'vatReport': true,
+        'whtPayable': true,
+        'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
@@ -4695,14 +4810,16 @@
       }
     });
     
-    // If current active tab is hidden, switch to VAT report
+    // If current active tab is hidden, switch to first visible report tab
     const activeReportTab = document.querySelector('#reportsSection .tab.active');
     if(activeReportTab && activeReportTab.style.display === 'none') {
       document.querySelectorAll('#reportsSection .tab').forEach(t => t.classList.remove('active'));
-      const vatTab = document.querySelector('#reportsSection .tab[data-report="vatReport"]');
-      if(vatTab) {
-        vatTab.classList.add('active');
-        renderReport('vatReport');
+      // Find first visible tab
+      const firstVisibleTab = Array.from(reportTabs).find(tab => tab.style.display !== 'none');
+      if(firstVisibleTab) {
+        firstVisibleTab.classList.add('active');
+        const reportName = firstVisibleTab.dataset.report;
+        if(reportName) renderReport(reportName);
       }
     }
   }
@@ -4951,30 +5068,53 @@
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
     const currentYear = new Date().getFullYear();
     
-    // Compute accounting values
+    // Compute accounting values with WHT receivable add-back
     let revenue = 0, expenses = 0;
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
+    let whtReceivable = 0;
+    let whtRemitted = 0;
     
     for(const t of arr){
-      if(t.accountCategory === 'Revenue') {
-        revenue += Number(t.amount || 0);
-        const acct = findAccount(b, t.accountId);
-        if(acct && acct.nonTaxableDefault) {
-          nonTaxableIncome += Number(t.amount || 0);
-        }
-        if(t.adjustmentType === 'nontaxable') {
-          nonTaxableIncome += Number(t.adjustmentAmount || t.amount || 0);
-        }
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Track WHT remitted
+      if (accountName === 'WHT Remitted' || accountName === 'WHT Paid') {
+        whtRemitted += Number(t.amount || 0);
       }
-      if(t.accountCategory === 'Expense') {
-        expenses += Number(t.amount || 0);
-        const acct = findAccount(b, t.accountId);
-        if(acct && acct.disallowableDefault) {
-          disallowableExpenses += Number(t.amount || 0);
+      
+      // Exclude tax payments from revenue/expenses
+      if (!isTaxPayment) {
+        if(t.accountCategory === 'Revenue') {
+          revenue += Number(t.amount || 0);
+          const acctObj = findAccount(b, t.accountId);
+          if(acctObj && acctObj.nonTaxableDefault) {
+            nonTaxableIncome += Number(t.amount || 0);
+          }
+          if(t.adjustmentType === 'nontaxable') {
+            nonTaxableIncome += Number(t.adjustmentAmount || t.amount || 0);
+          }
+          // Add back WHT receivable for revenue transactions
+          if(t.whtApplied) {
+            if(t.whtBasis === 'net') {
+              const rate = (t.whtRate || b.whtRate) / 100;
+              whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+            } else {
+              whtReceivable += Number(t.amount || 0) * ((t.whtRate || b.whtRate)/100);
+            }
+          }
         }
-        if(t.adjustmentType === 'disallowable') {
-          disallowableExpenses += Number(t.adjustmentAmount || t.amount || 0);
+        if(t.accountCategory === 'Expense') {
+          expenses += Number(t.amount || 0);
+          const acctObj = findAccount(b, t.accountId);
+          if(acctObj && acctObj.disallowableDefault) {
+            disallowableExpenses += Number(t.amount || 0);
+          }
+          if(t.adjustmentType === 'disallowable') {
+            disallowableExpenses += Number(t.adjustmentAmount || t.amount || 0);
+          }
         }
       }
     }
@@ -5004,8 +5144,8 @@
     
     disallowableExpenses += lossOnDisposal;
     
-    // Calculations
-    const accountingProfit = revenue - expenses;
+    // Calculations - add back WHT receivable to accounting profit
+    const accountingProfit = revenue + whtReceivable - expenses;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -5027,16 +5167,8 @@
     
     const citLiability = taxableProfit * citRate;
     
-    // WHT receivable
-    let whtReceivable = 0;
-    for(const t of arr){
-      if(t.whtApplied && t.accountCategory === 'Revenue') {
-        const rate = Number(t.whtRate || b.whtRate) / 100;
-        whtReceivable += Number(t.amount || 0) * rate;
-      }
-    }
-    
-    const finalLiability = Math.max(0, citLiability - whtReceivable);
+    // Use WHT remitted instead of WHT receivable for final liability
+    const finalLiability = Math.max(0, citLiability - whtRemitted);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Company Income Tax Computation</h3>`;
@@ -5069,7 +5201,7 @@
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
@@ -5456,24 +5588,41 @@
       const currentYear = new Date().getFullYear();
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       
-      // Compute P&L values with proper breakdown
+      // Compute P&L values with proper breakdown and WHT receivable add-back
       let revenue = 0, costOfSales = 0, otherExpenses = 0;
+      let whtReceivable = 0;
       const expenseBreakdown = {};
       
       for(const t of arr){
-        if(t.accountCategory === 'Revenue') {
-          revenue += Number(t.amount || 0);
-        }
-        if(t.accountCategory === 'Expense') {
-          const amount = Number(t.amount || 0);
-          // Check if this is COGS/Cost of Sales
-          if(t.accountName && (t.accountName === 'COGS' || t.accountName.toLowerCase().includes('cost of sales'))) {
-            costOfSales += amount;
-          } else {
-            otherExpenses += amount;
-            // Track expense breakdown by account name
-            const accountName = t.accountName || 'Other Expenses';
-            expenseBreakdown[accountName] = (expenseBreakdown[accountName] || 0) + amount;
+        const acct = findAccount(b, t.accountId);
+        const accountName = acct?.name || t.accountName || '';
+        const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+        
+        // Exclude tax payments from P&L
+        if (!isTaxPayment) {
+          if(t.accountCategory === 'Revenue') {
+            revenue += Number(t.amount || 0);
+            // Add back WHT receivable for revenue transactions
+            if(t.whtApplied) {
+              if(t.whtBasis === 'net') {
+                const rate = (t.whtRate || b.whtRate) / 100;
+                whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+              } else {
+                whtReceivable += Number(t.amount || 0) * ((t.whtRate || b.whtRate)/100);
+              }
+            }
+          }
+          if(t.accountCategory === 'Expense') {
+            const amount = Number(t.amount || 0);
+            // Check if this is COGS/Cost of Sales
+            if(t.accountName && (t.accountName === 'COGS' || t.accountName.toLowerCase().includes('cost of sales'))) {
+              costOfSales += amount;
+            } else {
+              otherExpenses += amount;
+              // Track expense breakdown by account name
+              const accountName = t.accountName || 'Other Expenses';
+              expenseBreakdown[accountName] = (expenseBreakdown[accountName] || 0) + amount;
+            }
           }
         }
       }
@@ -5482,7 +5631,7 @@
       expenseBreakdown['Depreciation'] = depreciation;
       otherExpenses += depreciation;
       
-      const grossProfit = revenue - costOfSales;
+      const grossProfit = revenue + whtReceivable - costOfSales;
       const profitBeforeTax = grossProfit - otherExpenses;
       
       // Calculate tax (simplified - using CIT if available)
@@ -6058,7 +6207,8 @@
       business: {
         fullPrice: 60000,
         offerPrice: 40000,
-        taxAccountantPrice: 15000,
+        taxAccountantPrice: 25000,
+        bookkeepingPrice: 75000,
         buyLink: 'https://buy.stripe.com/business-plan',
         taxAccountantLink: 'https://buy.stripe.com/hire-tax-accountant-business'
       },
@@ -6066,6 +6216,7 @@
         fullPrice: 80000,
         offerPrice: 60000,
         taxAccountantPrice: 25000,
+        bookkeepingPrice: 100000,
         buyLink: 'https://buy.stripe.com/company-plan',
         taxAccountantLink: 'https://buy.stripe.com/hire-tax-accountant-company'
       },
@@ -6186,6 +6337,11 @@
           addonPrice += plan.taxAccountantPrice;
           addonParams.push({ type: 'tax-accountant', price: plan.taxAccountantPrice });
         }
+        const bookkeepingCheckbox = document.getElementById('businessBookkeepingService');
+        if (bookkeepingCheckbox && bookkeepingCheckbox.checked) {
+          addonPrice += plan.bookkeepingPrice;
+          addonParams.push({ type: 'bookkeeping', price: plan.bookkeepingPrice });
+        }
       }
       
       // Handle Company plan tax accountant addon
@@ -6194,6 +6350,11 @@
         if (taxAccountantCheckbox && taxAccountantCheckbox.checked) {
           addonPrice += plan.taxAccountantPrice;
           addonParams.push({ type: 'tax-accountant', price: plan.taxAccountantPrice });
+        }
+        const bookkeepingCheckbox = document.getElementById('companyBookkeepingService');
+        if (bookkeepingCheckbox && bookkeepingCheckbox.checked) {
+          addonPrice += plan.bookkeepingPrice;
+          addonParams.push({ type: 'bookkeeping', price: plan.bookkeepingPrice });
         }
       }
       
@@ -6262,10 +6423,26 @@
         });
       }
       
+      // Add listener for Business plan bookkeeping checkbox
+      const businessBookkeeping = document.getElementById('businessBookkeepingService');
+      if (businessBookkeeping) {
+        businessBookkeeping.addEventListener('change', function() {
+          updatePlanTotal('business');
+        });
+      }
+      
       // Add listener for Company plan tax accountant checkbox
       const companyTaxAccountant = document.getElementById('companyHireTaxAccountant');
       if (companyTaxAccountant) {
         companyTaxAccountant.addEventListener('change', function() {
+          updatePlanTotal('company');
+        });
+      }
+      
+      // Add listener for Company plan bookkeeping checkbox
+      const companyBookkeeping = document.getElementById('companyBookkeepingService');
+      if (companyBookkeeping) {
+        companyBookkeeping.addEventListener('change', function() {
           updatePlanTotal('company');
         });
       }
