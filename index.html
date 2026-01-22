@@ -187,12 +187,14 @@
       console.log('Firebase Authentication initialized successfully');
     } catch (e) {
       console.error('Firebase initialization failed:', e.message);
-      alert('Authentication system unavailable. Please check your internet connection or contact support.');
+      console.warn('Continuing in local-only mode. Firebase features will be unavailable.');
       FIREBASE_ENABLED = false;
+      // Don't block the user with an alert - let them continue in local mode
     }
   } else if (FIREBASE_ENABLED) {
     console.error('Firebase configuration is invalid. Please verify your Firebase settings.');
-    alert('Authentication configuration error. Please contact support.');
+    console.warn('Continuing in local-only mode. Firebase features will be unavailable.');
+    FIREBASE_ENABLED = false;
   }
   
   /**
@@ -595,6 +597,12 @@
       </div>
 
       <p class="prelogin-note" id="authModeNote">Secure authentication powered by Firebase. Your data is stored locally in your browser.</p>
+      
+      <!-- Demo access button (shown when Firebase is unavailable) -->
+      <div id="demoAccessContainer" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid #e6e6e6;">
+        <button class="primary prelogin-btn" id="btnDemoAccess" style="width:100%;">Continue in Demo Mode</button>
+        <p class="prelogin-note" style="margin-top:8px; color:#b00;">Authentication service is currently unavailable. You can continue in demo mode with local storage only.</p>
+      </div>
     </div>
   </div>
 
@@ -1924,7 +1932,21 @@
     
     // Check if Firebase is available
     if (!isFirebaseAuthEnabled()) {
-      if(authLoginMsg) { authLoginMsg.textContent = 'Authentication service unavailable'; authLoginMsg.style.color = '#b00'; }
+      if(authLoginMsg) { 
+        authLoginMsg.innerHTML = 'Authentication service unavailable. <a href="#" id="tryDemoMode" style="color:#0b76d1;text-decoration:underline;">Continue in Demo Mode</a>'; 
+        authLoginMsg.style.color = '#b00'; 
+        // Add click handler for demo mode link
+        setTimeout(function() {
+          const tryDemoLink = document.getElementById('tryDemoMode');
+          if (tryDemoLink) {
+            tryDemoLink.addEventListener('click', function(e) {
+              e.preventDefault();
+              const btnDemo = document.getElementById('btnDemoAccess');
+              if (btnDemo) btnDemo.click();
+            });
+          }
+        }, 100);
+      }
       return;
     }
     
@@ -2298,7 +2320,21 @@
         
         // Check if Firebase is available
         if (!isFirebaseAuthEnabled()) {
-          if (authSignupMsg) { authSignupMsg.textContent = 'Authentication service unavailable'; authSignupMsg.style.color = '#b00'; }
+          if (authSignupMsg) { 
+            authSignupMsg.innerHTML = 'Authentication service unavailable. <a href="#" id="tryDemoModeSignup" style="color:#0b76d1;text-decoration:underline;">Continue in Demo Mode</a>'; 
+            authSignupMsg.style.color = '#b00'; 
+            // Add click handler for demo mode link
+            setTimeout(function() {
+              const tryDemoLink = document.getElementById('tryDemoModeSignup');
+              if (tryDemoLink) {
+                tryDemoLink.addEventListener('click', function(e) {
+                  e.preventDefault();
+                  const btnDemo = document.getElementById('btnDemoAccess');
+                  if (btnDemo) btnDemo.click();
+                });
+              }
+            }, 100);
+          }
           return;
         }
         
@@ -6153,15 +6189,63 @@
   // Firebase Auth UI Initialization
   (function initFirebaseAuthUI() {
     const authModeNote = document.getElementById('authModeNote');
+    const demoAccessContainer = document.getElementById('demoAccessContainer');
+    const btnDemoAccess = document.getElementById('btnDemoAccess');
     
-    // Update auth mode note based on Firebase availability
+    // Update auth mode note and demo button based on Firebase availability
     if (authModeNote) {
       if (typeof isFirebaseAuthEnabled === 'function' && isFirebaseAuthEnabled()) {
         authModeNote.textContent = 'Secure authentication powered by Firebase. Your data is stored locally in your browser.';
+        authModeNote.style.color = '';
+        // Hide demo access button when Firebase is working
+        if (demoAccessContainer) demoAccessContainer.style.display = 'none';
       } else {
-        authModeNote.textContent = 'Authentication service unavailable. Please check your internet connection.';
+        authModeNote.textContent = 'Note: Authentication service is currently unavailable.';
         authModeNote.style.color = '#b00';
+        // Show demo access button when Firebase is unavailable
+        if (demoAccessContainer) demoAccessContainer.style.display = 'block';
       }
+    }
+    
+    // Demo access button handler
+    if (btnDemoAccess) {
+      btnDemoAccess.addEventListener('click', function() {
+        // Create a demo user if none exists
+        if (!state.auth.currentUserId && state.users.length === 0) {
+          const demoUserId = uid('user');
+          const demoUser = {
+            id: demoUserId,
+            username: 'demo',
+            display: 'Demo User',
+            email: 'demo@local',
+            role: 'User',
+            isAdmin: false,
+            permissions: { view: true, edit: true, delete: true },
+            plan: 'Individual',
+            createdAt: Date.now(),
+            trialStart: Date.now(),
+            tourSeen: false,
+            createdByAdmin: false
+          };
+          state.users.push(demoUser);
+          state.auth.currentUserId = demoUserId;
+          saveState();
+          addAudit('auth.demo', 'user', demoUserId, 'User accessed demo mode');
+        } else if (!state.auth.currentUserId && state.users.length > 0) {
+          // Use existing user
+          state.auth.currentUserId = state.users[0].id;
+          saveState();
+        }
+        
+        updateAuthUI();
+        renderAll();
+        
+        // Check if user needs to see video tour
+        const currentUser = state.users.find(function(u) { return u.id === state.auth.currentUserId; });
+        if (currentUser && currentUser.tourSeen !== true) {
+          showTourModal(currentUser.id);
+        }
+      });
     }
     
     // Listen for Firebase auth state changes if enabled
