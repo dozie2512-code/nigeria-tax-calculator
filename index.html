@@ -870,14 +870,10 @@
       <h2 style="margin:0 0 8px 0;">Report</h2>
 
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-        <button class="small tab active" data-report="vatReport">VAT Report</button>
-        <button class="small tab" data-report="whtPayable">WHT Payable</button>
-        <button class="small tab" data-report="whtReceivable">WHT Receivable</button>
-        <button class="small tab" data-report="payeReport">PAYE Report</button>
+        <button class="small tab active" data-report="payeReport">PAYE Report</button>
         <button class="small tab" data-report="inventoryReport">Inventory Report</button>
         <button class="small tab" data-report="assetsReport">Assets Report</button>
-        <button class="small tab" data-report="pitIndividual">PIT (Individual)</button>
-        <button class="small tab" data-report="pitEnterprise">PIT (Enterprise)</button>
+        <button class="small tab" data-report="pitBusiness">PIT (Business)</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
         <button class="small tab" data-report="companyAccounts">Company Accounts</button>
         <button class="small tab" data-report="auditTrail">Audit Trail</button>
@@ -942,8 +938,8 @@
       <label>Entity type:
         <select id="bizEntity">
           <option value="Company">Company</option>
-          <option value="Enterprise">Enterprise</option>
-          <option value="Individual">Individual</option>
+          <option value="Business">Business</option>
+          <option value="Enterprise Plus">Enterprise Plus</option>
         </select>
       </label>
       <label>VAT rate %: <input type="number" id="bizVat" class="smallInput" min="0" step="0.01" /></label>
@@ -1101,9 +1097,9 @@
     <label>Password: <input type="password" id="signupPassword" minlength="6" placeholder="Min 6 characters" required></label>
     <label>Plan:
       <select id="signupPlan">
-        <option value="Individual">Individual</option>
-        <option value="Enterprise">Enterprise</option>
+        <option value="Business">Business</option>
         <option value="Company">Company</option>
+        <option value="Enterprise Plus">Enterprise Plus</option>
       </select>
     </label>
   </div>
@@ -1138,9 +1134,9 @@
   <div class="row">
     <label>Entity Type:
       <select id="entitySelectType">
-        <option value="Individual">Individual</option>
-        <option value="Enterprise">Enterprise</option>
+        <option value="Business">Business</option>
         <option value="Company">Company</option>
+        <option value="Enterprise Plus">Enterprise Plus</option>
       </select>
     </label>
   </div>
@@ -1245,8 +1241,8 @@
   const CGT_EXEMPTION_GAIN = 10000000; // ₦10,000,000
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
-  // Individual-only account names (for UI filtering)
-  const INDIVIDUAL_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
+  // Common account names constants (no longer used for filtering)
+  const COMMON_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
 
   // App state
   let state = {
@@ -1634,9 +1630,13 @@
     state.superAdmin = state.superAdmin || { isActive: false };
     
     state.businesses.forEach(b => {
-      // MIGRATION: Rename SoleProprietor to Enterprise
-      if (b.entity === 'SoleProprietor') {
-        b.entity = 'Enterprise';
+      // MIGRATION: Rename SoleProprietor to Business, and Enterprise to Business
+      if (b.entity === 'SoleProprietor' || b.entity === 'Enterprise') {
+        b.entity = 'Business';
+      }
+      // MIGRATION: Rename Individual to Business (removing Individual entity)
+      if (b.entity === 'Individual') {
+        b.entity = 'Business';
       }
       
       // MIGRATION: Add turnoverThreshold if missing (default 100M)
@@ -1681,13 +1681,8 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' }  // Added for Individual
+        { name: 'Sales Revenue', category: 'Revenue' }
       ];
-      
-      // Add Rent as Revenue for Individual entities only
-      if(b.entity === 'Individual'){
-        accountsToAdd.push({ name: 'Rent', category: 'Revenue' });
-      }
       
       for (const acct of accountsToAdd) {
         if (!existingAccountNames.includes(acct.name)) {
@@ -2576,7 +2571,7 @@
         // Show entity selection modal for new user
         setTimeout(() => {
           if (preLoginOverlay) preLoginOverlay.classList.add('hidden');
-          showEntitySelectModal(userId, 'Individual');
+          showEntitySelectModal(userId, 'Business');
         }, 500);
       });
     }
@@ -2607,7 +2602,7 @@
             var email = (emailEl && emailEl.value) ? emailEl.value.trim() : '';
             var phone = (phoneEl && phoneEl.value) ? phoneEl.value.trim() : '';
             var password = (passwordEl && passwordEl.value) ? passwordEl.value : '';
-            var plan = (planEl && planEl.value) ? planEl.value : 'Individual';
+            var plan = (planEl && planEl.value) ? planEl.value : 'Business';
 
             // Validate required fields
             if (!name || !username || !email || !password) {
@@ -2740,7 +2735,7 @@
             if (emailEl) emailEl.value = '';
             if (phoneEl) phoneEl.value = '';
             if (passwordEl) passwordEl.value = '';
-            if (planEl) planEl.value = 'Individual';
+            if (planEl) planEl.value = 'Business';
 
             // Close signup modal
             var signupModalEl = document.getElementById('signupModal');
@@ -3202,46 +3197,17 @@
   }
 
   function renderFeatureVisibility(){
-    // Handle Individual entity restrictions
+    // No entity restrictions needed - all features available for all entities
     const b = findBiz(selectedBizId);
     if (!b) return;
     
-    const isIndividual = b.entity === 'Individual';
+    // Show all panels for all entities
+    const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
+    if(plQuick) plQuick.style.display = 'block';
     
-    if (isIndividual) {
-      // Hide panels and elements for Individual
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'none';
-      
-      // Restrict actions - only show Revenue for Individuals
-      Array.from(txnAction.options).forEach(opt => {
-        if (opt.value && opt.value !== 'Revenue') {
-          opt.style.display = 'none';
-        } else if (opt.value === 'Revenue') {
-          opt.style.display = '';
-        }
-      });
-      
-      // Restrict accounts - show Individual income accounts, hide Salary
-      Array.from(txnAccount.options).forEach(opt => {
-        const accountText = opt.textContent.split(' (')[0]; // Get name without category
-        if (accountText === 'Salary') {
-          opt.style.display = 'none';  // Hide Salary for Individual
-        } else if (['Dividend', 'Interest', 'Royalty', 'Rent', 'Benefit in kind', 'Share of profit', 'Sales Revenue'].includes(accountText)) {
-          opt.style.display = '';  // Show Individual income accounts
-        } else {
-          opt.style.display = 'none';
-        }
-      });
-    } else {
-      // Show all panels for non-Individual entities
-      const plQuick = document.querySelector('#quickPanels > div:nth-child(1)');
-      if(plQuick) plQuick.style.display = 'block';
-      
-      // Show all actions and accounts for non-Individual entities
-      Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
-      Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
-    }
+    // Show all actions and accounts for all entities
+    Array.from(txnAction.options).forEach(opt => { opt.style.display = ''; });
+    Array.from(txnAccount.options).forEach(opt => { opt.style.display = ''; });
   }
 
   function txnActionChanged(){
@@ -3890,8 +3856,8 @@
         
         // CGT: Apply entity-specific rules for net (post-offset) gain
         if(netGainAfterOffset > 0 && !isShareExempt) {
-          if(b.entity === 'Individual' || b.entity === 'Enterprise') {
-            // Individual or Enterprise: include netGain in taxable profit
+          if(b.entity === 'Business' || b.entity === 'Enterprise Plus') {
+            // Business or Enterprise Plus: include netGain in taxable profit
             includedInTaxableProfit = true;
             addAudit('cgt.taxable_profit', 'asset', asset.id, 
               `Chargeable gain ${fmt(netGainAfterOffset)} included in taxable profit for ${b.entity}`,
@@ -4780,7 +4746,7 @@
           cgtExcludedFromTaxable += effectiveGain;
         }
       } else {
-        // For Individual/Enterprise: gains included in taxable profit unless exempt
+        // For Business/Enterprise Plus: gains included in taxable profit unless exempt
         // If the gain is exempt (share exemption), exclude from taxable profit
         if(g.isShareExempt && effectiveGain > 0) {
           // Exempt gains: exclude from taxable profit
@@ -4854,9 +4820,9 @@
       }
     }
 
-    // PIT for Enterprise (renamed from SoleProprietor)
+    // PIT for Business/Enterprise Plus (renamed from SoleProprietor)
     let pitCharge = 0;
-    if(b.entity === 'Enterprise' && b.pitEnabled){
+    if((b.entity === 'Business' || b.entity === 'Enterprise Plus') && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
         // Deduct WHT receivable from PIT charge
@@ -4866,70 +4832,31 @@
 
     const vatNet = vatCollected - vatPaid;
     
-    // INDIVIDUAL ENTITY: Special display
-    const isIndividual = b.entity === 'Individual';
-    
-    // PIT for Individual (compute properly with statutory deductions and WHT receivable)
-    if(isIndividual && b.pitEnabled){
-      // Compute total gross income from all Revenue transactions
-      let totalGrossIncome = 0;
-      for(const t of arr){
-        if(t.accountCategory === 'Revenue') {
-          totalGrossIncome += Number(t.amount || 0);
-        }
-      }
-      
-      // Get statutory deductions
-      const ded = getStatutoryDeductions(b, null);
-      const totalDed = totalStatutoryDeductions(ded);
-      
-      // Taxable income (gross income less statutory deductions)
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
-      
-      // Compute PIT using bands on taxable income
-      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
-      
-      // Deduct WHT receivable from PIT
-      pitCharge = Math.max(0, pitLiability - whtReceivable);
-    }
-    
     let html = '';
-    if(isIndividual){
-      // For Individual: show simplified summary - no WHT Payable, no PAYE, no CA details
-      html += `<div><strong>Gross Income:</strong> ${fmt(revenue)}</div>`;
-      html += `<div><strong>Taxable Income:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Expenses ${fmt(expenses)}</div>`;
-      html += `<hr/>`;
-      // For Individual: show only WHT Receivable and PIT
-      html += `<div><strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PIT (Personal Income Tax):</strong> ${fmt(pitCharge)}</div>`;
-      html += `<div class="small-note">PIT is computed on taxable income (gross income less statutory deductions). WHT receivable is then deducted from the PIT liability.</div>`;
+    // For Company/Business/Enterprise Plus: show full summary
+    html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
+    html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
+    html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
+    html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
+    html += `<hr/>`;
+    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
+    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
+    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+    if(b.entity === 'Company'){
+      html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+      if(whtCarryForward > 0) {
+        html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
+      }
+      html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
+      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
+      if(totalCarryforwardLosses > 0) {
+        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
+      }
     } else {
-      // For Company/Enterprise: show full summary
-      html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
-      html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
-      html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
-      html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
-      html += `<hr/>`;
-      html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-      html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)}</div>`;
-      html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
-      if(b.entity === 'Company'){
-        html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
-        if(whtCarryForward > 0) {
-          html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
-        }
-        html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
-        const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-        html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
-        if(totalCarryforwardLosses > 0) {
-          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-        }
-      } else {
-        html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
-        if(totalCarryforwardLosses > 0) {
-          html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
-        }
+      html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      if(totalCarryforwardLosses > 0) {
+        html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
     }
     
@@ -5025,43 +4952,31 @@
     
     // Define visibility per entity
     const visibilityRules = {
-      'Individual': {
-        'vatReport': true,
-        'whtPayable': false,
-        'whtReceivable': false,
-        'payeReport': false,
-        'inventoryReport': false,
-        'assetsReport': false,
-        'pitIndividual': true,
-        'pitEnterprise': false,
-        'cgtReport': false,
+      'Business': {
+        'payeReport': true,
+        'inventoryReport': true,
+        'assetsReport': true,
+        'pitBusiness': true,
+        'cgtReport': true,
         'companyAccounts': false,
         'auditTrail': true,
         'receiptsFolder': true
       },
-      'Enterprise': {
-        'vatReport': true,
-        'whtPayable': true,
-        'whtReceivable': true,
+      'Enterprise Plus': {
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitIndividual': false,
-        'pitEnterprise': true,
+        'pitBusiness': true,
         'cgtReport': true,
         'companyAccounts': false,
         'auditTrail': true,
         'receiptsFolder': true
       },
       'Company': {
-        'vatReport': true,
-        'whtPayable': true,
-        'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitIndividual': false,
-        'pitEnterprise': false,
+        'pitBusiness': false,
         'cgtReport': true,
         'companyAccounts': true,
         'auditTrail': true,
@@ -5153,12 +5068,12 @@
   }
 
   /**
-   * Generates PIT Enterprise computation report with full template.
+   * Generates PIT Business computation report with full template.
    * @param {string} bizId - Business ID
    * @param {string} contactId - Optional contact ID for per-contact deductions
    * @returns {string} HTML content for the report
    */
-  function generatePitEnterpriseReport(bizId, contactId) {
+  function generatePitBusinessReport(bizId, contactId) {
     const b = state.businesses.find(x => x.id === bizId);
     if(!b) return '<div>Business not found</div>';
     
@@ -5254,7 +5169,7 @@
     const finalLiability = Math.max(0, pitLiability - whtReceivable);
     const effectiveRate = grossTaxableProfit > 0 ? ((finalLiability / grossTaxableProfit) * 100).toFixed(2) : '0.00';
     
-    let html = `<h3>Enterprise</h3>`;
+    let html = `<h3>Personal Income Tax Computation (Business)</h3>`;
     html += `<p><strong>Business Name:</strong> ${b.name}</p>`;
     html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
@@ -5603,7 +5518,7 @@
       html += `<div class="small-muted">For Companies with turnover threshold > ₦100,000,000: CGT is charged at 30% on net gains, not included in taxable profit.</div>`;
       html += `<div class="small-muted">Current turnover threshold setting: ${fmt(threshold)}</div>`;
     } else {
-      html += `<div class="small-muted">For Individual/Enterprise: Net gains are included in taxable profit and subject to PIT rates.</div>`;
+      html += `<div class="small-muted">For Business/Enterprise Plus: Net gains are included in taxable profit and subject to PIT rates.</div>`;
     }
     html += `<div class="small-muted" style="margin-top:6px;">Carryforward losses can only offset gains in future accounting periods (years after the loss occurred).</div>`;
     
@@ -5830,84 +5745,9 @@
       }
       reportContent.innerHTML = html;
       
-    } else if(name === 'pitIndividual'){
-      // PIT Individual report - compute from actual transactions
-      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
-      const currentYear = new Date().getFullYear();
-      
-      // Compute income by category
-      let salary = 0, dividend = 0, interest = 0, royalty = 0, rent = 0, benefitInKind = 0, shareOfProfit = 0;
-      let totalGrossIncome = 0;
-      
-      for(const t of arr){
-        if(t.accountCategory === 'Revenue') {
-          const amount = Number(t.amount || 0);
-          totalGrossIncome += amount;
-          
-          const acct = findAccount(b, t.accountId);
-          const acctName = acct ? acct.name.toLowerCase() : '';
-          
-          if(acctName.includes('salary')) salary += amount;
-          else if(acctName.includes('dividend')) dividend += amount;
-          else if(acctName.includes('interest')) interest += amount;
-          else if(acctName.includes('royalty')) royalty += amount;
-          else if(acctName.includes('rent')) rent += amount;
-          else if(acctName.includes('benefit')) benefitInKind += amount;
-          else if(acctName.includes('share') || acctName.includes('profit')) shareOfProfit += amount;
-        }
-      }
-      
-      // Get statutory deductions
-      const ded = getStatutoryDeductions(b, null);
-      const totalDed = totalStatutoryDeductions(ded);
-      
-      // Taxable income
-      const taxableIncome = Math.max(0, totalGrossIncome - totalDed);
-      
-      // Compute PIT using bands
-      const pitLiability = computePAYEOnAnnualIncome(taxableIncome);
-      
-      // WHT receivable
-      let whtReceivable = 0;
-      for(const t of arr){
-        if(t.whtApplied && t.accountCategory === 'Revenue') {
-          const rate = Number(t.whtRate || b.whtRate) / 100;
-          whtReceivable += Number(t.amount || 0) * rate;
-        }
-      }
-      
-      const finalPIT = Math.max(0, pitLiability - whtReceivable);
-      
-      let html = `<h3>Personal Income Tax Computation (Individual) - ${currentYear}</h3>`;
-      html += `<p><strong>Name:</strong> ${b.name}</p>`;
-      html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
-      html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
-      html += `<tr><td colspan="2"><strong>Gross Income</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Salary</td><td style="text-align:right;">${fmt(salary)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Dividend</td><td style="text-align:right;">${fmt(dividend)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Interest</td><td style="text-align:right;">${fmt(interest)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Royalty</td><td style="text-align:right;">${fmt(royalty)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Rent</td><td style="text-align:right;">${fmt(rent)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Benefit in kind</td><td style="text-align:right;">${fmt(benefitInKind)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Share of profit</td><td style="text-align:right;">${fmt(shareOfProfit)}</td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Gross Income</strong></td><td style="text-align:right;"><strong>${fmt(totalGrossIncome)}</strong></td></tr>`;
-      html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Rent relief</td><td style="text-align:right;">${fmt(ded.rent)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Life assurance</td><td style="text-align:right;">${fmt(ded.life)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Mortgage interest</td><td style="text-align:right;">${fmt(ded.mortgage)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">NHF</td><td style="text-align:right;">${fmt(ded.nhf)}</td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Income</strong></td><td style="text-align:right;"><strong>${fmt(taxableIncome)}</strong></td></tr>`;
-      html += `<tr><td colspan="2" style="padding-top:12px;"><strong>PIT Computation</strong></td></tr>`;
-      html += `<tr><td style="padding-left:20px;">PIT as per bands</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
-      html += `<tr><td style="padding-left:20px;">Less: WHT Receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
-      html += `<tr style="background:#e6f3ff;"><td><strong>Final PIT Payable</strong></td><td style="text-align:right;"><strong>${fmt(finalPIT)}</strong></td></tr>`;
-      html += `</tbody></table>`;
-      reportContent.innerHTML = html;
-      
-    } else if(name === 'pitEnterprise'){
-      // Use the new generatePitEnterpriseReport function
-      reportContent.innerHTML = generatePitEnterpriseReport(selectedBizId, null);
+    } else if(name === 'pitBusiness'){
+      // Use the new generatePitBusinessReport function
+      reportContent.innerHTML = generatePitBusinessReport(selectedBizId, null);
       
     } else if(name === 'cgtReport'){
       // Use the new generateCgtReport function
@@ -6819,7 +6659,7 @@
     
     if (!entitySelectModal || !entitySelectType) {
       // Fallback: create business directly without modal
-      createBusinessForUser(userId, preselectedPlan || 'Individual');
+      createBusinessForUser(userId, preselectedPlan || 'Business');
       completeSignupFlow(userId);
       return;
     }
@@ -6830,7 +6670,7 @@
     }
     
     // Pre-select based on signup plan
-    entitySelectType.value = preselectedPlan || 'Individual';
+    entitySelectType.value = preselectedPlan || 'Business';
     
     // Block page leaving with beforeunload (user must confirm entity)
     window.addEventListener('beforeunload', blockPageLeaveUntilEntitySelected);
@@ -6880,7 +6720,7 @@
         return;
       }
       
-      const entityType = entitySelectType ? entitySelectType.value : 'Individual';
+      const entityType = entitySelectType ? entitySelectType.value : 'Business';
       
       // Create default business for the user
       const bizId = createBusinessForUser(pendingSignupUserId, entityType);
