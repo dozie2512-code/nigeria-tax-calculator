@@ -647,9 +647,23 @@
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
             <option value="Revenue">Revenue</option>
+            <option value="InvestmentIncome">Investment Income</option>
+            <option value="TaxIncome">Tax Income</option>
+            <option value="TaxPayment">Tax Payment</option>
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
+          </select>
+        </label>
+
+        <label id="txnTaxPaymentTypeLabel" style="display:none;">Tax Payment Type:
+          <select id="txnTaxPaymentType">
+            <option value="">-- Select type --</option>
+            <option value="WHTPaid">WHT Paid</option>
+            <option value="PAYEPaid">PAYE Paid</option>
+            <option value="PITPaid">PIT Paid</option>
+            <option value="CGTPaid">CGT Paid</option>
+            <option value="CITPaid">CIT Paid</option>
           </select>
         </label>
 
@@ -711,16 +725,10 @@
                     <option value="">Select employee...</option>
                   </select>
                 </button>
-                <button type="button" class="contact-type-option" data-type="Customer" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Customers
-                  <select class="contact-name-select" data-type="Customer" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select customer...</option>
-                  </select>
-                </button>
-                <button type="button" class="contact-type-option" data-type="Vendor" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
-                  Vendors
-                  <select class="contact-name-select" data-type="Vendor" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
-                    <option value="">Select vendor...</option>
+                <button type="button" class="contact-type-option" data-type="SoleTrader" style="display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:0.9rem;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='none'">
+                  Sole Trader
+                  <select class="contact-name-select" data-type="SoleTrader" style="display:block;width:100%;margin-top:4px;padding:4px;border:1px solid #cfcfcf;border-radius:4px;font-size:0.85rem;" onclick="event.stopPropagation()">
+                    <option value="">Select sole trader...</option>
                   </select>
                 </button>
               </div>
@@ -993,8 +1001,6 @@
         <div class="row">
           <input type="text" id="newContactName" placeholder="Contact name" />
           <select id="newContactType">
-            <option value="Customer">Customer</option>
-            <option value="Vendor">Vendor</option>
             <option value="Employee">Employee</option>
             <option value="SoleTrader">SoleTrader</option>
           </select>
@@ -1022,6 +1028,8 @@
         <option value="Asset">Asset</option>
         <option value="Liability">Liability</option>
         <option value="Capital">Capital</option>
+        <option value="VATRefunded">VAT Refunded</option>
+        <option value="VATPaid">VAT Paid</option>
       </select>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountDisallowable" /> Disallowable</label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountNonTax" /> Non-taxable</label>
@@ -1044,8 +1052,6 @@
       <label>Name: <input type="text" id="contactEditName" /></label>
       <label>Type:
         <select id="contactEditType">
-          <option value="Customer">Customer</option>
-          <option value="Vendor">Vendor</option>
           <option value="Employee">Employee</option>
           <option value="SoleTrader">SoleTrader</option>
         </select>
@@ -1411,6 +1417,8 @@
 
   const txnDate = document.getElementById('txnDate');
   const txnAction = document.getElementById('txnAction');
+  const txnTaxPaymentType = document.getElementById('txnTaxPaymentType');
+  const txnTaxPaymentTypeLabel = document.getElementById('txnTaxPaymentTypeLabel');
   const txnAccount = document.getElementById('txnAccount');
   const txnDesc = document.getElementById('txnDesc');
   const txnAmount = document.getElementById('txnAmount');
@@ -2968,6 +2976,14 @@
 
   function txnActionChanged(){
     const val = txnAction.value;
+    
+    // Show/hide Tax Payment Type field
+    if(val === 'TaxPayment'){
+      txnTaxPaymentTypeLabel.style.display = '';
+    } else {
+      txnTaxPaymentTypeLabel.style.display = 'none';
+    }
+    
     if(val === 'InventoryPurchase' || val === 'InventorySale'){
       mainTxnForm.style.display = 'none';
       inventorySubform.style.display = 'block';
@@ -3199,6 +3215,8 @@
   function resetForms(){
     txnDate.value = today();
     txnAction.value = '';
+    txnTaxPaymentType.value = '';
+    txnTaxPaymentTypeLabel.style.display = 'none';
     txnAccount.selectedIndex = 0;
     txnDesc.value = '';
     txnAmount.value = '';
@@ -3264,6 +3282,7 @@
       whtRate: Number(txnWhtRate.value || 0),
       whtBasis: txnWhtBasis.value || 'gross',
       paye: !!txnSalary.checked,
+      taxPaymentType: txnTaxPaymentType.value || '',
       contact: txnContact.value || '',
       receiptId: null
     };
@@ -4842,10 +4861,19 @@
     let revenue = 0, expenses = 0;
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
+    let whtReceivableAddBack = 0; // For net-basis WHT on income items
     
     for(const t of arr){
       if(t.accountCategory === 'Revenue') {
         revenue += Number(t.amount || 0);
+        
+        // Add back WHT receivable for net-basis income (dividend, interest, royalty)
+        if(t.whtApplied && t.whtBasis === 'net') {
+          const rate = Number(t.whtRate || b.whtRate) / 100;
+          const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
+          whtReceivableAddBack += whtAmount;
+        }
+        
         // Check for non-taxable
         const acct = findAccount(b, t.accountId);
         if(acct && acct.nonTaxableDefault) {
@@ -4905,7 +4933,7 @@
     
     // Calculations
     const accountingProfit = revenue - expenses;
-    const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
+    const adjustedProfit = accountingProfit + disallowableExpenses + whtReceivableAddBack - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
     const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
@@ -4939,6 +4967,9 @@
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Depreciation</td><td style="text-align:right;">${fmt(depreciation)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Loss on disposal</td><td style="text-align:right;">${fmt(lossOnDisposal)}</td></tr>`;
+    if(whtReceivableAddBack > 0) {
+      html += `<tr><td style="padding-left:20px;">WHT receivable (net-basis income)</td><td style="text-align:right;">${fmt(whtReceivableAddBack)}</td></tr>`;
+    }
     html += `<tr><td style="padding-left:20px;">Other disallowable expenses</td><td style="text-align:right;">${fmt(disallowableExpenses - depreciation - lossOnDisposal)}</td></tr>`;
     
     // Non-taxable income
@@ -5518,11 +5549,19 @@
       
       // Compute P&L values with proper breakdown
       let revenue = 0, costOfSales = 0, otherExpenses = 0;
+      let whtReceivableAddBack = 0; // For net-basis WHT on income items
       const expenseBreakdown = {};
       
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
           revenue += Number(t.amount || 0);
+          
+          // Add back WHT receivable for net-basis income (dividend, interest, royalty)
+          if(t.whtApplied && t.whtBasis === 'net') {
+            const rate = Number(t.whtRate || b.whtRate) / 100;
+            const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
+            whtReceivableAddBack += whtAmount;
+          }
         }
         if(t.accountCategory === 'Expense') {
           const amount = Number(t.amount || 0);
@@ -5542,8 +5581,13 @@
       expenseBreakdown['Depreciation'] = depreciation;
       otherExpenses += depreciation;
       
+      // Add WHT receivable add-back to revenue or as adjustment
+      if(whtReceivableAddBack > 0) {
+        expenseBreakdown['Less: WHT receivable (net-basis income)'] = -whtReceivableAddBack;
+      }
+      
       const grossProfit = revenue - costOfSales;
-      const profitBeforeTax = grossProfit - otherExpenses;
+      const profitBeforeTax = grossProfit - otherExpenses + whtReceivableAddBack;
       
       // Calculate tax (simplified - using CIT if available)
       let taxAmount = 0;
