@@ -4048,11 +4048,24 @@
   // PL computation
   function computePLSnapshot(){
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    const b = findBiz(selectedBizId);
     let revenue=0, expenses=0, depreciation=0;
     let disallowableExpense=0, nonTaxableIncome=0;
+    let whtReceivable=0;
     
     for(const t of arr){
-      if(t.accountCategory === 'Revenue') revenue += Number(t.amount||0);
+      if(t.accountCategory === 'Revenue') {
+        revenue += Number(t.amount||0);
+        // Add back WHT receivable for revenue transactions (dividends, interests, royalties posted at net)
+        if(t.whtApplied) {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || (b ? b.whtRate : 5)) / 100;
+            whtReceivable += Number(t.amount||0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount||0) * ((t.whtRate || (b ? b.whtRate : 5))/100);
+          }
+        }
+      }
       if(t.accountCategory === 'Expense') expenses += Number(t.amount||0);
       
       // Handle adjustment transactions
@@ -4067,8 +4080,9 @@
     const dep = computeTotalDepreciation();
     depreciation = dep;
     expenses += depreciation;
-    const accountingProfit = revenue - expenses;
-    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome };
+    // Add back WHT receivable to accounting profit for revenues posted at net
+    const accountingProfit = revenue + whtReceivable - expenses;
+    return { revenue, expenses, depreciation, accountingProfit, disallowableExpense, nonTaxableIncome, whtReceivable };
   }
 
   // compute daily depreciation for all assets
@@ -4400,7 +4414,8 @@
     
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
-    const accountingProfit = revenue - expenses;
+    // Add back WHT receivable to accounting profit for revenues posted at net
+    const accountingProfit = revenue + whtReceivable - expenses;
     
     // Get adjustment values from P&L snapshot
     const plSnapshot = computePLSnapshot();
@@ -4967,10 +4982,11 @@
     const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
     const currentYear = new Date().getFullYear();
     
-    // Compute accounting values
+    // Compute accounting values with WHT receivable add-back
     let revenue = 0, expenses = 0;
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
+    let whtReceivable = 0;
     
     for(const t of arr){
       if(t.accountCategory === 'Revenue') {
@@ -4981,6 +4997,15 @@
         }
         if(t.adjustmentType === 'nontaxable') {
           nonTaxableIncome += Number(t.adjustmentAmount || t.amount || 0);
+        }
+        // Add back WHT receivable for revenue transactions
+        if(t.whtApplied) {
+          if(t.whtBasis === 'net') {
+            const rate = (t.whtRate || b.whtRate) / 100;
+            whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount || 0) * ((t.whtRate || b.whtRate)/100);
+          }
         }
       }
       if(t.accountCategory === 'Expense') {
@@ -5020,8 +5045,8 @@
     
     disallowableExpenses += lossOnDisposal;
     
-    // Calculations
-    const accountingProfit = revenue - expenses;
+    // Calculations - add back WHT receivable to accounting profit
+    const accountingProfit = revenue + whtReceivable - expenses;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
@@ -5042,15 +5067,6 @@
     // Below ₦25M = 0% rate
     
     const citLiability = taxableProfit * citRate;
-    
-    // WHT receivable
-    let whtReceivable = 0;
-    for(const t of arr){
-      if(t.whtApplied && t.accountCategory === 'Revenue') {
-        const rate = Number(t.whtRate || b.whtRate) / 100;
-        whtReceivable += Number(t.amount || 0) * rate;
-      }
-    }
     
     const finalLiability = Math.max(0, citLiability - whtReceivable);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
@@ -5472,13 +5488,23 @@
       const currentYear = new Date().getFullYear();
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       
-      // Compute P&L values with proper breakdown
+      // Compute P&L values with proper breakdown and WHT receivable add-back
       let revenue = 0, costOfSales = 0, otherExpenses = 0;
+      let whtReceivable = 0;
       const expenseBreakdown = {};
       
       for(const t of arr){
         if(t.accountCategory === 'Revenue') {
           revenue += Number(t.amount || 0);
+          // Add back WHT receivable for revenue transactions
+          if(t.whtApplied) {
+            if(t.whtBasis === 'net') {
+              const rate = (t.whtRate || b.whtRate) / 100;
+              whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+            } else {
+              whtReceivable += Number(t.amount || 0) * ((t.whtRate || b.whtRate)/100);
+            }
+          }
         }
         if(t.accountCategory === 'Expense') {
           const amount = Number(t.amount || 0);
@@ -5498,7 +5524,7 @@
       expenseBreakdown['Depreciation'] = depreciation;
       otherExpenses += depreciation;
       
-      const grossProfit = revenue - costOfSales;
+      const grossProfit = revenue + whtReceivable - costOfSales;
       const profitBeforeTax = grossProfit - otherExpenses;
       
       // Calculate tax (simplified - using CIT if available)
