@@ -1237,47 +1237,67 @@
     const user = state.users.find(u => u.id === userId);
     if (!user) return null;
     
-    const bizId = uid('biz');
-    // Removed Sales (Revenue) default account as per requirements
-    const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
-    
-    const newBusiness = {
-      id: bizId,
-      name: (user.display || user.username) + "'s Business",
-      ownerId: userId,
-      entity: entityType,
-      vatRate: DEFAULTS.vatRate,
-      whtRate: DEFAULTS.whtRate,
-      citRate: DEFAULTS.citRate,
-      turnoverThreshold: DEFAULTS.turnoverThreshold,
-      vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
-      caRateDefault: DEFAULTS.caRateDefault,
-      depRateDefault: DEFAULTS.depRateDefault,
-      accounts: [cogs, bank], // Removed sales account
-      inventory: [],
-      assets: [],
-      contacts: [],
-      statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-      lossBroughtForward: 0, caCarryForward: 0,
-      defaultExpenseDisallowable: false, defaultRevenueNonTax: false,
-      userIds: [userId], // Track users associated with this business
-      chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
-      shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
-    };
-    
-    state.businesses.push(newBusiness);
-    
-    // Initialize transactions for this user/business combo
-    if (!state.transactions[userId]) {
-      state.transactions[userId] = {};
+    // Determine how many businesses to create based on entity type
+    let businessesToCreate = 1;
+    if (entityType === 'Enterprise Plus') {
+      businessesToCreate = 3;
     }
-    state.transactions[userId][bizId] = [];
+    
+    const createdBusinessIds = [];
+    
+    for (let i = 0; i < businessesToCreate; i++) {
+      const bizId = uid('biz');
+      // Removed Sales (Revenue) default account as per requirements
+      const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
+      const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
+      
+      const businessName = businessesToCreate > 1 
+        ? (user.display || user.username) + "'s Business " + (i + 1)
+        : (user.display || user.username) + "'s Business";
+      
+      const newBusiness = {
+        id: bizId,
+        name: businessName,
+        ownerId: userId,
+        entity: entityType,
+        vatRate: DEFAULTS.vatRate,
+        whtRate: DEFAULTS.whtRate,
+        citRate: DEFAULTS.citRate,
+        turnoverThreshold: DEFAULTS.turnoverThreshold,
+        vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
+        caRateDefault: DEFAULTS.caRateDefault,
+        depRateDefault: DEFAULTS.depRateDefault,
+        accounts: [cogs, bank], // Removed sales account
+        inventory: [],
+        assets: [],
+        contacts: [],
+        statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
+        lossBroughtForward: 0, caCarryForward: 0,
+        defaultExpenseDisallowable: false, defaultRevenueNonTax: false,
+        userIds: [userId], // Track users associated with this business
+        maxUsers: entityType === 'Business' ? 2 : 3, // 2 for Business, 3 for Company/Enterprise Plus
+        trialStart: Date.now(),
+        trialDays: 7,
+        chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
+        shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
+      };
+      
+      state.businesses.push(newBusiness);
+      
+      // Initialize transactions for this user/business combo
+      if (!state.transactions[userId]) {
+        state.transactions[userId] = {};
+      }
+      state.transactions[userId][bizId] = [];
+      
+      createdBusinessIds.push(bizId);
+      addAudit('business.create', 'business', bizId, 'Default business created for user: ' + user.username);
+    }
     
     saveState();
-    addAudit('business.create', 'business', bizId, 'Default business created for user: ' + user.username);
     
-    return bizId;
+    // Return the first business ID
+    return createdBusinessIds[0];
   }
 
   /**
