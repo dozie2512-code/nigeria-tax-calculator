@@ -621,10 +621,8 @@
 
       <div class="auth-bar">
         <span id="authInfo" class="small-muted"></span>
-        <span id="superAdminIndicator" class="muted-pill" role="status" aria-live="polite" style="display:none;background:#ff6b6b;color:#fff;">Super Admin</span>
         <button id="btnLogin" class="small primary">Login</button>
         <button id="btnLogout" class="small" style="display:none;">Logout</button>
-        <button id="btnSuperAdmin" class="small" style="background:#ff6b6b;color:#fff;border-color:#ff6b6b;">Super Admin</button>
         <button id="btnExport" class="small">Export JSON</button>
         <button id="btnImport" class="small">Import JSON</button>
         <button id="btnClearAll" class="small danger">Clear All</button>
@@ -1160,20 +1158,6 @@
   <small class="note" style="margin-top:8px;display:block;">The tour will auto-close after 5 minutes if not dismissed.</small>
 </div>
 
-<!-- Super Admin Login Modal -->
-<div id="superAdminModal" class="modal">
-  <h3>Super Admin Access</h3>
-  <p class="notice" style="margin-bottom:12px;">⚠️ Super admin access allows viewing and editing ALL data. Enter the super admin password to continue.</p>
-  <div class="row">
-    <label>Super Admin Password: <input type="password" id="superAdminPassword" placeholder="Enter super admin password" /></label>
-  </div>
-  <p id="superAdminMsg" class="auth-msg"></p>
-  <small class="note" style="color:#b00;">🔒 <strong>Security Note:</strong> This hardcoded password is for development/demo purposes only. In production, this feature should use environment variables or a secure authentication system.</small>
-  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
-    <button id="superAdminCancel">Cancel</button>
-    <button class="primary" id="superAdminSubmit">Login as Super Admin</button>
-  </div>
-</div>
 
   <footer class="muted" style="margin-top:16px;">Taxpro — Accurate Taxes, Real time filing — data stored in localStorage (ntc_full_accounting_v1)</footer>
 
@@ -1275,7 +1259,6 @@
       name: (user.display || user.username) + "'s Business",
       ownerId: userId,
       entity: entityType,
-      entityLocked: true, // Lock entity type after creation
       vatRate: DEFAULTS.vatRate,
       whtRate: DEFAULTS.whtRate,
       citRate: DEFAULTS.citRate,
@@ -1547,11 +1530,6 @@
   const accountsModal = document.getElementById('accountsModal');
   const accountsList = document.getElementById('accountsList');
   const newAccountName = document.getElementById('newAccountName');
-  
-  // Super Admin modal elements
-  const superAdminModal = document.getElementById('superAdminModal');
-  const superAdminPassword = document.getElementById('superAdminPassword');
-  const superAdminMsg = document.getElementById('superAdminMsg');
   const newAccountCategory = document.getElementById('newAccountCategory');
   const newAccountDisallowable = document.getElementById('newAccountDisallowable');
   const newAccountNonTax = document.getElementById('newAccountNonTax');
@@ -2012,180 +1990,21 @@
     enforcePermissions();
   }
 
-  /**
-   * Check if current session has super admin access
-   * @returns {boolean}
-   */
-  function isSuperAdmin(){
-    return state.superAdmin && state.superAdmin.isActive === true;
-  }
-
-  /**
-   * Activate super admin mode with session timeout
-   */
-  function activateSuperAdmin(){
-    state.superAdmin = state.superAdmin || {};
-    state.superAdmin.isActive = true;
-    state.superAdmin.activatedAt = Date.now();
-    
-    // Set session timeout for 30 minutes of inactivity
-    resetSuperAdminTimeout();
-    
-    saveState();
-    addAudit('superadmin.activated', 'auth', null, 'Super admin access activated');
-    updateAuthUI();
-    
-    // Reset timeout on user activity
-    setupSuperAdminActivityListeners();
-  }
-  
-  /**
-   * Reset super admin timeout (called on user activity)
-   */
-  function resetSuperAdminTimeout(){
-    if(!isSuperAdmin()) return;
-    
-    const SUPER_ADMIN_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-    
-    // Clear any existing timeout
-    if(state.superAdmin && state.superAdmin.timeoutId){
-      clearTimeout(state.superAdmin.timeoutId);
-    }
-    
-    // Set new timeout
-    state.superAdmin = state.superAdmin || {};
-    state.superAdmin.timeoutId = setTimeout(()=> {
-      if(isSuperAdmin()){
-        deactivateSuperAdmin();
-        // Show accessible notification instead of alert
-        if(superAdminMsg){
-          superAdminMsg.textContent = 'Super Admin session has expired due to inactivity. Please login again if needed.';
-          superAdminMsg.style.color = '#b00';
-          superAdminMsg.setAttribute('role', 'alert');
-          if(superAdminModal) openModal(superAdminModal);
-        }
-      }
-    }, SUPER_ADMIN_TIMEOUT_MS);
-  }
-  
-  /**
-   * Setup activity listeners to reset super admin timeout
-   */
-  function setupSuperAdminActivityListeners(){
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-    const throttledReset = throttle(resetSuperAdminTimeout, 1000); // Throttle to once per second
-    
-    events.forEach(event => {
-      document.addEventListener(event, throttledReset);
-    });
-  }
-  
-  /**
-   * Simple throttle function
-   */
-  function throttle(func, wait){
-    let timeout;
-    return function executedFunction(...args){
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
-    };
-  }
-
-  /**
-   * Deactivate super admin mode
-   */
-  function deactivateSuperAdmin(){
-    if(state.superAdmin){
-      // Clear timeout if it exists
-      if(state.superAdmin.timeoutId){
-        clearTimeout(state.superAdmin.timeoutId);
-        state.superAdmin.timeoutId = null;
-      }
-      
-      state.superAdmin.isActive = false;
-      state.superAdmin.deactivatedAt = Date.now();
-    }
-    saveState();
-    addAudit('superadmin.deactivated', 'auth', null, 'Super admin access deactivated');
-    updateAuthUI();
-  }
-
-  /**
-   * Validate super admin password
-   * @param {string} password
-   * @returns {boolean}
-   */
-  function validateSuperAdminPassword(password){
-    // SECURITY WARNING: Hardcoded password for development/demo only
-    // 
-    // ⚠️ IMPORTANT: This uses a deliberately weak password to make it obvious
-    // this is not production-ready. For any environment with real data:
-    // 
-    // In production, this should use environment variables or secure vault
-    // Example for production:
-    // const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '';
-    // if (!SUPER_ADMIN_PASSWORD) {
-    //   console.error('SUPER_ADMIN_PASSWORD environment variable not set');
-    //   return false;
-    // }
-    //
-    // Development password (DO NOT use in production):
-    const SUPER_ADMIN_PASSWORD = 'aaaaaa';
-    return password === SUPER_ADMIN_PASSWORD;
-  }
-
   function enforcePermissions(){
-    const user = state.users.find(u => u.id === state.auth.currentUserId);
-    const isAdmin = user && user.isAdmin;
-    const isSuperAdminActive = isSuperAdmin();
+    // All buttons are now always enabled for logged in users
+    btnAddBusiness.disabled = false;
+    btnEditBusiness.disabled = false;
+    btnDeleteBusiness.disabled = false;
+    btnManageAccounts.disabled = false;
+    btnDeleteUser.disabled = false;
+    btnClearAll.disabled = false;
     
-    // Super admin has full access to everything
-    if(isSuperAdminActive){
-      btnAddBusiness.disabled = false;
-      btnEditBusiness.disabled = false;
-      btnDeleteBusiness.disabled = false;
-      btnManageAccounts.disabled = false;
-      btnDeleteUser.disabled = false;
-      btnClearAll.disabled = false;
-      
-      btnAddBusiness.classList.remove('disabled');
-      btnEditBusiness.classList.remove('disabled');
-      btnDeleteBusiness.classList.remove('disabled');
-      btnManageAccounts.classList.remove('disabled');
-      btnDeleteUser.classList.remove('disabled');
-      btnClearAll.classList.remove('disabled');
-      return;
-    }
-    
-    // Disable business management buttons for non-admins
-    btnAddBusiness.disabled = !isAdmin;
-    btnEditBusiness.disabled = !isAdmin;
-    btnDeleteBusiness.disabled = !isAdmin;
-    btnManageAccounts.disabled = !isAdmin;
-    
-    // Always disable sensitive operations for non-super-admins
-    btnDeleteUser.disabled = true;
-    btnClearAll.disabled = true;
-    
-    if(!isAdmin){
-      btnAddBusiness.classList.add('disabled');
-      btnEditBusiness.classList.add('disabled');
-      btnDeleteBusiness.classList.add('disabled');
-      btnManageAccounts.classList.add('disabled');
-    } else {
-      btnAddBusiness.classList.remove('disabled');
-      btnEditBusiness.classList.remove('disabled');
-      btnDeleteBusiness.classList.remove('disabled');
-      btnManageAccounts.classList.remove('disabled');
-    }
-    
-    // Mark sensitive operations as disabled for non-super-admins
-    btnDeleteUser.classList.add('disabled');
-    btnClearAll.classList.add('disabled');
+    btnAddBusiness.classList.remove('disabled');
+    btnEditBusiness.classList.remove('disabled');
+    btnDeleteBusiness.classList.remove('disabled');
+    btnManageAccounts.classList.remove('disabled');
+    btnDeleteUser.classList.remove('disabled');
+    btnClearAll.classList.remove('disabled');
   }
 
   // Helper functions for asset and inventory deletion
@@ -2348,77 +2167,6 @@
     btnLogout.addEventListener('click', handleLogout);
     loginSubmit.addEventListener('click', handleLogin);
     loginCancel.addEventListener('click', ()=> closeModal(loginModal));
-
-    // Super Admin handlers
-    const btnSuperAdmin = document.getElementById('btnSuperAdmin');
-    const superAdminSubmit = document.getElementById('superAdminSubmit');
-    const superAdminCancel = document.getElementById('superAdminCancel');
-    
-    if(btnSuperAdmin){
-      btnSuperAdmin.addEventListener('click', ()=> {
-        if(isSuperAdmin()){
-          // Already logged in as super admin - offer to logout
-          if(confirm('You are currently logged in as Super Admin. Do you want to logout from Super Admin mode?')){
-            deactivateSuperAdmin();
-            alert('Super Admin mode deactivated.');
-          }
-        } else {
-          // Show super admin login modal
-          if(superAdminPassword) superAdminPassword.value = '';
-          if(superAdminMsg) superAdminMsg.textContent = '';
-          openModal(superAdminModal);
-        }
-      });
-    }
-    
-    if(superAdminSubmit){
-      superAdminSubmit.addEventListener('click', ()=> {
-        const password = superAdminPassword ? superAdminPassword.value : '';
-        if(!password){
-          if(superAdminMsg){ 
-            superAdminMsg.textContent = 'Please enter the super admin password.'; 
-            superAdminMsg.style.color = '#b00'; 
-            superAdminMsg.setAttribute('role', 'alert');
-          }
-          return;
-        }
-        
-        if(validateSuperAdminPassword(password)){
-          activateSuperAdmin();
-          if(superAdminMsg){ 
-            superAdminMsg.textContent = 'Super Admin access granted! Closing in a moment...'; 
-            superAdminMsg.style.color = 'green'; 
-            superAdminMsg.setAttribute('role', 'status');
-          }
-          // Close modal after a brief delay to show success message
-          setTimeout(()=> {
-            closeModal(superAdminModal);
-          }, 1200);
-        } else {
-          if(superAdminMsg){ 
-            superAdminMsg.textContent = 'Invalid super admin password.'; 
-            superAdminMsg.style.color = '#b00'; 
-            superAdminMsg.setAttribute('role', 'alert');
-          }
-          addAudit('superadmin.failed_login', 'auth', null, 'Failed super admin login attempt');
-        }
-      });
-    }
-    
-    if(superAdminCancel){
-      superAdminCancel.addEventListener('click', ()=> {
-        closeModal(superAdminModal);
-        if(superAdminPassword) superAdminPassword.value = '';
-        if(superAdminMsg) superAdminMsg.textContent = '';
-      });
-    }
-    
-    // Allow Enter key to submit super admin password
-    if(superAdminPassword){
-      superAdminPassword.addEventListener('keypress', (e)=> {
-        if(e.key === 'Enter' && superAdminSubmit) superAdminSubmit.click();
-      });
-    }
 
     // Pre-login overlay handler - authenticates user from overlay form
     if(preLoginSubmit){
@@ -3106,8 +2854,8 @@
     renderBizContacts(b);
     bizSave.dataset.edit = b.id;
     
-    // Lock entity type if entityLocked is true
-    bizEntity.disabled = !!b.entityLocked;
+    // Entity type is always editable
+    bizEntity.disabled = false;
     
     openModal(businessModal);
   }
@@ -3125,10 +2873,8 @@
       if(!b) return alert('Business not found');
       b.name = name; b.ownerId = bizOwnerSelect.value;
       
-      // Only update entity if not locked
-      if(!b.entityLocked) {
-        b.entity = bizEntity.value;
-      }
+      // Entity type is always editable
+      b.entity = bizEntity.value;
       
       b.vatRate = Number(bizVat.value || DEFAULTS.vatRate); b.whtRate = Number(bizWht.value || DEFAULTS.whtRate); b.citRate = Number(bizCit.value || DEFAULTS.citRate);
       b.turnoverThreshold = turnoverThresholdValue;
@@ -3332,19 +3078,6 @@
     r.readAsText(f);
   }
   function clearAllData(){
-    if(!isSuperAdmin()){
-      // Use accessible notification instead of alert
-      const msg = 'Super Admin access required to clear all data. Please login as Super Admin first.';
-      if(superAdminMsg && superAdminModal){
-        superAdminMsg.textContent = msg;
-        superAdminMsg.style.color = '#b00';
-        superAdminMsg.setAttribute('role', 'alert');
-        openModal(superAdminModal);
-      } else {
-        alert(msg);
-      }
-      return;
-    }
     if(!confirm('Clear all stored data? This action cannot be undone!')) return;
     if(!confirm('Are you absolutely sure? This will delete ALL users, businesses, and transactions!')) return;
     
@@ -3360,7 +3093,7 @@
       renderAll();
       
       // Log after successful completion
-      addAudit('data.clear_all', 'system', null, 'All data cleared by Super Admin');
+      addAudit('data.clear_all', 'system', null, 'All data cleared');
     } catch(error) {
       console.error('Failed to clear data:', error);
       alert('Failed to clear data. Please check console for details.');
@@ -3379,8 +3112,7 @@
       transactions: {},
       attachments: {},
       audit: [],
-      auth: { currentUserId: null },
-      superAdmin: { isActive: false }
+      auth: { currentUserId: null }
     };
   }
 
@@ -6169,22 +5901,11 @@
   }
 
   function deleteUser(id){
-    if(!isSuperAdmin()){
-      // Use accessible notification instead of alert
-      const msg = 'Super Admin access required to delete users. Please login as Super Admin first.';
-      if(superAdminMsg && superAdminModal){
-        superAdminMsg.textContent = msg;
-        superAdminMsg.style.color = '#b00';
-        superAdminMsg.setAttribute('role', 'alert');
-        openModal(superAdminModal);
-      } else {
-        alert(msg);
-      }
-      return;
-    }
+    if(!confirm('Delete this user and all their data? This action cannot be undone!')) return;
+    
     state.users = state.users.filter(x=>x.id!==id);
     delete state.transactions[id];
-    addAudit('user.delete', 'user', id, 'User deleted by Super Admin');
+    addAudit('user.delete', 'user', id, 'User deleted');
     saveState();
     refreshSelectors();
     ensureSelection();
