@@ -4873,11 +4873,14 @@
       if(t.accountCategory === 'Revenue') {
         revenue += Number(t.amount || 0);
         
-        // Add back WHT receivable for net-basis income (dividend, interest, royalty)
+        // Add back WHT receivable for net-basis revenue transactions
         if(t.whtApplied && t.whtBasis === 'net') {
           const rate = Number(t.whtRate || b.whtRate) / 100;
-          const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
-          whtReceivableAddBack += whtAmount;
+          // Protect against division by zero (rate should never be 100% but validate anyway)
+          if(rate < 1) {
+            const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
+            whtReceivableAddBack += whtAmount;
+          }
         }
         
         // Check for non-taxable
@@ -5562,11 +5565,14 @@
         if(t.accountCategory === 'Revenue') {
           revenue += Number(t.amount || 0);
           
-          // Add back WHT receivable for net-basis income (dividend, interest, royalty)
+          // Add back WHT receivable for net-basis revenue transactions
           if(t.whtApplied && t.whtBasis === 'net') {
             const rate = Number(t.whtRate || b.whtRate) / 100;
-            const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
-            whtReceivableAddBack += whtAmount;
+            // Protect against division by zero (rate should never be 100% but validate anyway)
+            if(rate < 1) {
+              const whtAmount = Number(t.amount || 0) * (rate / (1 - rate));
+              whtReceivableAddBack += whtAmount;
+            }
           }
         }
         if(t.accountCategory === 'Expense') {
@@ -5586,11 +5592,6 @@
       const depreciation = computeTotalDepreciation();
       expenseBreakdown['Depreciation'] = depreciation;
       otherExpenses += depreciation;
-      
-      // Add WHT receivable add-back to revenue or as adjustment
-      if(whtReceivableAddBack > 0) {
-        expenseBreakdown['Less: WHT receivable (net-basis income)'] = -whtReceivableAddBack;
-      }
       
       const grossProfit = revenue - costOfSales;
       const profitBeforeTax = grossProfit - otherExpenses + whtReceivableAddBack;
@@ -5644,6 +5645,13 @@
       for(const expName in expenseBreakdown) {
         html += `<tr><td style="padding-left:20px;">${expName}</td><td style="text-align:right;">(${fmt(expenseBreakdown[expName])})</td></tr>`;
       }
+      
+      // Add: WHT receivable adjustment (if applicable)
+      if(whtReceivableAddBack > 0) {
+        html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Adjustments</strong></td></tr>`;
+        html += `<tr><td style="padding-left:20px;">WHT receivable (net-basis income)</td><td style="text-align:right;">${fmt(whtReceivableAddBack)}</td></tr>`;
+      }
+      
       html += `<tr style="background:#f2f6fa;"><td><strong>Profit Before Tax (PBT)</strong></td><td style="text-align:right;"><strong>${fmt(profitBeforeTax)}</strong></td></tr>`;
       html += `<tr><td>Less: Tax</td><td style="text-align:right;">(${fmt(taxAmount)})</td></tr>`;
       html += `<tr style="background:#e6f3ff;"><td><strong>Profit After Tax (PAT)</strong></td><td style="text-align:right;"><strong>${fmt(profitAfterTax)}</strong></td></tr>`;
