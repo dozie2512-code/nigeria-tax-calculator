@@ -401,6 +401,9 @@
     }
   }
   </script>
+  
+  <!-- jsPDF library for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <!-- Pre-login overlay - blocks access until user signs in -->
@@ -629,6 +632,8 @@
 
       <div class="tabbar">
         <button class="tab active" id="btnLedgerTab">Ledger</button>
+        <button class="tab" id="btnInvoicingTab">Invoicing</button>
+        <button class="tab" id="btnCashbookTab">Cashbook</button>
         <button class="tab" id="btnReportsTab">Reports</button>
       </div>
 
@@ -868,6 +873,103 @@
 
       <div id="plSnapshot" class="totals"></div>
       <div id="taxSummary" class="tax-summary"></div>
+    </section>
+
+    <!-- Invoicing Section -->
+    <section id="invoicingSection" class="panel section" style="display:none;">
+      <h2 style="margin:0 0 8px 0;">Invoicing</h2>
+      
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="primary small" id="btnCreateInvoice">Create Invoice</button>
+        <div class="spacer"></div>
+        <label style="display:flex; gap:8px; align-items:center;">
+          Filter:
+          <select id="invoiceStatusFilter">
+            <option value="all">All</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="paid">Paid</option>
+            <option value="overdue">Overdue</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="table-scroll">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>Invoice #</th>
+              <th>Date</th>
+              <th>Customer</th>
+              <th>Amount</th>
+              <th>VAT</th>
+              <th>Total</th>
+              <th>Status</th>
+              <th>Due Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="invoiceTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Cashbook Section -->
+    <section id="cashbookSection" class="panel section" style="display:none;">
+      <h2 style="margin:0 0 8px 0;">Cashbook</h2>
+      
+      <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+        <button class="primary small" id="btnAddCashEntry">Add Entry</button>
+        <div class="spacer"></div>
+        <label style="display:flex; gap:8px; align-items:center;">
+          From:
+          <input type="date" id="cashbookFromDate" />
+        </label>
+        <label style="display:flex; gap:8px; align-items:center;">
+          To:
+          <input type="date" id="cashbookToDate" />
+        </label>
+        <button class="small" id="btnFilterCashbook">Filter</button>
+        <button class="small" id="btnClearCashFilter">Clear</button>
+      </div>
+
+      <div class="totals" style="margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+          <div>
+            <div class="small-muted">Opening Balance</div>
+            <div style="font-size:1.1rem; font-weight:600;" id="cashOpeningBalance">₦0.00</div>
+          </div>
+          <div>
+            <div class="small-muted">Total Inflows</div>
+            <div style="font-size:1.1rem; font-weight:600; color:#059669;" id="cashTotalInflows">₦0.00</div>
+          </div>
+          <div>
+            <div class="small-muted">Total Outflows</div>
+            <div style="font-size:1.1rem; font-weight:600; color:#dc2626;" id="cashTotalOutflows">₦0.00</div>
+          </div>
+          <div>
+            <div class="small-muted">Current Balance</div>
+            <div style="font-size:1.1rem; font-weight:600;" id="cashCurrentBalance">₦0.00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Inflow</th>
+              <th>Outflow</th>
+              <th>Balance</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="cashbookTableBody"></tbody>
+        </table>
+      </div>
     </section>
 
     <section id="reportsSection" class="panel section" style="display:none;">
@@ -1154,6 +1256,119 @@
   <small class="note" style="margin-top:8px;display:block;">The tour will auto-close after 5 minutes if not dismissed.</small>
 </div>
 
+<!-- Invoice Modal -->
+<div id="invoiceModal" class="modal">
+  <h3 id="invoiceModalTitle">Create Invoice</h3>
+  <div class="row">
+    <label>Invoice #: <input type="text" id="invoiceNumber" placeholder="Auto-generated" readonly /></label>
+    <label>Date: <input type="date" id="invoiceDate" /></label>
+    <label>Due Date: <input type="date" id="invoiceDueDate" /></label>
+  </div>
+  <div class="row">
+    <label>Customer Name: <input type="text" id="invoiceCustomerName" /></label>
+    <label>Customer Email: <input type="text" id="invoiceCustomerEmail" /></label>
+    <label>Customer Phone: <input type="text" id="invoiceCustomerPhone" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Customer Address: <textarea id="invoiceCustomerAddress" rows="2" style="width:100%;"></textarea></label>
+  </div>
+  
+  <h4 style="margin:12px 0 8px 0;">Items</h4>
+  <div id="invoiceItems" style="margin-bottom:12px;">
+    <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+      <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
+      <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
+      <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
+      <button type="button" class="small danger" onclick="this.parentElement.remove(); updateInvoiceTotal();">×</button>
+    </div>
+  </div>
+  <button type="button" class="small" id="btnAddInvoiceItem">+ Add Item</button>
+  
+  <div class="row" style="margin-top:12px;">
+    <label>VAT Applicable:
+      <select id="invoiceVatType">
+        <option value="none">None</option>
+        <option value="exclusive">VAT (exclusive)</option>
+        <option value="inclusive">VAT (inclusive)</option>
+      </select>
+    </label>
+    <label>Payment Terms: 
+      <select id="invoicePaymentTerms">
+        <option value="immediate">Immediate</option>
+        <option value="net7">Net 7 days</option>
+        <option value="net15">Net 15 days</option>
+        <option value="net30">Net 30 days</option>
+        <option value="net60">Net 60 days</option>
+      </select>
+    </label>
+  </div>
+  
+  <div style="margin-top:12px; padding:12px; background:#f8f9fb; border-radius:6px;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+      <span>Subtotal:</span>
+      <span id="invoiceSubtotal">₦0.00</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+      <span>VAT:</span>
+      <span id="invoiceVatAmount">₦0.00</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem;">
+      <span>Total:</span>
+      <span id="invoiceTotal">₦0.00</span>
+    </div>
+  </div>
+  
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="invoiceCancel">Cancel</button>
+    <button class="primary" id="invoiceSave">Save Invoice</button>
+  </div>
+</div>
+
+<!-- Cashbook Entry Modal -->
+<div id="cashbookModal" class="modal">
+  <h3 id="cashbookModalTitle">Add Cashbook Entry</h3>
+  <div class="row">
+    <label>Date: <input type="date" id="cashbookDate" /></label>
+    <label>Type:
+      <select id="cashbookType">
+        <option value="inflow">Inflow (Cash In)</option>
+        <option value="outflow">Outflow (Cash Out)</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>Category:
+      <select id="cashbookCategory">
+        <option value="">-- Select --</option>
+        <optgroup label="Revenue (Inflows)">
+          <option value="Sales">Sales</option>
+          <option value="Services">Services</option>
+          <option value="Investment Income">Investment Income</option>
+          <option value="Other Income">Other Income</option>
+        </optgroup>
+        <optgroup label="Expenses (Outflows)">
+          <option value="Purchases">Purchases</option>
+          <option value="Salaries">Salaries</option>
+          <option value="Rent">Rent</option>
+          <option value="Utilities">Utilities</option>
+          <option value="Office Supplies">Office Supplies</option>
+          <option value="Marketing">Marketing</option>
+          <option value="Transportation">Transportation</option>
+          <option value="Other Expenses">Other Expenses</option>
+        </optgroup>
+      </select>
+    </label>
+    <label>Amount (₦): <input type="number" id="cashbookAmount" min="0" step="0.01" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Description: <textarea id="cashbookDescription" rows="2" style="width:100%;"></textarea></label>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="cashbookCancel">Cancel</button>
+    <button class="primary" id="cashbookSave">Save Entry</button>
+  </div>
+</div>
+
 
   <footer class="muted" style="margin-top:16px;">Taxpro — Accurate Taxes, Real time filing — data stored in localStorage (ntc_full_accounting_v1)</footer>
 
@@ -1230,6 +1445,7 @@
   // App state
   let state = {
     users: [], businesses: [], transactions: {}, attachments: {}, audit: [], auth: { currentUserId: null },
+    invoices: {}, cashbook: {}
   };
   let selectedUserId = null;
   let selectedBizId = null;
@@ -1556,7 +1772,55 @@
   const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
   const btnLedgerTab = document.getElementById('btnLedgerTab');
+  const btnInvoicingTab = document.getElementById('btnInvoicingTab');
+  const btnCashbookTab = document.getElementById('btnCashbookTab');
   const btnReportsTab = document.getElementById('btnReportsTab');
+  
+  // Invoicing DOM refs
+  const invoicingSection = document.getElementById('invoicingSection');
+  const btnCreateInvoice = document.getElementById('btnCreateInvoice');
+  const invoiceStatusFilter = document.getElementById('invoiceStatusFilter');
+  const invoiceTableBody = document.getElementById('invoiceTableBody');
+  const invoiceModal = document.getElementById('invoiceModal');
+  const invoiceModalTitle = document.getElementById('invoiceModalTitle');
+  const invoiceNumber = document.getElementById('invoiceNumber');
+  const invoiceDate = document.getElementById('invoiceDate');
+  const invoiceDueDate = document.getElementById('invoiceDueDate');
+  const invoiceCustomerName = document.getElementById('invoiceCustomerName');
+  const invoiceCustomerEmail = document.getElementById('invoiceCustomerEmail');
+  const invoiceCustomerPhone = document.getElementById('invoiceCustomerPhone');
+  const invoiceCustomerAddress = document.getElementById('invoiceCustomerAddress');
+  const invoiceItems = document.getElementById('invoiceItems');
+  const btnAddInvoiceItem = document.getElementById('btnAddInvoiceItem');
+  const invoiceVatType = document.getElementById('invoiceVatType');
+  const invoicePaymentTerms = document.getElementById('invoicePaymentTerms');
+  const invoiceSubtotal = document.getElementById('invoiceSubtotal');
+  const invoiceVatAmount = document.getElementById('invoiceVatAmount');
+  const invoiceTotal = document.getElementById('invoiceTotal');
+  const invoiceSave = document.getElementById('invoiceSave');
+  const invoiceCancel = document.getElementById('invoiceCancel');
+  
+  // Cashbook DOM refs
+  const cashbookSection = document.getElementById('cashbookSection');
+  const btnAddCashEntry = document.getElementById('btnAddCashEntry');
+  const cashbookFromDate = document.getElementById('cashbookFromDate');
+  const cashbookToDate = document.getElementById('cashbookToDate');
+  const btnFilterCashbook = document.getElementById('btnFilterCashbook');
+  const btnClearCashFilter = document.getElementById('btnClearCashFilter');
+  const cashOpeningBalance = document.getElementById('cashOpeningBalance');
+  const cashTotalInflows = document.getElementById('cashTotalInflows');
+  const cashTotalOutflows = document.getElementById('cashTotalOutflows');
+  const cashCurrentBalance = document.getElementById('cashCurrentBalance');
+  const cashbookTableBody = document.getElementById('cashbookTableBody');
+  const cashbookModal = document.getElementById('cashbookModal');
+  const cashbookModalTitle = document.getElementById('cashbookModalTitle');
+  const cashbookDate = document.getElementById('cashbookDate');
+  const cashbookType = document.getElementById('cashbookType');
+  const cashbookCategory = document.getElementById('cashbookCategory');
+  const cashbookAmount = document.getElementById('cashbookAmount');
+  const cashbookDescription = document.getElementById('cashbookDescription');
+  const cashbookSave = document.getElementById('cashbookSave');
+  const cashbookCancel = document.getElementById('cashbookCancel');
 
   // New DOM refs for added features
   const btnLogin = document.getElementById('btnLogin');
@@ -1624,6 +1888,8 @@
     state.audit = state.audit || [];
     state.auth = state.auth || { currentUserId: null };
     state.superAdmin = state.superAdmin || { isActive: false };
+    state.invoices = state.invoices || {};
+    state.cashbook = state.cashbook || {};
     
     state.businesses.forEach(b => {
       // MIGRATION: Rename SoleProprietor to Business, and Enterprise to Business
@@ -2733,7 +2999,52 @@
     }
 
     btnLedgerTab.addEventListener('click', ()=> { activeTab='ledger'; renderTab(); });
+    btnInvoicingTab.addEventListener('click', ()=> { activeTab='invoicing'; renderTab(); });
+    btnCashbookTab.addEventListener('click', ()=> { activeTab='cashbook'; renderTab(); });
     btnReportsTab.addEventListener('click', ()=> { activeTab='reports'; renderTab(); });
+    
+    // Invoicing event listeners
+    btnCreateInvoice.addEventListener('click', openCreateInvoice);
+    invoiceStatusFilter.addEventListener('change', renderInvoices);
+    btnAddInvoiceItem.addEventListener('click', () => {
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'invoice-item';
+      itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
+      itemDiv.innerHTML = `
+        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
+        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
+        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
+        <button type="button" class="small danger" onclick="this.parentElement.remove(); updateInvoiceTotal();">×</button>
+      `;
+      invoiceItems.appendChild(itemDiv);
+    });
+    invoiceVatType.addEventListener('change', updateInvoiceTotal);
+    invoicePaymentTerms.addEventListener('change', () => {
+      const terms = invoicePaymentTerms.value;
+      let days = 30;
+      if(terms === 'immediate') days = 0;
+      else if(terms === 'net7') days = 7;
+      else if(terms === 'net15') days = 15;
+      else if(terms === 'net30') days = 30;
+      else if(terms === 'net60') days = 60;
+      
+      const date = new Date(invoiceDate.value || Date.now());
+      date.setDate(date.getDate() + days);
+      invoiceDueDate.value = date.toISOString().slice(0,10);
+    });
+    invoiceSave.addEventListener('click', saveInvoice);
+    invoiceCancel.addEventListener('click', closeInvoiceModal);
+    
+    // Cashbook event listeners
+    btnAddCashEntry.addEventListener('click', openCreateCashEntry);
+    btnFilterCashbook.addEventListener('click', renderCashbook);
+    btnClearCashFilter.addEventListener('click', () => {
+      cashbookFromDate.value = '';
+      cashbookToDate.value = '';
+      renderCashbook();
+    });
+    cashbookSave.addEventListener('click', saveCashEntry);
+    cashbookCancel.addEventListener('click', closeCashbookModal);
 
     document.querySelectorAll('#reportsSection .tab').forEach(tb => {
       tb.addEventListener('click', (e) => {
@@ -5388,22 +5699,865 @@
     return html;
   }
 
+  // ============== INVOICING FUNCTIONALITY ==============
+  let editingInvoice = null;
+
+  function renderInvoices(){
+    if(!selectedUserId || !selectedBizId) {
+      invoiceTableBody.innerHTML = '<tr><td colspan="9">Please select a business</td></tr>';
+      return;
+    }
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const invoices = state.invoices[key] || [];
+    const filterStatus = invoiceStatusFilter.value;
+    
+    invoiceTableBody.innerHTML = '';
+    
+    const filtered = invoices.filter(inv => {
+      if(filterStatus === 'all') return true;
+      return inv.status === filterStatus;
+    });
+    
+    if(filtered.length === 0){
+      invoiceTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No invoices found</td></tr>';
+      return;
+    }
+    
+    for(const inv of filtered){
+      const tr = document.createElement('tr');
+      
+      const tdNum = document.createElement('td');
+      tdNum.textContent = inv.invoiceNumber;
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = inv.date;
+      
+      const tdCustomer = document.createElement('td');
+      tdCustomer.textContent = inv.customerName;
+      
+      const tdAmount = document.createElement('td');
+      tdAmount.textContent = fmt(inv.subtotal);
+      
+      const tdVat = document.createElement('td');
+      tdVat.textContent = fmt(inv.vatAmount);
+      
+      const tdTotal = document.createElement('td');
+      tdTotal.textContent = fmt(inv.total);
+      
+      const tdStatus = document.createElement('td');
+      const statusSpan = document.createElement('span');
+      statusSpan.textContent = inv.status.charAt(0).toUpperCase() + inv.status.slice(1);
+      statusSpan.style.padding = '4px 8px';
+      statusSpan.style.borderRadius = '4px';
+      statusSpan.style.fontSize = '0.85rem';
+      if(inv.status === 'paid'){
+        statusSpan.style.background = '#e6f4ea';
+        statusSpan.style.color = '#1e7e34';
+      } else if(inv.status === 'overdue'){
+        statusSpan.style.background = '#fee';
+        statusSpan.style.color = '#c00';
+      } else {
+        statusSpan.style.background = '#fff3cd';
+        statusSpan.style.color = '#856404';
+      }
+      tdStatus.appendChild(statusSpan);
+      
+      const tdDue = document.createElement('td');
+      tdDue.textContent = inv.dueDate;
+      
+      const tdActions = document.createElement('td');
+      const actionsDiv = document.createElement('div');
+      actionsDiv.style.display = 'flex';
+      actionsDiv.style.gap = '4px';
+      
+      const viewBtn = document.createElement('button');
+      viewBtn.textContent = 'View';
+      viewBtn.className = 'small';
+      viewBtn.addEventListener('click', () => viewInvoice(inv));
+      
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.className = 'small';
+      editBtn.addEventListener('click', () => openEditInvoice(inv));
+      
+      const paidBtn = document.createElement('button');
+      paidBtn.textContent = inv.status === 'paid' ? 'Unpaid' : 'Paid';
+      paidBtn.className = 'small primary';
+      paidBtn.addEventListener('click', () => toggleInvoiceStatus(inv));
+      
+      const pdfBtn = document.createElement('button');
+      pdfBtn.textContent = 'PDF';
+      pdfBtn.className = 'small';
+      pdfBtn.addEventListener('click', () => exportInvoicePDF(inv));
+      
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.className = 'small danger';
+      delBtn.addEventListener('click', () => deleteInvoice(inv.id));
+      
+      actionsDiv.appendChild(viewBtn);
+      actionsDiv.appendChild(editBtn);
+      actionsDiv.appendChild(paidBtn);
+      actionsDiv.appendChild(pdfBtn);
+      actionsDiv.appendChild(delBtn);
+      tdActions.appendChild(actionsDiv);
+      
+      tr.appendChild(tdNum);
+      tr.appendChild(tdDate);
+      tr.appendChild(tdCustomer);
+      tr.appendChild(tdAmount);
+      tr.appendChild(tdVat);
+      tr.appendChild(tdTotal);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdDue);
+      tr.appendChild(tdActions);
+      
+      invoiceTableBody.appendChild(tr);
+    }
+  }
+
+  function generateInvoiceNumber(){
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const invoices = state.invoices[key] || [];
+    const num = invoices.length + 1;
+    return `INV-${Date.now().toString(36).toUpperCase()}-${num.toString().padStart(4, '0')}`;
+  }
+
+  function openCreateInvoice(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    editingInvoice = null;
+    invoiceModalTitle.textContent = 'Create Invoice';
+    invoiceNumber.value = generateInvoiceNumber();
+    invoiceDate.value = today();
+    
+    // Calculate due date based on payment terms (default Net 30)
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 30);
+    invoiceDueDate.value = dueDate.toISOString().slice(0,10);
+    
+    invoiceCustomerName.value = '';
+    invoiceCustomerEmail.value = '';
+    invoiceCustomerPhone.value = '';
+    invoiceCustomerAddress.value = '';
+    invoiceVatType.value = 'none';
+    invoicePaymentTerms.value = 'net30';
+    
+    // Reset items
+    invoiceItems.innerHTML = `
+      <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
+        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
+        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
+        <button type="button" class="small danger" onclick="this.parentElement.remove(); updateInvoiceTotal();">×</button>
+      </div>
+    `;
+    
+    updateInvoiceTotal();
+    modalOverlay.style.display = 'block';
+    invoiceModal.style.display = 'block';
+  }
+
+  function openEditInvoice(inv){
+    editingInvoice = inv;
+    invoiceModalTitle.textContent = 'Edit Invoice';
+    invoiceNumber.value = inv.invoiceNumber;
+    invoiceDate.value = inv.date;
+    invoiceDueDate.value = inv.dueDate;
+    invoiceCustomerName.value = inv.customerName;
+    invoiceCustomerEmail.value = inv.customerEmail || '';
+    invoiceCustomerPhone.value = inv.customerPhone || '';
+    invoiceCustomerAddress.value = inv.customerAddress || '';
+    invoiceVatType.value = inv.vatType;
+    invoicePaymentTerms.value = inv.paymentTerms;
+    
+    // Populate items
+    invoiceItems.innerHTML = '';
+    for(const item of inv.items){
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'invoice-item';
+      itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
+      itemDiv.innerHTML = `
+        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" value="${item.description}" />
+        <input type="number" placeholder="Qty" min="1" step="1" value="${item.qty}" class="invoice-item-qty" style="width:70px;" />
+        <input type="number" placeholder="Unit price" min="0" step="0.01" value="${item.price}" class="invoice-item-price" style="width:120px;" />
+        <button type="button" class="small danger" onclick="this.parentElement.remove(); updateInvoiceTotal();">×</button>
+      `;
+      invoiceItems.appendChild(itemDiv);
+    }
+    
+    updateInvoiceTotal();
+    modalOverlay.style.display = 'block';
+    invoiceModal.style.display = 'block';
+  }
+
+  function updateInvoiceTotal(){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    let subtotal = 0;
+    const items = invoiceItems.querySelectorAll('.invoice-item');
+    items.forEach(item => {
+      const qty = Number(item.querySelector('.invoice-item-qty').value) || 0;
+      const price = Number(item.querySelector('.invoice-item-price').value) || 0;
+      subtotal += qty * price;
+    });
+    
+    let vatAmount = 0;
+    const vatType = invoiceVatType.value;
+    if(vatType !== 'none'){
+      vatAmount = computeVAT(subtotal, vatType, b.vatRate);
+    }
+    
+    const total = subtotal + vatAmount;
+    
+    invoiceSubtotal.textContent = fmt(subtotal);
+    invoiceVatAmount.textContent = fmt(vatAmount);
+    invoiceTotal.textContent = fmt(total);
+  }
+
+  function saveInvoice(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business');
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return alert('Business not found');
+    
+    // Validate
+    if(!invoiceDate.value) return alert('Please enter invoice date');
+    if(!invoiceDueDate.value) return alert('Please enter due date');
+    if(!invoiceCustomerName.value.trim()) return alert('Please enter customer name');
+    
+    // Collect items
+    const items = [];
+    const itemDivs = invoiceItems.querySelectorAll('.invoice-item');
+    if(itemDivs.length === 0) return alert('Please add at least one item');
+    
+    for(const itemDiv of itemDivs){
+      const desc = itemDiv.querySelector('.invoice-item-desc').value.trim();
+      const qty = Number(itemDiv.querySelector('.invoice-item-qty').value) || 0;
+      const price = Number(itemDiv.querySelector('.invoice-item-price').value) || 0;
+      
+      if(!desc) return alert('Please enter item description');
+      if(qty <= 0) return alert('Quantity must be greater than 0');
+      if(price < 0) return alert('Price cannot be negative');
+      
+      items.push({ description: desc, qty, price });
+    }
+    
+    // Calculate totals
+    let subtotal = 0;
+    items.forEach(item => {
+      subtotal += item.qty * item.price;
+    });
+    
+    let vatAmount = 0;
+    const vatType = invoiceVatType.value;
+    if(vatType !== 'none'){
+      vatAmount = computeVAT(subtotal, vatType, b.vatRate);
+    }
+    
+    const total = subtotal + vatAmount;
+    
+    // Determine status
+    let status = 'unpaid';
+    const dueDate = new Date(invoiceDueDate.value);
+    const now = new Date();
+    if(dueDate < now){
+      status = 'overdue';
+    }
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.invoices[key]) state.invoices[key] = [];
+    
+    if(editingInvoice){
+      // Update existing invoice
+      const idx = state.invoices[key].findIndex(inv => inv.id === editingInvoice.id);
+      if(idx !== -1){
+        state.invoices[key][idx] = {
+          ...state.invoices[key][idx],
+          date: invoiceDate.value,
+          dueDate: invoiceDueDate.value,
+          customerName: invoiceCustomerName.value.trim(),
+          customerEmail: invoiceCustomerEmail.value.trim(),
+          customerPhone: invoiceCustomerPhone.value.trim(),
+          customerAddress: invoiceCustomerAddress.value.trim(),
+          items,
+          vatType,
+          paymentTerms: invoicePaymentTerms.value,
+          subtotal,
+          vatAmount,
+          total,
+          status: editingInvoice.status === 'paid' ? 'paid' : status
+        };
+        addAudit('invoice.edit', 'invoice', editingInvoice.id, 'Invoice updated');
+      }
+    } else {
+      // Create new invoice
+      const invoice = {
+        id: uid('inv'),
+        invoiceNumber: invoiceNumber.value,
+        date: invoiceDate.value,
+        dueDate: invoiceDueDate.value,
+        customerName: invoiceCustomerName.value.trim(),
+        customerEmail: invoiceCustomerEmail.value.trim(),
+        customerPhone: invoiceCustomerPhone.value.trim(),
+        customerAddress: invoiceCustomerAddress.value.trim(),
+        items,
+        vatType,
+        paymentTerms: invoicePaymentTerms.value,
+        subtotal,
+        vatAmount,
+        total,
+        status
+      };
+      
+      state.invoices[key].push(invoice);
+      addAudit('invoice.create', 'invoice', invoice.id, 'Invoice created: ' + invoice.invoiceNumber);
+    }
+    
+    saveState();
+    closeInvoiceModal();
+    renderInvoices();
+  }
+
+  function closeInvoiceModal(){
+    modalOverlay.style.display = 'none';
+    invoiceModal.style.display = 'none';
+    editingInvoice = null;
+  }
+
+  function viewInvoice(inv){
+    const html = `
+      <div style="max-width:800px; margin:auto; padding:20px; background:#fff; border:1px solid #ddd;">
+        <h2 style="text-align:center; margin-bottom:20px;">INVOICE</h2>
+        
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+          <div>
+            <strong>Invoice #:</strong> ${inv.invoiceNumber}<br/>
+            <strong>Date:</strong> ${inv.date}<br/>
+            <strong>Due Date:</strong> ${inv.dueDate}<br/>
+            <strong>Status:</strong> ${inv.status.toUpperCase()}
+          </div>
+          <div>
+            <strong>Bill To:</strong><br/>
+            ${inv.customerName}<br/>
+            ${inv.customerEmail ? inv.customerEmail + '<br/>' : ''}
+            ${inv.customerPhone ? inv.customerPhone + '<br/>' : ''}
+            ${inv.customerAddress ? inv.customerAddress : ''}
+          </div>
+        </div>
+        
+        <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+          <thead>
+            <tr style="background:#f2f6fa;">
+              <th style="border:1px solid #ddd; padding:8px; text-align:left;">Item</th>
+              <th style="border:1px solid #ddd; padding:8px; text-align:right;">Qty</th>
+              <th style="border:1px solid #ddd; padding:8px; text-align:right;">Unit Price</th>
+              <th style="border:1px solid #ddd; padding:8px; text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${inv.items.map(item => `
+              <tr>
+                <td style="border:1px solid #ddd; padding:8px;">${item.description}</td>
+                <td style="border:1px solid #ddd; padding:8px; text-align:right;">${item.qty}</td>
+                <td style="border:1px solid #ddd; padding:8px; text-align:right;">${fmt(item.price)}</td>
+                <td style="border:1px solid #ddd; padding:8px; text-align:right;">${fmt(item.qty * item.price)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        <div style="text-align:right; margin-bottom:20px;">
+          <div style="margin-bottom:4px;"><strong>Subtotal:</strong> ${fmt(inv.subtotal)}</div>
+          <div style="margin-bottom:4px;"><strong>VAT:</strong> ${fmt(inv.vatAmount)}</div>
+          <div style="font-size:1.2rem; font-weight:700;"><strong>Total:</strong> ${fmt(inv.total)}</div>
+        </div>
+        
+        <div style="text-align:center; margin-top:30px; color:#666; font-size:0.9rem;">
+          Payment Terms: ${inv.paymentTerms.replace('net', 'Net ')}
+        </div>
+      </div>
+    `;
+    
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Invoice ${inv.invoiceNumber}</title>
+        <style>body { font-family: system-ui, sans-serif; padding:20px; }</style>
+      </head>
+      <body>${html}</body>
+      </html>
+    `);
+  }
+
+  function toggleInvoiceStatus(inv){
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const idx = state.invoices[key].findIndex(i => i.id === inv.id);
+    if(idx === -1) return;
+    
+    if(inv.status === 'paid'){
+      // Determine if it's overdue or unpaid
+      const dueDate = new Date(inv.dueDate);
+      const now = new Date();
+      state.invoices[key][idx].status = dueDate < now ? 'overdue' : 'unpaid';
+    } else {
+      state.invoices[key][idx].status = 'paid';
+      
+      // Create a revenue transaction when marked as paid
+      createInvoiceTransaction(inv);
+    }
+    
+    addAudit('invoice.status', 'invoice', inv.id, `Status changed to ${state.invoices[key][idx].status}`);
+    saveState();
+    renderInvoices();
+  }
+
+  function createInvoiceTransaction(inv){
+    // Create a Revenue transaction when invoice is marked as paid
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Find or create Sales Revenue account
+    let salesAccount = b.accounts.find(a => a.name === 'Sales Revenue');
+    if(!salesAccount){
+      salesAccount = { name: 'Sales Revenue', category: 'Revenue' };
+      b.accounts.push(salesAccount);
+    }
+    
+    const txn = {
+      id: uid('txn'),
+      date: inv.date,
+      action: 'Revenue',
+      accountName: 'Sales Revenue',
+      accountCategory: 'Revenue',
+      description: `Invoice ${inv.invoiceNumber} - ${inv.customerName}`,
+      amount: inv.subtotal,
+      vatType: inv.vatType,
+      whtApplied: false,
+      paye: false,
+      contact: inv.customerName,
+      adjustmentType: '',
+      adjustmentAmount: 0
+    };
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.transactions[selectedUserId]) state.transactions[selectedUserId] = {};
+    if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
+    
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    addAudit('txn.add', 'txn', txn.id, `Transaction created from invoice ${inv.invoiceNumber}`);
+  }
+
+  function deleteInvoice(id){
+    if(!confirm('Delete this invoice?')) return;
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const idx = state.invoices[key].findIndex(inv => inv.id === id);
+    if(idx !== -1){
+      state.invoices[key].splice(idx, 1);
+      addAudit('invoice.delete', 'invoice', id, 'Invoice deleted');
+      saveState();
+      renderInvoices();
+    }
+  }
+
+  function exportInvoicePDF(inv){
+    // Check if jsPDF is loaded
+    if(typeof jspdf === 'undefined' || !jspdf.jsPDF){
+      alert('jsPDF library not loaded. PDF export is not available.');
+      return;
+    }
+    
+    const { jsPDF } = jspdf;
+    const doc = new jsPDF();
+    
+    // Title
+    doc.setFontSize(20);
+    doc.text('INVOICE', 105, 20, { align: 'center' });
+    
+    // Invoice details
+    doc.setFontSize(10);
+    doc.text(`Invoice #: ${inv.invoiceNumber}`, 20, 40);
+    doc.text(`Date: ${inv.date}`, 20, 46);
+    doc.text(`Due Date: ${inv.dueDate}`, 20, 52);
+    doc.text(`Status: ${inv.status.toUpperCase()}`, 20, 58);
+    
+    // Customer details
+    doc.text('Bill To:', 120, 40);
+    doc.text(inv.customerName, 120, 46);
+    if(inv.customerEmail) doc.text(inv.customerEmail, 120, 52);
+    if(inv.customerPhone) doc.text(inv.customerPhone, 120, 58);
+    
+    // Items table
+    let y = 75;
+    doc.setFontSize(10);
+    doc.text('Item', 20, y);
+    doc.text('Qty', 110, y, { align: 'right' });
+    doc.text('Unit Price', 140, y, { align: 'right' });
+    doc.text('Total', 180, y, { align: 'right' });
+    
+    y += 6;
+    doc.line(20, y, 190, y);
+    y += 6;
+    
+    doc.setFontSize(9);
+    for(const item of inv.items){
+      doc.text(item.description.substring(0, 40), 20, y);
+      doc.text(item.qty.toString(), 110, y, { align: 'right' });
+      doc.text(rawFmt(item.price), 140, y, { align: 'right' });
+      doc.text(rawFmt(item.qty * item.price), 180, y, { align: 'right' });
+      y += 6;
+    }
+    
+    y += 6;
+    doc.line(20, y, 190, y);
+    
+    // Totals
+    y += 8;
+    doc.setFontSize(10);
+    doc.text('Subtotal:', 140, y);
+    doc.text(rawFmt(inv.subtotal), 180, y, { align: 'right' });
+    
+    y += 6;
+    doc.text('VAT:', 140, y);
+    doc.text(rawFmt(inv.vatAmount), 180, y, { align: 'right' });
+    
+    y += 8;
+    doc.setFontSize(12);
+    doc.text('Total:', 140, y);
+    doc.text(rawFmt(inv.total), 180, y, { align: 'right' });
+    
+    // Payment terms
+    y += 12;
+    doc.setFontSize(9);
+    doc.text(`Payment Terms: ${inv.paymentTerms.replace('net', 'Net ')}`, 105, y, { align: 'center' });
+    
+    // Save
+    doc.save(`invoice_${inv.invoiceNumber}.pdf`);
+  }
+
+  // ============== CASHBOOK FUNCTIONALITY ==============
+  let editingCashEntry = null;
+
+  function renderCashbook(){
+    if(!selectedUserId || !selectedBizId) {
+      cashbookTableBody.innerHTML = '<tr><td colspan="8">Please select a business</td></tr>';
+      return;
+    }
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const entries = state.cashbook[key] || [];
+    
+    // Apply date filter
+    const fromDate = cashbookFromDate.value;
+    const toDate = cashbookToDate.value;
+    
+    let filtered = [...entries];
+    if(fromDate){
+      filtered = filtered.filter(e => e.date >= fromDate);
+    }
+    if(toDate){
+      filtered = filtered.filter(e => e.date <= toDate);
+    }
+    
+    // Sort by date
+    filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Calculate balances
+    let balance = 0;
+    let totalInflows = 0;
+    let totalOutflows = 0;
+    
+    cashbookTableBody.innerHTML = '';
+    
+    if(filtered.length === 0){
+      cashbookTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No entries found</td></tr>';
+      cashOpeningBalance.textContent = fmt(0);
+      cashTotalInflows.textContent = fmt(0);
+      cashTotalOutflows.textContent = fmt(0);
+      cashCurrentBalance.textContent = fmt(0);
+      return;
+    }
+    
+    // Get all entries for opening balance calculation
+    const allEntries = [...entries].sort((a, b) => new Date(a.date) - new Date(b.date));
+    let openingBalance = 0;
+    
+    // Calculate opening balance (entries before fromDate)
+    if(fromDate){
+      for(const e of allEntries){
+        if(e.date < fromDate){
+          if(e.type === 'inflow'){
+            openingBalance += Number(e.amount);
+          } else {
+            openingBalance -= Number(e.amount);
+          }
+        }
+      }
+    }
+    
+    balance = openingBalance;
+    
+    for(const entry of filtered){
+      const tr = document.createElement('tr');
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = entry.date;
+      
+      const tdType = document.createElement('td');
+      const typeSpan = document.createElement('span');
+      typeSpan.textContent = entry.type === 'inflow' ? 'Inflow' : 'Outflow';
+      typeSpan.style.padding = '4px 8px';
+      typeSpan.style.borderRadius = '4px';
+      typeSpan.style.fontSize = '0.85rem';
+      if(entry.type === 'inflow'){
+        typeSpan.style.background = '#e6f4ea';
+        typeSpan.style.color = '#1e7e34';
+      } else {
+        typeSpan.style.background = '#fee';
+        typeSpan.style.color = '#c00';
+      }
+      tdType.appendChild(typeSpan);
+      
+      const tdCategory = document.createElement('td');
+      tdCategory.textContent = entry.category;
+      
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = entry.description;
+      
+      const tdInflow = document.createElement('td');
+      tdInflow.style.color = '#059669';
+      if(entry.type === 'inflow'){
+        tdInflow.textContent = fmt(entry.amount);
+        totalInflows += Number(entry.amount);
+        balance += Number(entry.amount);
+      } else {
+        tdInflow.textContent = '';
+      }
+      
+      const tdOutflow = document.createElement('td');
+      tdOutflow.style.color = '#dc2626';
+      if(entry.type === 'outflow'){
+        tdOutflow.textContent = fmt(entry.amount);
+        totalOutflows += Number(entry.amount);
+        balance -= Number(entry.amount);
+      } else {
+        tdOutflow.textContent = '';
+      }
+      
+      const tdBalance = document.createElement('td');
+      tdBalance.textContent = fmt(balance);
+      tdBalance.style.fontWeight = '600';
+      
+      const tdActions = document.createElement('td');
+      const actionsDiv = document.createElement('div');
+      actionsDiv.style.display = 'flex';
+      actionsDiv.style.gap = '4px';
+      
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.className = 'small';
+      editBtn.addEventListener('click', () => openEditCashEntry(entry));
+      
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.className = 'small danger';
+      delBtn.addEventListener('click', () => deleteCashEntry(entry.id));
+      
+      actionsDiv.appendChild(editBtn);
+      actionsDiv.appendChild(delBtn);
+      tdActions.appendChild(actionsDiv);
+      
+      tr.appendChild(tdDate);
+      tr.appendChild(tdType);
+      tr.appendChild(tdCategory);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdInflow);
+      tr.appendChild(tdOutflow);
+      tr.appendChild(tdBalance);
+      tr.appendChild(tdActions);
+      
+      cashbookTableBody.appendChild(tr);
+    }
+    
+    // Update summary
+    cashOpeningBalance.textContent = fmt(openingBalance);
+    cashTotalInflows.textContent = fmt(totalInflows);
+    cashTotalOutflows.textContent = fmt(totalOutflows);
+    cashCurrentBalance.textContent = fmt(balance);
+  }
+
+  function openCreateCashEntry(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    editingCashEntry = null;
+    cashbookModalTitle.textContent = 'Add Cashbook Entry';
+    cashbookDate.value = today();
+    cashbookType.value = 'inflow';
+    cashbookCategory.value = '';
+    cashbookAmount.value = '';
+    cashbookDescription.value = '';
+    
+    modalOverlay.style.display = 'block';
+    cashbookModal.style.display = 'block';
+  }
+
+  function openEditCashEntry(entry){
+    editingCashEntry = entry;
+    cashbookModalTitle.textContent = 'Edit Cashbook Entry';
+    cashbookDate.value = entry.date;
+    cashbookType.value = entry.type;
+    cashbookCategory.value = entry.category;
+    cashbookAmount.value = entry.amount;
+    cashbookDescription.value = entry.description;
+    
+    modalOverlay.style.display = 'block';
+    cashbookModal.style.display = 'block';
+  }
+
+  function saveCashEntry(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business');
+    
+    // Validate
+    if(!cashbookDate.value) return alert('Please enter date');
+    if(!cashbookCategory.value) return alert('Please select category');
+    if(!cashbookAmount.value || Number(cashbookAmount.value) <= 0) return alert('Please enter valid amount');
+    if(!cashbookDescription.value.trim()) return alert('Please enter description');
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.cashbook[key]) state.cashbook[key] = [];
+    
+    if(editingCashEntry){
+      // Update existing entry
+      const idx = state.cashbook[key].findIndex(e => e.id === editingCashEntry.id);
+      if(idx !== -1){
+        state.cashbook[key][idx] = {
+          ...state.cashbook[key][idx],
+          date: cashbookDate.value,
+          type: cashbookType.value,
+          category: cashbookCategory.value,
+          amount: Number(cashbookAmount.value),
+          description: cashbookDescription.value.trim()
+        };
+        addAudit('cashbook.edit', 'cashbook', editingCashEntry.id, 'Cashbook entry updated');
+      }
+    } else {
+      // Create new entry
+      const entry = {
+        id: uid('cash'),
+        date: cashbookDate.value,
+        type: cashbookType.value,
+        category: cashbookCategory.value,
+        amount: Number(cashbookAmount.value),
+        description: cashbookDescription.value.trim()
+      };
+      
+      state.cashbook[key].push(entry);
+      addAudit('cashbook.create', 'cashbook', entry.id, 'Cashbook entry created');
+      
+      // Create linked transaction in ledger
+      createCashbookTransaction(entry);
+    }
+    
+    saveState();
+    closeCashbookModal();
+    renderCashbook();
+  }
+
+  function closeCashbookModal(){
+    modalOverlay.style.display = 'none';
+    cashbookModal.style.display = 'none';
+    editingCashEntry = null;
+  }
+
+  function deleteCashEntry(id){
+    if(!confirm('Delete this entry?')) return;
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const idx = state.cashbook[key].findIndex(e => e.id === id);
+    if(idx !== -1){
+      state.cashbook[key].splice(idx, 1);
+      addAudit('cashbook.delete', 'cashbook', id, 'Cashbook entry deleted');
+      saveState();
+      renderCashbook();
+    }
+  }
+
+  function createCashbookTransaction(entry){
+    // Create a ledger transaction from cashbook entry
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Determine account and action based on type and category
+    let accountName = entry.category;
+    let accountCategory = entry.type === 'inflow' ? 'Revenue' : 'Expense';
+    let action = entry.type === 'inflow' ? 'Revenue' : 'Expense';
+    
+    // Find or create account
+    let account = b.accounts.find(a => a.name === accountName);
+    if(!account){
+      account = { name: accountName, category: accountCategory };
+      b.accounts.push(account);
+    }
+    
+    const txn = {
+      id: uid('txn'),
+      date: entry.date,
+      action: action,
+      accountName: accountName,
+      accountCategory: accountCategory,
+      description: `Cashbook: ${entry.description}`,
+      amount: entry.amount,
+      vatType: 'none',
+      whtApplied: false,
+      paye: false,
+      contact: '',
+      adjustmentType: '',
+      adjustmentAmount: 0
+    };
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.transactions[selectedUserId]) state.transactions[selectedUserId] = {};
+    if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
+    
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    addAudit('txn.add', 'txn', txn.id, `Transaction created from cashbook entry`);
+  }
+
   // Reports rendering
   function renderTab(){
+    // Hide all sections first
+    ledgerSection.style.display = 'none';
+    invoicingSection.style.display = 'none';
+    cashbookSection.style.display = 'none';
+    reportsSection.style.display = 'none';
+    if(ledgerListSection) ledgerListSection.style.display = 'none';
+    
+    // Remove active class from all tabs
+    btnLedgerTab.classList.remove('active');
+    btnInvoicingTab.classList.remove('active');
+    btnCashbookTab.classList.remove('active');
+    btnReportsTab.classList.remove('active');
+    
     if(activeTab === 'ledger'){
       ledgerSection.style.display = 'block';
-      reportsSection.style.display = 'none';
-      btnLedgerTab.classList.add('active'); btnReportsTab.classList.remove('active');
-      // Show ledger list section when on ledger tab
       if(ledgerListSection) ledgerListSection.style.display = 'block';
+      btnLedgerTab.classList.add('active');
       renderAll();
-    } else {
-      ledgerSection.style.display = 'none';
+    } else if(activeTab === 'invoicing'){
+      invoicingSection.style.display = 'block';
+      btnInvoicingTab.classList.add('active');
+      renderInvoices();
+    } else if(activeTab === 'cashbook'){
+      cashbookSection.style.display = 'block';
+      btnCashbookTab.classList.add('active');
+      renderCashbook();
+    } else if(activeTab === 'reports'){
       reportsSection.style.display = 'block';
-      btnLedgerTab.classList.remove('active'); btnReportsTab.classList.add('active');
-      // Hide ledger list section (including ledger table and tax summary) when on reports tab
-      if(ledgerListSection) ledgerListSection.style.display = 'none';
-      updateReportTabVisibility(); // Update report tab visibility based on entity
+      btnReportsTab.classList.add('active');
+      updateReportTabVisibility();
       document.querySelectorAll('#reportsSection .tab').forEach(t=>t.classList.remove('active'));
       const tb = document.querySelector('#reportsSection .tab[data-report="vatReport"]');
       if(tb) tb.classList.add('active');
