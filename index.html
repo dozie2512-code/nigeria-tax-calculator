@@ -664,6 +664,8 @@
         <label>Action:
           <select id="txnAction">
             <option value="">-- Select action --</option>
+            <option value="Invoicing">Invoicing</option>
+            <option value="Cashbook">Cashbook</option>
             <option value="InventoryPurchase">Inventory Purchase</option>
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
@@ -920,6 +922,7 @@
       
       <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
         <button class="primary small" id="btnAddCashEntry">Add Entry</button>
+        <button class="small" id="btnSetStartingBalance">Set Starting Balance</button>
         <button class="small" id="btnManageAccountsCashbook">Manage Accounts</button>
         <div class="spacer"></div>
         <label style="display:flex; gap:8px; align-items:center;">
@@ -1478,6 +1481,36 @@
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
     <button id="cashbookCancel">Cancel</button>
     <button class="primary" id="cashbookSave">Save Entry</button>
+  </div>
+</div>
+
+<!-- Starting Balance Modal -->
+<div id="startingBalanceModal" class="modal">
+  <h3>Set Starting Balance</h3>
+  <div class="row">
+    <label>Date: <input type="date" id="startingBalanceDate" /></label>
+  </div>
+  <div class="row">
+    <label>Bank Account:
+      <select id="startingBalanceAccount" style="min-width:250px;">
+        <option value="">-- Select Bank Account --</option>
+      </select>
+    </label>
+    <label>Amount (₦): <input type="number" id="startingBalanceAmount" min="0" step="0.01" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Description: <textarea id="startingBalanceDescription" rows="2" style="width:100%;" placeholder="E.g., Opening balance for cashbook"></textarea></label>
+  </div>
+  <div class="row">
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="startingBalanceCreateLedger" checked />
+      Automatically create ledger transaction
+    </label>
+    <small class="muted">When checked, this entry will be recorded in the ledger</small>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="startingBalanceCancel">Cancel</button>
+    <button class="primary" id="startingBalanceSave">Set Starting Balance</button>
   </div>
 </div>
 
@@ -2067,6 +2100,17 @@
   const cashbookSave = document.getElementById('cashbookSave');
   const cashbookCancel = document.getElementById('cashbookCancel');
   const btnManageAccountsCashbook = document.getElementById('btnManageAccountsCashbook');
+  
+  // Starting Balance Modal DOM refs
+  const btnSetStartingBalance = document.getElementById('btnSetStartingBalance');
+  const startingBalanceModal = document.getElementById('startingBalanceModal');
+  const startingBalanceDate = document.getElementById('startingBalanceDate');
+  const startingBalanceAccount = document.getElementById('startingBalanceAccount');
+  const startingBalanceAmount = document.getElementById('startingBalanceAmount');
+  const startingBalanceDescription = document.getElementById('startingBalanceDescription');
+  const startingBalanceCreateLedger = document.getElementById('startingBalanceCreateLedger');
+  const startingBalanceSave = document.getElementById('startingBalanceSave');
+  const startingBalanceCancel = document.getElementById('startingBalanceCancel');
 
   // Bank Reconciliation DOM refs
   const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
@@ -3371,6 +3415,17 @@
     cashbookSave.addEventListener('click', saveCashEntry);
     cashbookCancel.addEventListener('click', closeCashbookModal);
     
+    // Starting Balance event listeners
+    if(btnSetStartingBalance){
+      btnSetStartingBalance.addEventListener('click', openSetStartingBalance);
+    }
+    if(startingBalanceSave){
+      startingBalanceSave.addEventListener('click', saveStartingBalance);
+    }
+    if(startingBalanceCancel){
+      startingBalanceCancel.addEventListener('click', closeStartingBalanceModal);
+    }
+    
     // Bank Reconciliation event listeners
     btnBankReconciliationTab.addEventListener('click', ()=> { activeTab='bankReconciliation'; renderTab(); });
     btnNewReconciliation.addEventListener('click', openNewReconciliation);
@@ -3688,7 +3743,17 @@
 
   function txnActionChanged(){
     const val = txnAction.value;
-    if(val === 'InventoryPurchase' || val === 'InventorySale'){
+    if(val === 'Invoicing'){
+      // Switch to invoicing tab
+      activeTab = 'invoicing';
+      renderTab();
+      txnAction.value = ''; // Reset dropdown
+    } else if(val === 'Cashbook'){
+      // Switch to cashbook tab
+      activeTab = 'cashbook';
+      renderTab();
+      txnAction.value = ''; // Reset dropdown
+    } else if(val === 'InventoryPurchase' || val === 'InventorySale'){
       mainTxnForm.style.display = 'none';
       inventorySubform.style.display = 'block';
       assetPurchaseSubform.style.display = 'none';
@@ -7025,6 +7090,108 @@
     addAudit('txn.add', 'txn', txn.id, `Transaction created from cashbook entry`);
     
     return txn.id; // Return the transaction ID
+  }
+  
+  // ============== STARTING BALANCE FUNCTIONALITY ==============
+  
+  function openSetStartingBalance(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    
+    // Reset form
+    startingBalanceDate.value = today();
+    startingBalanceAmount.value = '';
+    startingBalanceDescription.value = 'Opening balance for cashbook';
+    if(startingBalanceCreateLedger) startingBalanceCreateLedger.checked = true;
+    
+    // Populate bank accounts
+    populateStartingBalanceAccountSelect();
+    
+    // Show modal
+    modalOverlay.style.display = 'block';
+    startingBalanceModal.style.display = 'block';
+  }
+  
+  function populateStartingBalanceAccountSelect(){
+    if(!startingBalanceAccount) return;
+    startingBalanceAccount.innerHTML = '<option value="">-- Select Bank Account --</option>';
+    
+    const b = findBiz(selectedBizId);
+    if(!b || !b.accounts) return;
+    
+    // Filter for Bank and Asset accounts
+    const bankAccounts = b.accounts.filter(a => 
+      (a.name === 'Bank' && a.category === 'Asset') || 
+      (a.category === 'Asset' && a.name.toLowerCase().includes('bank'))
+    );
+    
+    for(const acc of bankAccounts){
+      const opt = document.createElement('option');
+      opt.value = acc.id;
+      opt.textContent = `${acc.name} (${acc.category})`;
+      startingBalanceAccount.appendChild(opt);
+    }
+    
+    // If no bank accounts found, show all asset accounts
+    if(bankAccounts.length === 0){
+      const assetAccounts = b.accounts.filter(a => a.category === 'Asset');
+      for(const acc of assetAccounts){
+        const opt = document.createElement('option');
+        opt.value = acc.id;
+        opt.textContent = `${acc.name} (${acc.category})`;
+        startingBalanceAccount.appendChild(opt);
+      }
+    }
+  }
+  
+  function saveStartingBalance(){
+    if(!startingBalanceDate.value) return alert('Please enter date');
+    if(!startingBalanceAccount.value) return alert('Please select a bank account');
+    if(!startingBalanceAmount.value || Number(startingBalanceAmount.value) < 0) return alert('Please enter valid amount');
+    if(!startingBalanceDescription.value.trim()) return alert('Please enter description');
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.cashbook[key]) state.cashbook[key] = [];
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    const account = b.accounts.find(a => a.id === startingBalanceAccount.value);
+    if(!account) return alert('Account not found');
+    
+    const createLedger = startingBalanceCreateLedger ? startingBalanceCreateLedger.checked : true;
+    
+    // Create cashbook entry for starting balance
+    const entry = {
+      id: uid('cash'),
+      date: startingBalanceDate.value,
+      type: 'inflow',
+      accountId: account.id,
+      accountName: account.name,
+      accountCategory: account.category,
+      category: account.name,
+      amount: Number(startingBalanceAmount.value),
+      description: startingBalanceDescription.value.trim(),
+      ledgerLinked: createLedger,
+      isStartingBalance: true // Mark as starting balance entry
+    };
+    
+    state.cashbook[key].push(entry);
+    addAudit('cashbook.create', 'cashbook', entry.id, 'Starting balance set');
+    
+    // Create linked transaction in ledger if checkbox is checked
+    if(createLedger){
+      const txnId = createCashbookTransaction(entry);
+      entry.ledgerTxnId = txnId;
+    }
+    
+    saveState();
+    closeStartingBalanceModal();
+    renderCashbook();
+  }
+  
+  function closeStartingBalanceModal(){
+    modalOverlay.style.display = 'none';
+    startingBalanceModal.style.display = 'none';
   }
 
   /***********************************************************************
