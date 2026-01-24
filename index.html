@@ -3507,6 +3507,19 @@
       addAudit('data.clear_all_failed', 'system', null, 'Failed to clear data: ' + error.message);
     }
   }
+  
+  /**
+   * Format skip message for import operations
+   * @param {number} invalidCount - Number of invalid entries
+   * @param {number} duplicateCount - Number of duplicate entries (optional)
+   * @returns {string} Formatted message
+   */
+  function formatSkipMessage(invalidCount, duplicateCount = 0){
+    if(invalidCount === 0 && duplicateCount === 0) return '';
+    const total = invalidCount + duplicateCount;
+    const dupMsg = duplicateCount > 0 ? ` - ${duplicateCount} duplicate(s)` : '';
+    return ` (${total} skipped${dupMsg})`;
+  }
 
   /**
    * Import ledger transactions from JSON file
@@ -3567,7 +3580,7 @@
             description: txn.description,
             amount: Number(txn.amount),
             // Optional fields with defaults
-            accountId: txn.accountId || '',
+            accountId: txn.accountId || null,
             accountName: txn.accountName || 'Imported',
             accountCategory: txn.accountCategory || 'Expense',
             qty: txn.qty || 1,
@@ -3577,7 +3590,7 @@
             whtRate: txn.whtRate || 0,
             paye: txn.paye || 0,
             contact: txn.contact || '',
-            receiptId: txn.receiptId || '',
+            receiptId: txn.receiptId || null,
             inventoryItemId: txn.inventoryItemId || null,
             assetId: txn.assetId || null
           };
@@ -3592,7 +3605,7 @@
         }
         
         // Confirm import
-        const confirmMsg = `Import ${validCount} transaction(s)?${invalidCount > 0 ? ` (${invalidCount} invalid entries will be skipped)` : ''}`;
+        const confirmMsg = `Import ${validCount} transaction(s)?${formatSkipMessage(invalidCount)}`;
         if(!confirm(confirmMsg)) {
           showImportStatus(statusDiv, 'info', 'Import cancelled');
           return;
@@ -3617,7 +3630,7 @@
         addAudit('ledger.import', 'ledger', null, `Imported ${validCount} transactions`);
         
         // Show success message
-        const successMsg = `Successfully imported ${validCount} transaction(s)${invalidCount > 0 ? ` (${invalidCount} skipped)` : ''}`;
+        const successMsg = `Successfully imported ${validCount} transaction(s)${formatSkipMessage(invalidCount)}`;
         showImportStatus(statusDiv, 'success', successMsg);
         
       } catch(err){
@@ -3679,10 +3692,10 @@
             continue;
           }
           
-          // Validate amount
-          if(isNaN(Number(entry.amount)) || Number(entry.amount) <= 0){
+          // Validate amount (must be a positive number, zero is allowed for corrections)
+          if(isNaN(Number(entry.amount)) || Number(entry.amount) < 0){
             invalidCount++;
-            console.warn('Skipping cashbook entry - invalid amount:', entry);
+            console.warn('Skipping cashbook entry - invalid amount (must be non-negative):', entry);
             continue;
           }
           
@@ -3706,7 +3719,7 @@
         }
         
         // Confirm import
-        const confirmMsg = `Import ${validCount} cashbook entry/entries?${invalidCount > 0 ? ` (${invalidCount} invalid entries will be skipped)` : ''}`;
+        const confirmMsg = `Import ${validCount} cashbook entry/entries?${formatSkipMessage(invalidCount)}`;
         if(!confirm(confirmMsg)) {
           showImportStatus(statusDiv, 'info', 'Import cancelled');
           return;
@@ -3729,7 +3742,7 @@
         addAudit('cashbook.import', 'cashbook', null, `Imported ${validCount} cashbook entries`);
         
         // Show success message
-        const successMsg = `Successfully imported ${validCount} cashbook entry/entries${invalidCount > 0 ? ` (${invalidCount} skipped)` : ''}`;
+        const successMsg = `Successfully imported ${validCount} cashbook entry/entries${formatSkipMessage(invalidCount)}`;
         showImportStatus(statusDiv, 'success', successMsg);
         
       } catch(err){
@@ -3794,8 +3807,9 @@
             continue;
           }
           
-          // Check for duplicate names
-          if(existingNames.includes(acct.name.toLowerCase())){
+          // Check for duplicate names (within existing accounts and within this import batch)
+          const lowerName = acct.name.toLowerCase();
+          if(existingNames.includes(lowerName)){
             duplicateCount++;
             console.warn('Skipping account - duplicate name:', acct.name);
             continue;
@@ -3822,7 +3836,7 @@
           };
           
           importedAccounts.push(newAccount);
-          existingNames.push(acct.name.toLowerCase()); // Add to check list for subsequent entries
+          existingNames.push(lowerName); // Add to check list to prevent duplicates within the same import
           validCount++;
         }
         
@@ -3832,12 +3846,7 @@
         }
         
         // Confirm import
-        let confirmMsg = `Import ${validCount} account(s)?`;
-        if(invalidCount > 0 || duplicateCount > 0){
-          confirmMsg += ` (${invalidCount + duplicateCount} entries will be skipped`;
-          if(duplicateCount > 0) confirmMsg += ` - ${duplicateCount} duplicate(s)`;
-          confirmMsg += ')';
-        }
+        const confirmMsg = `Import ${validCount} account(s)?${formatSkipMessage(invalidCount, duplicateCount)}`;
         if(!confirm(confirmMsg)) {
           showImportStatus(statusDiv, 'info', 'Import cancelled');
           return;
@@ -3860,12 +3869,7 @@
         addAudit('accounts.import', 'account', null, `Imported ${validCount} accounts`);
         
         // Show success message
-        let successMsg = `Successfully imported ${validCount} account(s)`;
-        if(invalidCount > 0 || duplicateCount > 0){
-          successMsg += ` (${invalidCount + duplicateCount} skipped`;
-          if(duplicateCount > 0) successMsg += ` - ${duplicateCount} duplicate(s)`;
-          successMsg += ')';
-        }
+        const successMsg = `Successfully imported ${validCount} account(s)${formatSkipMessage(invalidCount, duplicateCount)}`;
         showImportStatus(statusDiv, 'success', successMsg);
         
       } catch(err){
