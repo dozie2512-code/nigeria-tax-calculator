@@ -858,7 +858,11 @@
         <input type="text" id="ledgerSearch" placeholder="Search by date/account/description/amount/contact" style="flex:1; padding:6px; border:1px solid #cfcfcf; border-radius:6px;" />
         <button class="small" id="btnSearch">Search</button>
         <button class="small" id="btnClearSearch">Clear</button>
+        <button class="small primary" id="btnImportLedger" title="Import ledger transactions from JSON file. Required fields: date, action, description, amount. Click for file dialog.">📥 Import Ledger</button>
+        <input type="file" id="ledgerFileInput" accept="application/json" style="display:none;" />
       </div>
+      
+      <div id="ledgerImportStatus" style="display:none; margin:8px 0; padding:8px; border-radius:4px; font-size:0.9rem;"></div>
 
       <div class="table-scroll">
         <table class="ledger-table" id="ledgerTable">
@@ -919,6 +923,8 @@
       
       <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
         <button class="primary small" id="btnAddCashEntry">Add Entry</button>
+        <button class="small primary" id="btnImportCashbook" title="Import cashbook entries from JSON file. Required fields: date, type (inflow/outflow), category, amount, description. Click for file dialog.">📥 Import Cashbook</button>
+        <input type="file" id="cashbookFileInput" accept="application/json" style="display:none;" />
         <div class="spacer"></div>
         <label style="display:flex; gap:8px; align-items:center;">
           From:
@@ -931,6 +937,8 @@
         <button class="small" id="btnFilterCashbook">Filter</button>
         <button class="small" id="btnClearCashFilter">Clear</button>
       </div>
+      
+      <div id="cashbookImportStatus" style="display:none; margin:8px 0; padding:8px; border-radius:4px; font-size:0.9rem;"></div>
 
       <div class="totals" style="margin-bottom:12px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
@@ -1112,6 +1120,11 @@
   <!-- Accounts modal -->
   <div id="accountsModal" class="modal">
     <h3>Manage Chart of Accounts</h3>
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <button class="small primary" id="btnImportAccounts" title="Import chart of accounts from JSON file. Required fields: name, category. Valid categories: Asset, Expense, Revenue, Liability, Capital. Click for file dialog.">📥 Import Accounts</button>
+      <input type="file" id="accountsFileInput" accept="application/json" style="display:none;" />
+    </div>
+    <div id="accountsImportStatus" style="display:none; margin:8px 0; padding:8px; border-radius:4px; font-size:0.9rem;"></div>
     <div id="accountsList" style="max-height:360px; overflow:auto;"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
       <input type="text" id="newAccountName" placeholder="Account name" style="flex:1;" />
@@ -2994,6 +3007,16 @@
     document.getElementById('fileInput').addEventListener('change', importJSON);
     document.getElementById('btnClearAll').addEventListener('click', clearAllData);
     
+    // Import Ledger, Cashbook, and Chart of Accounts event listeners
+    document.getElementById('btnImportLedger').addEventListener('click', ()=> document.getElementById('ledgerFileInput').click());
+    document.getElementById('ledgerFileInput').addEventListener('change', importLedgerData);
+    
+    document.getElementById('btnImportCashbook').addEventListener('click', ()=> document.getElementById('cashbookFileInput').click());
+    document.getElementById('cashbookFileInput').addEventListener('change', importCashbookData);
+    
+    document.getElementById('btnImportAccounts').addEventListener('click', ()=> document.getElementById('accountsFileInput').click());
+    document.getElementById('accountsFileInput').addEventListener('change', importChartOfAccounts);
+    
     // Buy Now button - opens prelogin/pricing overlay
     const buyNowBtn = document.getElementById('buyNowBtn');
     if(buyNowBtn) {
@@ -3483,6 +3506,411 @@
       alert('Failed to clear data. Please check console for details.');
       addAudit('data.clear_all_failed', 'system', null, 'Failed to clear data: ' + error.message);
     }
+  }
+  
+  /**
+   * Format skip message for import operations
+   * @param {number} invalidCount - Number of invalid entries
+   * @param {number} duplicateCount - Number of duplicate entries (optional)
+   * @returns {string} Formatted message
+   */
+  function formatSkipMessage(invalidCount, duplicateCount = 0){
+    if(invalidCount === 0 && duplicateCount === 0) return '';
+    const total = invalidCount + duplicateCount;
+    const dupMsg = duplicateCount > 0 ? ` - ${duplicateCount} duplicate(s)` : '';
+    return ` (${total} skipped${dupMsg})`;
+  }
+
+  /**
+   * Import ledger transactions from JSON file
+   * @param {Event} e - File input change event
+   */
+  function importLedgerData(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    
+    // Reset file input for re-import
+    e.target.value = '';
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      const statusDiv = document.getElementById('ledgerImportStatus');
+      try {
+        const data = JSON.parse(reader.result);
+        
+        // Validate data structure
+        if(!Array.isArray(data)){
+          showImportStatus(statusDiv, 'error', 'Invalid format: Expected an array of transactions');
+          return;
+        }
+        
+        // Check if user and business are selected
+        if(!selectedUserId || !selectedBizId){
+          showImportStatus(statusDiv, 'error', 'Please select a user and business first');
+          return;
+        }
+        
+        // Validate required fields for each transaction
+        const requiredFields = ['date', 'action', 'description', 'amount'];
+        let validCount = 0;
+        let invalidCount = 0;
+        const importedTransactions = [];
+        
+        for(const txn of data){
+          // Check required fields
+          const missingFields = requiredFields.filter(field => !txn[field]);
+          if(missingFields.length > 0){
+            invalidCount++;
+            console.warn('Skipping transaction - missing fields:', missingFields, txn);
+            continue;
+          }
+          
+          // Validate amount is a number
+          if(isNaN(Number(txn.amount))){
+            invalidCount++;
+            console.warn('Skipping transaction - invalid amount:', txn);
+            continue;
+          }
+          
+          // Create transaction object with required fields
+          const newTxn = {
+            id: uid('txn'),
+            date: txn.date,
+            action: txn.action,
+            description: txn.description,
+            amount: Number(txn.amount),
+            // Optional fields with defaults
+            accountId: txn.accountId || null,
+            accountName: txn.accountName || 'Imported',
+            accountCategory: txn.accountCategory || 'Expense',
+            qty: txn.qty || 1,
+            unitPrice: txn.unitPrice || Number(txn.amount),
+            vatType: txn.vatType || 'none',
+            whtApplied: txn.whtApplied || false,
+            whtRate: txn.whtRate || 0,
+            paye: txn.paye || 0,
+            contact: txn.contact || '',
+            receiptId: txn.receiptId || null,
+            inventoryItemId: txn.inventoryItemId || null,
+            assetId: txn.assetId || null
+          };
+          
+          importedTransactions.push(newTxn);
+          validCount++;
+        }
+        
+        if(validCount === 0){
+          showImportStatus(statusDiv, 'error', 'No valid transactions found in the file');
+          return;
+        }
+        
+        // Confirm import
+        const confirmMsg = `Import ${validCount} transaction(s)?${formatSkipMessage(invalidCount)}`;
+        if(!confirm(confirmMsg)) {
+          showImportStatus(statusDiv, 'info', 'Import cancelled');
+          return;
+        }
+        
+        // Initialize transactions array if needed
+        if(!state.transactions[selectedUserId]){
+          state.transactions[selectedUserId] = {};
+        }
+        if(!state.transactions[selectedUserId][selectedBizId]){
+          state.transactions[selectedUserId][selectedBizId] = [];
+        }
+        
+        // Add transactions to state
+        state.transactions[selectedUserId][selectedBizId].push(...importedTransactions);
+        
+        // Save and refresh
+        saveState();
+        renderLedger();
+        
+        // Log audit
+        addAudit('ledger.import', 'ledger', null, `Imported ${validCount} transactions`);
+        
+        // Show success message
+        const successMsg = `Successfully imported ${validCount} transaction(s)${formatSkipMessage(invalidCount)}`;
+        showImportStatus(statusDiv, 'success', successMsg);
+        
+      } catch(err){
+        console.error('Import error:', err);
+        showImportStatus(statusDiv, 'error', 'Invalid JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+  
+  /**
+   * Import cashbook entries from JSON file
+   * @param {Event} e - File input change event
+   */
+  function importCashbookData(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    
+    // Reset file input for re-import
+    e.target.value = '';
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      const statusDiv = document.getElementById('cashbookImportStatus');
+      try {
+        const data = JSON.parse(reader.result);
+        
+        // Validate data structure
+        if(!Array.isArray(data)){
+          showImportStatus(statusDiv, 'error', 'Invalid format: Expected an array of cashbook entries');
+          return;
+        }
+        
+        // Check if user and business are selected
+        if(!selectedUserId || !selectedBizId){
+          showImportStatus(statusDiv, 'error', 'Please select a user and business first');
+          return;
+        }
+        
+        // Validate required fields
+        const requiredFields = ['date', 'type', 'category', 'amount', 'description'];
+        let validCount = 0;
+        let invalidCount = 0;
+        const importedEntries = [];
+        
+        for(const entry of data){
+          // Check required fields
+          const missingFields = requiredFields.filter(field => !entry[field]);
+          if(missingFields.length > 0){
+            invalidCount++;
+            console.warn('Skipping cashbook entry - missing fields:', missingFields, entry);
+            continue;
+          }
+          
+          // Validate type
+          if(entry.type !== 'inflow' && entry.type !== 'outflow'){
+            invalidCount++;
+            console.warn('Skipping cashbook entry - invalid type (must be "inflow" or "outflow"):', entry);
+            continue;
+          }
+          
+          // Validate amount (must be a positive number, zero is allowed for corrections)
+          if(isNaN(Number(entry.amount)) || Number(entry.amount) < 0){
+            invalidCount++;
+            console.warn('Skipping cashbook entry - invalid amount (must be non-negative):', entry);
+            continue;
+          }
+          
+          // Create entry object
+          const newEntry = {
+            id: uid('cash'),
+            date: entry.date,
+            type: entry.type,
+            category: entry.category,
+            amount: Number(entry.amount),
+            description: entry.description
+          };
+          
+          importedEntries.push(newEntry);
+          validCount++;
+        }
+        
+        if(validCount === 0){
+          showImportStatus(statusDiv, 'error', 'No valid cashbook entries found in the file');
+          return;
+        }
+        
+        // Confirm import
+        const confirmMsg = `Import ${validCount} cashbook entry/entries?${formatSkipMessage(invalidCount)}`;
+        if(!confirm(confirmMsg)) {
+          showImportStatus(statusDiv, 'info', 'Import cancelled');
+          return;
+        }
+        
+        // Initialize cashbook array if needed
+        const key = `${selectedUserId}_${selectedBizId}`;
+        if(!state.cashbook[key]){
+          state.cashbook[key] = [];
+        }
+        
+        // Add entries to state
+        state.cashbook[key].push(...importedEntries);
+        
+        // Save and refresh
+        saveState();
+        renderCashbook();
+        
+        // Log audit
+        addAudit('cashbook.import', 'cashbook', null, `Imported ${validCount} cashbook entries`);
+        
+        // Show success message
+        const successMsg = `Successfully imported ${validCount} cashbook entry/entries${formatSkipMessage(invalidCount)}`;
+        showImportStatus(statusDiv, 'success', successMsg);
+        
+      } catch(err){
+        console.error('Import error:', err);
+        showImportStatus(statusDiv, 'error', 'Invalid JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+  
+  /**
+   * Import chart of accounts from JSON file
+   * @param {Event} e - File input change event
+   */
+  function importChartOfAccounts(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    
+    // Reset file input for re-import
+    e.target.value = '';
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      const statusDiv = document.getElementById('accountsImportStatus');
+      try {
+        const data = JSON.parse(reader.result);
+        
+        // Validate data structure
+        if(!Array.isArray(data)){
+          showImportStatus(statusDiv, 'error', 'Invalid format: Expected an array of accounts');
+          return;
+        }
+        
+        // Check if business is selected
+        if(!selectedBizId){
+          showImportStatus(statusDiv, 'error', 'Please select a business first');
+          return;
+        }
+        
+        const biz = findBiz(selectedBizId);
+        if(!biz){
+          showImportStatus(statusDiv, 'error', 'Business not found');
+          return;
+        }
+        
+        // Validate required fields
+        const requiredFields = ['name', 'category'];
+        let validCount = 0;
+        let invalidCount = 0;
+        let duplicateCount = 0;
+        const importedAccounts = [];
+        
+        // Get existing account names for duplicate check
+        const existingNames = (biz.accounts || []).map(a => a.name.toLowerCase());
+        
+        for(const acct of data){
+          // Check required fields
+          const missingFields = requiredFields.filter(field => !acct[field]);
+          if(missingFields.length > 0){
+            invalidCount++;
+            console.warn('Skipping account - missing fields:', missingFields, acct);
+            continue;
+          }
+          
+          // Check for duplicate names (within existing accounts and within this import batch)
+          const lowerName = acct.name.toLowerCase();
+          if(existingNames.includes(lowerName)){
+            duplicateCount++;
+            console.warn('Skipping account - duplicate name:', acct.name);
+            continue;
+          }
+          
+          // Validate category
+          const validCategories = ['Asset', 'Expense', 'Revenue', 'Liability', 'Capital'];
+          if(!validCategories.includes(acct.category)){
+            invalidCount++;
+            console.warn('Skipping account - invalid category (must be one of: Asset, Expense, Revenue, Liability, Capital):', acct);
+            continue;
+          }
+          
+          // Create account object
+          const newAccount = {
+            id: uid('acct'),
+            name: acct.name,
+            category: acct.category,
+            disallowableDefault: acct.disallowableDefault || false,
+            nonTaxableDefault: acct.nonTaxableDefault || false,
+            rentFreq: acct.rentFreq || '',
+            closingBalance: Number(acct.closingBalance || 0),
+            openingBalance: Number(acct.openingBalance || 0)
+          };
+          
+          importedAccounts.push(newAccount);
+          existingNames.push(lowerName); // Add to check list to prevent duplicates within the same import
+          validCount++;
+        }
+        
+        if(validCount === 0){
+          showImportStatus(statusDiv, 'error', 'No valid accounts found in the file');
+          return;
+        }
+        
+        // Confirm import
+        const confirmMsg = `Import ${validCount} account(s)?${formatSkipMessage(invalidCount, duplicateCount)}`;
+        if(!confirm(confirmMsg)) {
+          showImportStatus(statusDiv, 'info', 'Import cancelled');
+          return;
+        }
+        
+        // Initialize accounts array if needed
+        if(!biz.accounts){
+          biz.accounts = [];
+        }
+        
+        // Add accounts to business
+        biz.accounts.push(...importedAccounts);
+        
+        // Save and refresh
+        saveState();
+        renderAccounts();
+        populateAccountSelect();
+        
+        // Log audit
+        addAudit('accounts.import', 'account', null, `Imported ${validCount} accounts`);
+        
+        // Show success message
+        const successMsg = `Successfully imported ${validCount} account(s)${formatSkipMessage(invalidCount, duplicateCount)}`;
+        showImportStatus(statusDiv, 'success', successMsg);
+        
+      } catch(err){
+        console.error('Import error:', err);
+        showImportStatus(statusDiv, 'error', 'Invalid JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+  
+  /**
+   * Display import status message
+   * @param {HTMLElement} statusDiv - Status div element
+   * @param {string} type - Status type: 'success', 'error', or 'info'
+   * @param {string} message - Status message
+   */
+  function showImportStatus(statusDiv, type, message){
+    if(!statusDiv) return;
+    
+    statusDiv.style.display = 'block';
+    statusDiv.textContent = message;
+    
+    // Set colors based on type
+    if(type === 'success'){
+      statusDiv.style.backgroundColor = '#dcfce7';
+      statusDiv.style.color = '#166534';
+      statusDiv.style.border = '1px solid #86efac';
+    } else if(type === 'error'){
+      statusDiv.style.backgroundColor = '#fee2e2';
+      statusDiv.style.color = '#991b1b';
+      statusDiv.style.border = '1px solid #fca5a5';
+    } else { // info
+      statusDiv.style.backgroundColor = '#dbeafe';
+      statusDiv.style.color = '#1e40af';
+      statusDiv.style.border = '1px solid #93c5fd';
+    }
+    
+    // Auto-hide after 8 seconds
+    setTimeout(() => {
+      statusDiv.style.display = 'none';
+    }, 8000);
   }
 
   /**
