@@ -3400,6 +3400,26 @@
       discrepancyModal.style.display = 'none';
     });
     
+    // Select-all checkboxes for bank reconciliation
+    if(selectAllBankItems){
+      selectAllBankItems.addEventListener('change', (e) => {
+        const checkboxes = document.querySelectorAll('#bankStatementItemsBody input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = e.target.checked);
+      });
+    }
+    if(selectAllLedgerItems){
+      selectAllLedgerItems.addEventListener('change', (e) => {
+        const checkboxes = document.querySelectorAll('#ledgerItemsBody input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = e.target.checked);
+      });
+    }
+    if(selectAllMatchItems){
+      selectAllMatchItems.addEventListener('change', (e) => {
+        const checkboxes = document.querySelectorAll('.match-ledger-checkbox');
+        checkboxes.forEach(cb => cb.checked = e.target.checked);
+      });
+    }
+    
     // Manage accounts from cashbook
     if(btnManageAccountsCashbook){
       btnManageAccountsCashbook.addEventListener('click', ()=> { 
@@ -7818,8 +7838,41 @@
         
         if(lines.length < 2) return alert('CSV file is empty or invalid');
         
+        // Helper function to parse CSV line respecting quotes
+        function parseCSVLine(line) {
+          const result = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+            
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                // Escaped quote
+                current += '"';
+                i++; // Skip next quote
+              } else {
+                // Toggle quote state
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              // Field separator
+              result.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          
+          // Add last field
+          result.push(current.trim());
+          return result;
+        }
+        
         // Parse header
-        const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+        const header = parseCSVLine(lines[0]).map(h => h.toLowerCase());
         
         // Check for required columns
         const dateIndex = header.findIndex(h => h.includes('date'));
@@ -7839,16 +7892,31 @@
           const line = lines[i].trim();
           if(!line) continue;
           
-          const values = line.split(',').map(v => v.trim());
+          const values = parseCSVLine(line);
+          
+          // Parse and validate numeric fields
+          const debitValue = debitIndex >= 0 ? values[debitIndex] : '';
+          const creditValue = creditIndex >= 0 ? values[creditIndex] : '';
+          const balanceValue = balanceIndex >= 0 ? values[balanceIndex] : '';
+          
+          const debit = debitValue ? parseFloat(debitValue.replace(/[^0-9.-]/g, '')) : 0;
+          const credit = creditValue ? parseFloat(creditValue.replace(/[^0-9.-]/g, '')) : 0;
+          const balance = balanceValue ? parseFloat(balanceValue.replace(/[^0-9.-]/g, '')) : 0;
+          
+          // Validate that at least numeric values are valid numbers
+          if(isNaN(debit) || isNaN(credit) || isNaN(balance)) {
+            console.warn(`Skipping row ${i + 1} due to invalid numeric values`);
+            continue;
+          }
           
           const item = {
             id: uid('bankitem'),
             date: values[dateIndex] || '',
             description: values[descIndex] || '',
             reference: refIndex >= 0 ? values[refIndex] : '',
-            debit: debitIndex >= 0 ? (parseFloat(values[debitIndex]) || 0) : 0,
-            credit: creditIndex >= 0 ? (parseFloat(values[creditIndex]) || 0) : 0,
-            balance: balanceIndex >= 0 ? (parseFloat(values[balanceIndex]) || 0) : 0,
+            debit: debit,
+            credit: credit,
+            balance: balance,
             status: 'unmatched'
           };
           
