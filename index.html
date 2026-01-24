@@ -919,6 +919,7 @@
       
       <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
         <button class="primary small" id="btnAddCashEntry">Add Entry</button>
+        <button class="small" id="btnManageAccountsCashbook">Manage Accounts</button>
         <div class="spacer"></div>
         <label style="display:flex; gap:8px; align-items:center;">
           From:
@@ -959,11 +960,12 @@
             <tr>
               <th>Date</th>
               <th>Type</th>
-              <th>Category</th>
+              <th>Account</th>
               <th>Description</th>
               <th>Inflow</th>
               <th>Outflow</th>
               <th>Balance</th>
+              <th>Ledger</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -1337,31 +1339,22 @@
     </label>
   </div>
   <div class="row">
-    <label>Category:
-      <select id="cashbookCategory">
-        <option value="">-- Select --</option>
-        <optgroup label="Revenue (Inflows)">
-          <option value="Sales">Sales</option>
-          <option value="Services">Services</option>
-          <option value="Investment Income">Investment Income</option>
-          <option value="Other Income">Other Income</option>
-        </optgroup>
-        <optgroup label="Expenses (Outflows)">
-          <option value="Purchases">Purchases</option>
-          <option value="Salaries">Salaries</option>
-          <option value="Rent">Rent</option>
-          <option value="Utilities">Utilities</option>
-          <option value="Office Supplies">Office Supplies</option>
-          <option value="Marketing">Marketing</option>
-          <option value="Transportation">Transportation</option>
-          <option value="Other Expenses">Other Expenses</option>
-        </optgroup>
+    <label>Account:
+      <select id="cashbookAccount" style="min-width:200px;">
+        <option value="">-- Select Account --</option>
       </select>
     </label>
     <label>Amount (₦): <input type="number" id="cashbookAmount" min="0" step="0.01" /></label>
   </div>
   <div class="row">
     <label style="flex:1;">Description: <textarea id="cashbookDescription" rows="2" style="width:100%;"></textarea></label>
+  </div>
+  <div class="row">
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="cashbookCreateLedger" checked />
+      Automatically create ledger transaction
+    </label>
+    <small class="muted">When checked, this entry will be recorded in the ledger</small>
   </div>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
     <button id="cashbookCancel">Cancel</button>
@@ -1817,10 +1810,13 @@
   const cashbookDate = document.getElementById('cashbookDate');
   const cashbookType = document.getElementById('cashbookType');
   const cashbookCategory = document.getElementById('cashbookCategory');
+  const cashbookAccount = document.getElementById('cashbookAccount');
   const cashbookAmount = document.getElementById('cashbookAmount');
   const cashbookDescription = document.getElementById('cashbookDescription');
+  const cashbookCreateLedger = document.getElementById('cashbookCreateLedger');
   const cashbookSave = document.getElementById('cashbookSave');
   const cashbookCancel = document.getElementById('cashbookCancel');
+  const btnManageAccountsCashbook = document.getElementById('btnManageAccountsCashbook');
 
   // New DOM refs for added features
   const btnLogin = document.getElementById('btnLogin');
@@ -3067,6 +3063,20 @@
     });
     cashbookSave.addEventListener('click', saveCashEntry);
     cashbookCancel.addEventListener('click', closeCashbookModal);
+    
+    // Manage accounts from cashbook
+    if(btnManageAccountsCashbook){
+      btnManageAccountsCashbook.addEventListener('click', ()=> { 
+        if(!selectedBizId) return alert('Select business'); 
+        renderAccounts(); 
+        openModal(accountsModal); 
+      });
+    }
+    
+    // Repopulate cashbook account dropdown when type changes
+    if(cashbookType){
+      cashbookType.addEventListener('change', populateCashbookAccountSelect);
+    }
 
     document.querySelectorAll('#reportsSection .tab').forEach(tb => {
       tb.addEventListener('click', (e) => {
@@ -3544,6 +3554,30 @@
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
+  }
+
+  function populateCashbookAccountSelect(){
+    if(!cashbookAccount) return;
+    cashbookAccount.innerHTML = '<option value="">-- Select Account --</option>';
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Get current type selection
+    const currentType = cashbookType ? cashbookType.value : 'inflow';
+    
+    // Filter accounts based on type
+    const relevantCategories = currentType === 'inflow' 
+      ? ['Revenue', 'Asset', 'Liability', 'Capital']
+      : ['Expense', 'Asset'];
+    
+    for(const a of b.accounts){
+      if(relevantCategories.includes(a.category)){
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name + ' (' + a.category + ')';
+        cashbookAccount.appendChild(opt);
+      }
+    }
   }
 
   function renderInventorySelect(){
@@ -6345,7 +6379,17 @@
       tdType.appendChild(typeSpan);
       
       const tdCategory = document.createElement('td');
-      tdCategory.textContent = entry.category;
+      // Use accountName if available, otherwise fall back to category
+      tdCategory.textContent = entry.accountName || entry.category;
+      
+      // Show account category as a small badge
+      if(entry.accountCategory){
+        const categoryBadge = document.createElement('span');
+        categoryBadge.className = 'account-category';
+        categoryBadge.textContent = entry.accountCategory;
+        categoryBadge.style.marginLeft = '6px';
+        tdCategory.appendChild(categoryBadge);
+      }
       
       const tdDesc = document.createElement('td');
       tdDesc.textContent = entry.description;
@@ -6374,6 +6418,28 @@
       tdBalance.textContent = fmt(balance);
       tdBalance.style.fontWeight = '600';
       
+      // Add ledger link column
+      const tdLedger = document.createElement('td');
+      if(entry.ledgerLinked && entry.ledgerTxnId){
+        const ledgerLink = document.createElement('a');
+        ledgerLink.href = '#';
+        ledgerLink.className = 'link-like';
+        ledgerLink.textContent = 'View';
+        ledgerLink.style.fontSize = '0.85rem';
+        ledgerLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          // Switch to ledger tab and highlight the transaction
+          activeTab = 'ledger';
+          renderTab();
+          // Could add scroll to transaction here if needed
+        });
+        tdLedger.appendChild(ledgerLink);
+      } else if(entry.ledgerLinked){
+        tdLedger.innerHTML = '<span class="muted" style="font-size:0.85rem;">Linked</span>';
+      } else {
+        tdLedger.innerHTML = '<span class="muted" style="font-size:0.85rem;">—</span>';
+      }
+      
       const tdActions = document.createElement('td');
       const actionsDiv = document.createElement('div');
       actionsDiv.style.display = 'flex';
@@ -6400,6 +6466,7 @@
       tr.appendChild(tdInflow);
       tr.appendChild(tdOutflow);
       tr.appendChild(tdBalance);
+      tr.appendChild(tdLedger);
       tr.appendChild(tdActions);
       
       cashbookTableBody.appendChild(tr);
@@ -6418,9 +6485,16 @@
     cashbookModalTitle.textContent = 'Add Cashbook Entry';
     cashbookDate.value = today();
     cashbookType.value = 'inflow';
-    cashbookCategory.value = '';
     cashbookAmount.value = '';
     cashbookDescription.value = '';
+    if(cashbookCreateLedger) cashbookCreateLedger.checked = true;
+    
+    // Populate account dropdown
+    populateCashbookAccountSelect();
+    if(cashbookAccount) cashbookAccount.value = '';
+    
+    // Keep category field for backward compatibility (if it exists)
+    if(cashbookCategory) cashbookCategory.value = '';
     
     modalOverlay.style.display = 'block';
     cashbookModal.style.display = 'block';
@@ -6431,9 +6505,28 @@
     cashbookModalTitle.textContent = 'Edit Cashbook Entry';
     cashbookDate.value = entry.date;
     cashbookType.value = entry.type;
-    cashbookCategory.value = entry.category;
     cashbookAmount.value = entry.amount;
     cashbookDescription.value = entry.description;
+    
+    // Populate account dropdown
+    populateCashbookAccountSelect();
+    
+    // Set account if available, otherwise fallback to category
+    if(cashbookAccount && entry.accountId){
+      cashbookAccount.value = entry.accountId;
+    } else if(cashbookAccount && entry.category){
+      // Try to find account by name matching category
+      const b = findBiz(selectedBizId);
+      if(b){
+        const account = b.accounts.find(a => a.name === entry.category);
+        if(account) cashbookAccount.value = account.id;
+      }
+    }
+    
+    // Keep category field for backward compatibility
+    if(cashbookCategory) cashbookCategory.value = entry.category || '';
+    
+    if(cashbookCreateLedger) cashbookCreateLedger.checked = !!entry.ledgerLinked;
     
     modalOverlay.style.display = 'block';
     cashbookModal.style.display = 'block';
@@ -6442,14 +6535,41 @@
   function saveCashEntry(){
     if(!selectedUserId || !selectedBizId) return alert('Please select a business');
     
+    const b = findBiz(selectedBizId);
+    if(!b) return alert('Business not found');
+    
     // Validate
     if(!cashbookDate.value) return alert('Please enter date');
-    if(!cashbookCategory.value) return alert('Please select category');
+    
+    let accountId = '';
+    let accountName = '';
+    let accountCategory = '';
+    
+    // Use account if available, otherwise fall back to category
+    if(cashbookAccount && cashbookAccount.value){
+      accountId = cashbookAccount.value;
+      const account = b.accounts.find(a => a.id === accountId);
+      if(account){
+        accountName = account.name;
+        accountCategory = account.category;
+      } else {
+        return alert('Selected account not found');
+      }
+    } else if(cashbookCategory && cashbookCategory.value){
+      // Fallback for backward compatibility
+      accountName = cashbookCategory.value;
+      accountCategory = cashbookType.value === 'inflow' ? 'Revenue' : 'Expense';
+    } else {
+      return alert('Please select an account');
+    }
+    
     if(!cashbookAmount.value || Number(cashbookAmount.value) <= 0) return alert('Please enter valid amount');
     if(!cashbookDescription.value.trim()) return alert('Please enter description');
     
     const key = `${selectedUserId}_${selectedBizId}`;
     if(!state.cashbook[key]) state.cashbook[key] = [];
+    
+    const createLedger = cashbookCreateLedger ? cashbookCreateLedger.checked : true;
     
     if(editingCashEntry){
       // Update existing entry
@@ -6459,9 +6579,13 @@
           ...state.cashbook[key][idx],
           date: cashbookDate.value,
           type: cashbookType.value,
-          category: cashbookCategory.value,
+          accountId: accountId,
+          accountName: accountName,
+          accountCategory: accountCategory,
+          category: accountName, // Keep for backward compatibility
           amount: Number(cashbookAmount.value),
-          description: cashbookDescription.value.trim()
+          description: cashbookDescription.value.trim(),
+          ledgerLinked: createLedger
         };
         addAudit('cashbook.edit', 'cashbook', editingCashEntry.id, 'Cashbook entry updated');
       }
@@ -6471,16 +6595,23 @@
         id: uid('cash'),
         date: cashbookDate.value,
         type: cashbookType.value,
-        category: cashbookCategory.value,
+        accountId: accountId,
+        accountName: accountName,
+        accountCategory: accountCategory,
+        category: accountName, // Keep for backward compatibility
         amount: Number(cashbookAmount.value),
-        description: cashbookDescription.value.trim()
+        description: cashbookDescription.value.trim(),
+        ledgerLinked: createLedger
       };
       
       state.cashbook[key].push(entry);
       addAudit('cashbook.create', 'cashbook', entry.id, 'Cashbook entry created');
       
-      // Create linked transaction in ledger
-      createCashbookTransaction(entry);
+      // Create linked transaction in ledger if checkbox is checked
+      if(createLedger){
+        const txnId = createCashbookTransaction(entry);
+        entry.ledgerTxnId = txnId; // Store the ledger transaction ID for reference
+      }
     }
     
     saveState();
@@ -6510,24 +6641,33 @@
   function createCashbookTransaction(entry){
     // Create a ledger transaction from cashbook entry
     const b = findBiz(selectedBizId);
-    if(!b) return;
+    if(!b) return null;
     
-    // Determine account and action based on type and category
-    let accountName = entry.category;
-    let accountCategory = entry.type === 'inflow' ? 'Revenue' : 'Expense';
+    // Use account information from entry
+    let accountId = entry.accountId;
+    let accountName = entry.accountName || entry.category;
+    let accountCategory = entry.accountCategory || (entry.type === 'inflow' ? 'Revenue' : 'Expense');
     let action = entry.type === 'inflow' ? 'Revenue' : 'Expense';
     
-    // Find or create account
-    let account = b.accounts.find(a => a.name === accountName);
+    // Find account by ID or name
+    let account = null;
+    if(accountId){
+      account = b.accounts.find(a => a.id === accountId);
+    }
     if(!account){
-      account = { name: accountName, category: accountCategory };
-      b.accounts.push(account);
+      account = b.accounts.find(a => a.name === accountName);
+    }
+    
+    // If account doesn't exist, it should have been created already, but double-check
+    if(!account){
+      console.warn('Account not found for cashbook entry, using entry data');
     }
     
     const txn = {
       id: uid('txn'),
       date: entry.date,
       action: action,
+      accountId: accountId,
       accountName: accountName,
       accountCategory: accountCategory,
       description: `Cashbook: ${entry.description}`,
@@ -6537,7 +6677,8 @@
       paye: false,
       contact: '',
       adjustmentType: '',
-      adjustmentAmount: 0
+      adjustmentAmount: 0,
+      cashbookEntryId: entry.id // Link back to cashbook entry
     };
     
     const key = `${selectedUserId}_${selectedBizId}`;
@@ -6546,6 +6687,8 @@
     
     state.transactions[selectedUserId][selectedBizId].push(txn);
     addAudit('txn.add', 'txn', txn.id, `Transaction created from cashbook entry`);
+    
+    return txn.id; // Return the transaction ID
   }
 
   // Reports rendering
