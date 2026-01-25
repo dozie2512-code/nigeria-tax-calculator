@@ -939,7 +939,12 @@
 
     <!-- Invoicing Section -->
     <section id="invoicingSection" class="panel section" style="display:none;">
-      <h2 style="margin:0 0 8px 0;">Invoicing</h2>
+      <h2 style="margin:0 0 8px 0;">Invoicing & Receivables</h2>
+      
+      <!-- Receivables Summary Dashboard -->
+      <div id="receivablesSummary" class="tax-summary" style="margin-bottom:16px;">
+        <!-- Will be populated by renderReceivablesSummary() -->
+      </div>
       
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <button class="primary small" id="btnCreateInvoice">Create Invoice</button>
@@ -1459,6 +1464,9 @@
   <h4 style="margin:12px 0 8px 0;">Items</h4>
   <div id="invoiceItems" style="margin-bottom:12px;">
     <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+      <select class="invoice-item-inventory" style="flex:1;">
+        <option value="">-- Select from Inventory or Enter Custom --</option>
+      </select>
       <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
       <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
       <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
@@ -3433,12 +3441,7 @@
       const itemDiv = document.createElement('div');
       itemDiv.className = 'invoice-item';
       itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
-      itemDiv.innerHTML = `
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      `;
+      itemDiv.innerHTML = createInvoiceItemRow();
       invoiceItems.appendChild(itemDiv);
     });
     
@@ -5507,22 +5510,96 @@
     html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
     html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
     html += `<hr/>`;
-    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)} | <strong>WHT Remitted:</strong> ${fmt(whtPaidToAuthority)}</div>`;
-    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+    
+    // Tax Payment Section with Outstanding Balances
+    html += `<h4 style="margin:12px 0 8px 0;">Tax Liabilities & Payments</h4>`;
+    
+    // VAT Section
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${vatNetAfterPayments > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>VAT:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(vatNetAfterPayments)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Collected: ${fmt(vatCollected)} | Paid: ${fmt(vatPaid)} | Net: ${fmt(vatNet)}</div>`;
+    html += `<div class="small-muted">Remitted to Authority: ${fmt(vatPaidToAuthority)}${vatRefunded > 0 ? ` | Refunded: ${fmt(vatRefunded)}` : ''}</div>`;
+    if(vatNetAfterPayments > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('VAT', ${vatNetAfterPayments})">Pay VAT (${fmt(vatNetAfterPayments)})</button>`;
+    }
+    html += `</div>`;
+    
+    // WHT Section
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${whtPayableNet > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>WHT:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(whtPayableNet)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Payable: ${fmt(whtPayable)} | Receivable: ${fmt(whtReceivable)} | Remitted: ${fmt(whtPaidToAuthority)}</div>`;
+    if(whtPayableNet > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('WHT', ${whtPayableNet})">Pay WHT (${fmt(whtPayableNet)})</button>`;
+    }
+    html += `</div>`;
+    
+    // PAYE Section
+    const payeOutstanding = Math.max(0, payeAnnualTotal - payePaid);
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${payeOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>PAYE:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(payeOutstanding)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Monthly: ${fmt(payeMonthlyTotal)} | Annual: ${fmt(payeAnnualTotal)} | Paid: ${fmt(payePaid)}</div>`;
+    if(payeOutstanding > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('PAYE', ${payeOutstanding})">Pay PAYE (${fmt(payeOutstanding)})</button>`;
+    }
+    html += `</div>`;
+    
+    // CIT/PIT Section
     if(b.entity === 'Company'){
-      html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+      const citOutstanding = Math.max(0, citCharge - citPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${citOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>CIT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(citOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge (after WHT): ${fmt(citCharge)} | Paid: ${fmt(citPaid)}</div>`;
       if(whtCarryForward > 0) {
         html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
       }
-      html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
+      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover: ${fmt(turnoverForCIT)}</div>`;
+      if(citOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CIT', ${citOutstanding})">Pay CIT (${fmt(citOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
+      // CGT Section
+      const cgtOutstanding = Math.max(0, cgtCharge - cgtPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${cgtOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>CGT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(cgtOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge: ${fmt(cgtCharge)} | Paid: ${fmt(cgtPaid)}</div>`;
+      if(cgtOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CGT', ${cgtOutstanding})">Pay CGT (${fmt(cgtOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
       if(totalCarryforwardLosses > 0) {
         html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
     } else {
-      html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      const pitOutstanding = Math.max(0, pitCharge - pitPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${pitOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>PIT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(pitOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge: ${fmt(pitCharge)} | Paid: ${fmt(pitPaid)}</div>`;
+      if(pitOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('PIT', ${pitOutstanding})">Pay PIT (${fmt(pitOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
       if(totalCarryforwardLosses > 0) {
         html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
@@ -5561,6 +5638,87 @@
     }
     return gains;
   }
+
+  /**
+   * Pay Tax Function - Records tax payment transaction
+   * @param {string} taxType - Type of tax (VAT, WHT, PAYE, CIT, PIT, CGT)
+   * @param {number} amount - Amount to pay
+   */
+  function payTax(taxType, amount) {
+    if(!selectedUserId || !selectedBizId) {
+      return alert('Please select a user and business');
+    }
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Map tax type to account name
+    const taxAccountMap = {
+      'VAT': 'VAT Paid',
+      'WHT': 'WHT Remitted',
+      'PAYE': 'PAYE Paid',
+      'CIT': 'CIT Paid',
+      'PIT': 'PIT Paid',
+      'CGT': 'CGT Paid'
+    };
+    
+    const accountName = taxAccountMap[taxType];
+    if(!accountName) {
+      return alert('Invalid tax type');
+    }
+    
+    // Find or create the tax payment account
+    let account = b.accounts.find(a => a.name === accountName);
+    if(!account) {
+      // Create the tax payment account if it doesn't exist
+      account = {
+        id: uid('acct'),
+        name: accountName,
+        category: 'Expense',
+        disallowableDefault: false,
+        nonTaxableDefault: true // Tax payments are non-taxable
+      };
+      b.accounts.push(account);
+    }
+    
+    // Prompt for payment amount (allow partial payment)
+    const paymentAmount = prompt(`Enter amount to pay for ${taxType}:\nOutstanding: ${fmt(amount)}`, amount);
+    if(!paymentAmount || isNaN(paymentAmount) || Number(paymentAmount) <= 0) {
+      return;
+    }
+    
+    const finalAmount = Number(paymentAmount);
+    
+    // Create transaction for tax payment
+    const txn = {
+      id: uid('txn'),
+      date: new Date().toISOString().split('T')[0],
+      action: 'Expense',
+      accountId: account.id,
+      accountName: account.name,
+      accountCategory: 'Expense',
+      amount: finalAmount,
+      description: `${taxType} Payment to Tax Authority`,
+      vatType: 'none',
+      whtApplied: false,
+      paye: false,
+      contact: 'Tax Authority',
+      timestamp: Date.now()
+    };
+    
+    // Add transaction
+    if(!state.transactions[selectedUserId]) state.transactions[selectedUserId] = {};
+    if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    
+    addAudit('tax.payment', 'transaction', txn.id, `Paid ${taxType}: ${fmt(finalAmount)}`);
+    saveState();
+    renderAll();
+    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!`);
+  }
+  
+  // Make payTax available globally for inline onclick handlers
+  window.payTax = payTax;
 
   /**
    * Computes accounting profit from transactions.
@@ -6222,7 +6380,87 @@
   // ============== INVOICING FUNCTIONALITY ==============
   let editingInvoice = null;
 
+  /**
+   * Render Receivables Summary Dashboard
+   * Shows aged receivables and total outstanding
+   */
+  function renderReceivablesSummary(){
+    const summaryDiv = document.getElementById('receivablesSummary');
+    if(!summaryDiv) return;
+    
+    if(!selectedUserId || !selectedBizId) {
+      summaryDiv.innerHTML = '<div class="muted">Please select a business</div>';
+      return;
+    }
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const invoices = state.invoices[key] || [];
+    
+    // Calculate receivables by aging period
+    let totalReceivables = 0;
+    let current = 0;        // 0-30 days
+    let aged30 = 0;         // 31-60 days
+    let aged60 = 0;         // 61-90 days
+    let aged90Plus = 0;     // 90+ days
+    
+    const today = new Date();
+    
+    for(const inv of invoices) {
+      if(inv.status === 'paid') continue; // Skip paid invoices
+      
+      const total = Number(inv.total || 0);
+      totalReceivables += total;
+      
+      const dueDate = new Date(inv.dueDate);
+      const daysPastDue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+      
+      if(daysPastDue <= 30) {
+        current += total;
+      } else if(daysPastDue <= 60) {
+        aged30 += total;
+      } else if(daysPastDue <= 90) {
+        aged60 += total;
+      } else {
+        aged90Plus += total;
+      }
+    }
+    
+    let html = '<h4 style="margin:0 0 8px 0;">Receivables Summary</h4>';
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">';
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #0b76d1;">`;
+    html += `<div class="small-muted">Total Receivables</div>`;
+    html += `<div style="font-size:1.3rem; font-weight:700; color:#0b76d1;">${fmt(totalReceivables)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #059669;">`;
+    html += `<div class="small-muted">Current (0-30 days)</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#059669;">${fmt(current)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #f59e0b;">`;
+    html += `<div class="small-muted">31-60 days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#f59e0b;">${fmt(aged30)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #dc2626;">`;
+    html += `<div class="small-muted">61-90 days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#dc2626;">${fmt(aged60)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #7f1d1d;">`;
+    html += `<div class="small-muted">90+ days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#7f1d1d;">${fmt(aged90Plus)}</div>`;
+    html += `</div>`;
+    
+    html += '</div>';
+    summaryDiv.innerHTML = html;
+  }
+
   function renderInvoices(){
+    // Render receivables summary first
+    renderReceivablesSummary();
+    
     if(!selectedUserId || !selectedBizId) {
       invoiceTableBody.innerHTML = '<tr><td colspan="9">Please select a business</td></tr>';
       return;
@@ -6363,20 +6601,61 @@
     invoiceVatType.value = 'none';
     invoicePaymentTerms.value = 'net30';
     
-    // Reset items
-    invoiceItems.innerHTML = `
-      <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      </div>
-    `;
+    // Reset items with inventory dropdown
+    invoiceItems.innerHTML = createInvoiceItemRow();
     
     updateInvoiceTotal();
     modalOverlay.style.display = 'block';
     invoiceModal.style.display = 'block';
   }
+
+  function createInvoiceItemRow(item = null) {
+    const b = findBiz(selectedBizId);
+    const inventory = b?.inventory || [];
+    
+    // Build inventory options
+    let inventoryOptions = '<option value="">-- Select from Inventory or Enter Custom --</option>';
+    for(const invItem of inventory) {
+      const selected = item && item.inventoryId === invItem.id ? 'selected' : '';
+      inventoryOptions += `<option value="${invItem.id}" ${selected}>${invItem.name} (₦${invItem.averageCost?.toFixed(2) || '0.00'})</option>`;
+    }
+    
+    return `
+      <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <select class="invoice-item-inventory" style="flex:1;" onchange="handleInventorySelection(this)">
+          ${inventoryOptions}
+        </select>
+        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" value="${item?.description || ''}" />
+        <input type="number" placeholder="Qty" min="1" step="1" value="${item?.qty || 1}" class="invoice-item-qty" style="width:70px;" />
+        <input type="number" placeholder="Unit price" min="0" step="0.01" value="${item?.price || ''}" class="invoice-item-price" style="width:120px;" />
+        <button type="button" class="small danger invoice-item-remove">×</button>
+      </div>
+    `;
+  }
+  
+  function handleInventorySelection(selectElement) {
+    const itemRow = selectElement.closest('.invoice-item');
+    const descInput = itemRow.querySelector('.invoice-item-desc');
+    const priceInput = itemRow.querySelector('.invoice-item-price');
+    
+    const inventoryId = selectElement.value;
+    if(!inventoryId) return;
+    
+    const b = findBiz(selectedBizId);
+    const inventoryItem = b?.inventory?.find(i => i.id === inventoryId);
+    
+    if(inventoryItem) {
+      descInput.value = inventoryItem.name;
+      priceInput.value = inventoryItem.averageCost || 0;
+      // Store inventory ID on the row for reference
+      itemRow.dataset.inventoryId = inventoryId;
+    }
+    
+    updateInvoiceTotal();
+  }
+  
+  // Make handleInventorySelection available globally
+  window.handleInventorySelection = handleInventorySelection;
 
   function openEditInvoice(inv){
     editingInvoice = inv;
@@ -6391,19 +6670,10 @@
     invoiceVatType.value = inv.vatType;
     invoicePaymentTerms.value = inv.paymentTerms;
     
-    // Populate items
+    // Populate items with inventory dropdown
     invoiceItems.innerHTML = '';
     for(const item of inv.items){
-      const itemDiv = document.createElement('div');
-      itemDiv.className = 'invoice-item';
-      itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
-      itemDiv.innerHTML = `
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" value="${item.description}" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="${item.qty}" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" value="${item.price}" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      `;
-      invoiceItems.appendChild(itemDiv);
+      invoiceItems.innerHTML += createInvoiceItemRow(item);
     }
     
     updateInvoiceTotal();
