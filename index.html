@@ -678,8 +678,8 @@
         </div>
         
         <div class="dashboard-card">
-          <h3>Account Balances</h3>
-          <div id="dashboardAccountBalances"></div>
+          <h3>Snapshot Summary</h3>
+          <div id="dashboardSnapshotSummary"></div>
         </div>
         
         <div class="dashboard-card">
@@ -8577,28 +8577,45 @@
     `;
     document.getElementById('dashboardBusinessInfo').innerHTML = businessInfo;
     
-    // Account Balances
-    const accounts = b.accounts || [];
-    let accountBalances = '';
-    if(accounts.length === 0){
-      accountBalances = '<div class="muted">No accounts configured</div>';
-    } else {
-      accounts.slice(0, 5).forEach(acc => {
-        accountBalances += `
-          <div class="dashboard-metric">
-            <span class="dashboard-metric-label">${escapeHtml(acc.name)}</span>
-            <span class="dashboard-metric-value">${fmt(acc.balance || 0)}</span>
-          </div>
-        `;
-      });
-      if(accounts.length > 5){
-        accountBalances += `<div class="muted" style="text-align:center;margin-top:6px;">+${accounts.length - 5} more accounts</div>`;
+    // Snapshot Summary - Revenue, Expenses, and Profit
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    let revenue = 0, expenses = 0;
+    
+    for(const t of arr){
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Exclude tax payments from revenue/expenses
+      if (!isTaxPayment) {
+        if(t.accountCategory === 'Revenue') revenue += Number(t.amount || 0);
+        if(t.accountCategory === 'Expense') expenses += Number(t.amount || 0);
       }
     }
-    document.getElementById('dashboardAccountBalances').innerHTML = accountBalances;
     
-    // Tax Summary
-    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    // Add depreciation to expenses
+    const depreciation = computeTotalDepreciation();
+    expenses += depreciation;
+    
+    const profit = revenue - expenses;
+    
+    let snapshotSummary = `
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Revenue:</span>
+        <span class="dashboard-metric-value" style="color:#059669;">${fmt(revenue)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Expenses:</span>
+        <span class="dashboard-metric-value" style="color:#dc2626;">${fmt(expenses)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Profit:</span>
+        <span class="dashboard-metric-value" style="color:${profit >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(profit)}</span>
+      </div>
+    `;
+    document.getElementById('dashboardSnapshotSummary').innerHTML = snapshotSummary;
+    
+    // Tax Summary - reuse arr from above
     let totalVATCollected = 0;
     let totalVATPaid = 0;
     let totalWHT = 0;
