@@ -5353,8 +5353,11 @@
     
     const depreciationDaily = computeTotalDepreciation();
     expenses += depreciationDaily;
-    // Add back WHT receivable to accounting profit for revenues posted at net
-    const accountingProfit = revenue + whtReceivable - expenses;
+    // Accounting profit excludes WHT receivable per requirements
+    const accountingProfit = revenue - expenses;
+    
+    // Frank Investment Income adjustment (maps to WHT Receivable)
+    const frankInvestmentIncome = whtReceivable;
     
     // Get adjustment values from P&L snapshot
     const plSnapshot = computePLSnapshot();
@@ -5386,9 +5389,9 @@
       carriedForwardCA = (1/3) * totalCA;
     }
     
-    // Taxable profit calculation: Add back depreciation for tax, deduct CA
+    // Taxable profit calculation: Add back depreciation for tax, deduct CA, include WHT Receivable
     // Also add disallowable expenses and deduct non-taxable income adjustments
-    let taxableProfit = accountingProfit + depreciationDaily - allowedCA + disallowableExpense - nonTaxableIncomeAdjustment + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
+    let taxableProfit = accountingProfit + frankInvestmentIncome + depreciationDaily - allowedCA + disallowableExpense - nonTaxableIncomeAdjustment + (b.lossBroughtForward ? -b.lossBroughtForward : 0);
     const chargeableGains = computeChargeableGainsForBiz();
     const turnover = revenue;
     let cgtCharge = 0;
@@ -5474,9 +5477,9 @@
       }
       // If threshold is 0 (NONE), CIT = 0
       
-      // Deduct WHT remitted (already paid) only if CIT was actually computed (turnover above threshold and CIT > 0)
+      // Deduct WHT receivable (instead of WHT remitted) only if CIT was actually computed
       if(citCharge > 0) {
-        citCharge = Math.max(0, citCharge - whtPaidToAuthority);
+        citCharge = Math.max(0, citCharge - whtReceivable);
       } else {
         // CIT is 0% (turnover below threshold): carry forward WHT receivable to next period
         whtCarryForward = whtReceivable;
@@ -5488,8 +5491,8 @@
     if((b.entity === 'Business' || b.entity === 'Enterprise Plus') && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        // Deduct WHT remitted (already paid) from PIT charge
-        pitCharge = Math.max(0, pitLiability - whtPaidToAuthority);
+        // Deduct WHT receivable (instead of WHT remitted) from PIT charge
+        pitCharge = Math.max(0, pitLiability - whtReceivable);
       }
     }
 
@@ -5506,6 +5509,7 @@
     let html = '';
     // For Company/Business/Enterprise Plus: show full summary
     html += `<div><strong>Accounting Profit:</strong> ${fmt(accountingProfit)}</div>`;
+    html += `<div class="small-muted" style="padding-left:20px;">Add: Frank Investment Income: ${fmt(frankInvestmentIncome)}</div>`;
     html += `<div><strong>Taxable Profit:</strong> ${fmt(taxableProfit)}</div>`;
     html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
     html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
@@ -5779,7 +5783,7 @@
     // Define visibility per entity
     const visibilityRules = {
       'Business': {
-        'vatReport': false,
+        'vatReport': true,
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
@@ -5792,7 +5796,7 @@
         'receiptsFolder': true
       },
       'Enterprise Plus': {
-        'vatReport': false,
+        'vatReport': true,
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
@@ -5982,26 +5986,33 @@
     const ded = getStatutoryDeductions(b, contactId);
     const totalDed = totalStatutoryDeductions(ded);
     
-    // Calculations
+    // WHT receivable (Frank Investment Income)
+    let whtReceivable = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue') {
+        const rate = Number(t.whtRate || b.whtRate) / 100;
+        const basis = t.whtBasis || 'gross';
+        if(basis === 'net') {
+          whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+        } else {
+          whtReceivable += Number(t.amount || 0) * rate;
+        }
+      }
+    }
+    const frankInvestmentIncome = whtReceivable;
+    
+    // Calculations - exclude WHT receivable from accounting profit
     const accountingProfit = revenue - expenses;
     const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
-    const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
+    // Include Frank Investment Income (WHT Receivable) in taxable profit
+    const taxableProfit = Math.max(0, assessableProfit + frankInvestmentIncome - capitalAllowance);
     const adjustedTaxableProfit = Math.max(0, taxableProfit - totalDed);
     const grossTaxableProfit = adjustedTaxableProfit + chargeableGains;
     
     // Compute PIT using bands
     const pitLiability = computePAYEOnAnnualIncome(grossTaxableProfit);
-    
-    // WHT receivable
-    let whtReceivable = 0;
-    for(const t of arr){
-      if(t.whtApplied && t.accountCategory === 'Revenue') {
-        const rate = Number(t.whtRate || b.whtRate) / 100;
-        whtReceivable += Number(t.amount || 0) * rate;
-      }
-    }
     
     const finalLiability = Math.max(0, pitLiability - whtReceivable);
     const effectiveRate = grossTaxableProfit > 0 ? ((finalLiability / grossTaxableProfit) * 100).toFixed(2) : '0.00';
@@ -6013,6 +6024,10 @@
     
     // Accounting profit
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    
+    // Frank Investment Income
+    html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Frank Investment Income</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(frankInvestmentIncome)}</td></tr>`;
     
     // Disallowable expenses
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
@@ -6140,6 +6155,14 @@
     // Depreciation
     const depreciation = computeTotalDepreciation();
     expenses += depreciation;
+    
+    // Accounting profit excludes WHT receivable per requirements
+    const accountingProfit = revenue - expenses;
+    
+    // Frank Investment Income adjustment (maps to WHT Receivable)
+    const frankInvestmentIncome = whtReceivable;
+    
+    // Disallowable expenses include depreciation
     disallowableExpenses += depreciation;
     
     // Capital allowance
@@ -6162,12 +6185,12 @@
     
     disallowableExpenses += lossOnDisposal;
     
-    // Calculations - add back WHT receivable to accounting profit
-    const accountingProfit = revenue + whtReceivable - expenses;
-    const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome - profitOnDisposal;
+    // Calculations - exclude WHT receivable from accounting profit, add as Frank Investment Income to taxable profit
+    const adjustedProfit = accountingProfit + disallowableExpense - nonTaxableIncome - profitOnDisposal;
     const lossBF = Number(b.lossBroughtForward || 0);
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
-    const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
+    // Include Frank Investment Income (WHT Receivable) in taxable profit
+    const taxableProfit = Math.max(0, assessableProfit + frankInvestmentIncome - capitalAllowance);
     
     // Determine CIT rate based on turnover (Nigerian CIT progressive rates)
     // Micro companies (turnover <= ₦25M): 0%
@@ -6185,8 +6208,8 @@
     
     const citLiability = taxableProfit * citRate;
     
-    // Use WHT remitted instead of WHT receivable for final liability
-    const finalLiability = Math.max(0, citLiability - whtRemitted);
+    // Use WHT receivable instead of WHT remitted for final liability
+    const finalLiability = Math.max(0, citLiability - whtReceivable);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Company Income Tax Computation</h3>`;
@@ -6195,6 +6218,9 @@
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+    
+    html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Frank Investment Income</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(frankInvestmentIncome)}</td></tr>`;
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Depreciation</td><td style="text-align:right;">${fmt(depreciation)}</td></tr>`;
@@ -6219,7 +6245,7 @@
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
@@ -8955,8 +8981,15 @@
       expenseBreakdown['Depreciation'] = depreciation;
       otherExpenses += depreciation;
       
-      const grossProfit = revenue + whtReceivable - costOfSales;
-      const profitBeforeTax = grossProfit - otherExpenses;
+      // Frank Investment Income (WHT Receivable)
+      const frankInvestmentIncome = whtReceivable;
+      
+      // Accounting profit excludes WHT receivable
+      const grossProfit = revenue - costOfSales;
+      const accountingProfit = grossProfit - otherExpenses;
+      
+      // Add Frank Investment Income for taxable profit calculation
+      const profitBeforeTax = accountingProfit + frankInvestmentIncome;
       
       // Calculate tax (simplified - using CIT if available)
       let taxAmount = 0;
@@ -9007,6 +9040,12 @@
       for(const expName in expenseBreakdown) {
         html += `<tr><td style="padding-left:20px;">${expName}</td><td style="text-align:right;">(${fmt(expenseBreakdown[expName])})</td></tr>`;
       }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Accounting Profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
+      
+      // Add: Frank Investment Income
+      html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Frank Investment Income</strong></td></tr>`;
+      html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(frankInvestmentIncome)}</td></tr>`;
+      
       html += `<tr style="background:#f2f6fa;"><td><strong>Profit Before Tax (PBT)</strong></td><td style="text-align:right;"><strong>${fmt(profitBeforeTax)}</strong></td></tr>`;
       html += `<tr><td>Less: Tax</td><td style="text-align:right;">(${fmt(taxAmount)})</td></tr>`;
       html += `<tr style="background:#e6f3ff;"><td><strong>Profit After Tax (PAT)</strong></td><td style="text-align:right;"><strong>${fmt(profitAfterTax)}</strong></td></tr>`;
