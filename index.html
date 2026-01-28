@@ -1312,11 +1312,6 @@
       </select>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountDisallowable" /> Disallowable</label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountNonTax" /> Non-taxable</label>
-      <select id="newAccountRentFreq">
-        <option value="">Rent freq</option>
-        <option value="monthly">Monthly rent</option>
-        <option value="yearly">Yearly rent</option>
-      </select>
       <button id="addAccountBtn" class="small">Add</button>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
@@ -1781,7 +1776,7 @@
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
   // Tax payment account names - used to exclude from P&L and track tax payments
-  const TAX_PAYMENT_ACCOUNTS = ['VAT Paid', 'VAT Refunded', 'WHT Remitted', 'WHT Paid', 'PAYE Paid', 'PIT Paid', 'CGT Paid', 'CIT Paid'];
+  const TAX_PAYMENT_ACCOUNTS = [];
   
   // Common account names constants (no longer used for filtering)
   const COMMON_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
@@ -2113,7 +2108,6 @@
   const newAccountCategory = document.getElementById('newAccountCategory');
   const newAccountDisallowable = document.getElementById('newAccountDisallowable');
   const newAccountNonTax = document.getElementById('newAccountNonTax');
-  const newAccountRentFreq = document.getElementById('newAccountRentFreq');
   const addAccountBtn = document.getElementById('addAccountBtn');
   const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
@@ -2375,26 +2369,7 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' },
-        // Tax payment tracking accounts
-        { name: 'VAT Refunded', category: 'Asset' },
-        { name: 'VAT Paid', category: 'Expense' },
-        { name: 'WHT Remitted', category: 'Expense' },
-        { name: 'WHT Paid', category: 'Expense' },
-        { name: 'PAYE Paid', category: 'Expense' },
-        { name: 'PIT Paid', category: 'Expense' },
-        { name: 'CGT Paid', category: 'Expense' },
-        { name: 'CIT Paid', category: 'Expense' },
-        // Liabilities for tax payables
-        { name: 'WHT Payable', category: 'Liability' },
-        { name: 'VAT Payable', category: 'Liability' },
-        { name: 'PAYE Payable', category: 'Liability' },
-        { name: 'CIT Payable', category: 'Liability' },
-        { name: 'PIT Payable', category: 'Liability' },
-        { name: 'CGT Payable', category: 'Liability' },
-        // Assets for tax receivables
-        { name: 'WHT Receivable', category: 'Asset' },
-        { name: 'VAT Refundable', category: 'Asset' }
+        { name: 'Sales Revenue', category: 'Revenue' }
       ];
       
       for (const acct of accountsToAdd) {
@@ -3795,14 +3770,19 @@
     const cat = newAccountCategory.value;
     const dis = !!newAccountDisallowable.checked;
     const nt = !!newAccountNonTax.checked;
-    const rentFreq = newAccountRentFreq.value || '';
     if(!name) return alert('Account name required');
     const b = findBiz(selectedBizId);
     b.accounts = b.accounts || [];
-    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq };
+    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt };
     b.accounts.push(newAcct);
     addAudit('account.add','account', newAcct.id, `Added account: ${name}`);
     saveState();
+    
+    // Reset input fields to blank state
+    newAccountName.value = '';
+    newAccountDisallowable.checked = false;
+    newAccountNonTax.checked = false;
+    
     renderAccounts();
     populateAccountSelect();
   }
@@ -9381,6 +9361,16 @@
       delBtn.textContent='Delete'; 
       delBtn.addEventListener('click', ()=> deleteAccount(a.id));
       
+      // Add Save button for Assets, Liabilities, and Capital
+      const saveBtn = document.createElement('button');
+      saveBtn.className='small primary';
+      saveBtn.textContent='Save';
+      saveBtn.style.marginLeft = '6px';
+      saveBtn.addEventListener('click', ()=> {
+        saveState();
+        alert('Account saved successfully');
+      });
+      
       // Determine which tabs use this account
       const usedIn = [];
       usedIn.push('Ledger'); // All accounts used in Ledger
@@ -9393,18 +9383,23 @@
       const usageBadge = `<span class="account-usage-badge">Used in: ${usedIn.join(', ')}</span>`;
       
       headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span> ${usageBadge}</div>`;
+      
+      // Add Save and Delete buttons for Asset, Liability, and Capital accounts
+      if(['Asset', 'Liability', 'Capital'].includes(a.category)) {
+        headerDiv.appendChild(saveBtn);
+      }
       headerDiv.appendChild(delBtn);
       div.appendChild(headerDiv);
       
-      // Show balance fields for eligible accounts (only closing balance, opening removed)
+      // Show balance fields for eligible accounts
       if(balanceAccounts.includes(a.name)){
         const balDiv = document.createElement('div');
         balDiv.style.display = 'flex';
         balDiv.style.gap = '8px';
         balDiv.innerHTML = `
-          <label class="small-note">Closing Balance: 
-            <input type="number" class="smallInput" value="${a.closingBalance||0}" 
-              onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
+          <label class="small-note">Opening Balance: 
+            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
           </label>
         `;
         div.appendChild(balDiv);
@@ -9420,7 +9415,9 @@
     const account = b.accounts.find(a => a.id === accountId);
     if(!account) return;
     
-    if(type === 'closing'){
+    if(type === 'opening'){
+      account.openingBalance = Number(value || 0);
+    } else if(type === 'closing'){
       account.closingBalance = Number(value || 0);
     }
     saveState();
