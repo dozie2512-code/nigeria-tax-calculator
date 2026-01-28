@@ -1341,6 +1341,7 @@
       <div class="row">
         <label>Mortgage interest (₦): <input type="number" id="contactDedMortgage" class="smallInput" min="0" step="0.01" /></label>
         <label>NHF (₦): <input type="number" id="contactDedNHF" class="smallInput" min="0" step="0.01" /></label>
+        <label>NHIS (₦): <input type="number" id="contactDedNHIS" class="smallInput" min="0" step="0.01" /></label>
       </div>
       <small class="note">These deductions override business-level statutory deductions when computing PIT/PAYE for this contact.</small>
     </div>
@@ -2896,6 +2897,10 @@
     loginSubmit.addEventListener('click', handleLogin);
     loginCancel.addEventListener('click', ()=> closeModal(loginModal));
 
+    // User and Business select change handlers
+    userSelect.addEventListener('change', ()=> { selectedUserId = userSelect.value; renderAll(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
+    businessSelect.addEventListener('change', ()=> { selectedBizId = businessSelect.value; populateAccountSelect(); renderAll(); renderFeatureVisibility(); updateReportTabVisibility(); if (typeof updateContactDropdowns === 'function') updateContactDropdowns(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
+
     // Pre-login overlay handler - authenticates user from overlay form
     if(preLoginSubmit){
       preLoginSubmit.addEventListener('click', handlePreLogin);
@@ -4006,8 +4011,6 @@
     if(!selectedBizId && state.businesses[0]) selectedBizId = state.businesses[0].id;
     userSelect.value = selectedUserId || (state.users[0] && state.users[0].id) || '';
     businessSelect.value = selectedBizId || (state.businesses[0] && state.businesses[0].id) || '';
-    userSelect.addEventListener('change', ()=> { selectedUserId = userSelect.value; renderAll(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
-    businessSelect.addEventListener('change', ()=> { selectedBizId = businessSelect.value; populateAccountSelect(); renderAll(); renderFeatureVisibility(); updateReportTabVisibility(); if (typeof updateContactDropdowns === 'function') updateContactDropdowns(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
     if(state.auth.currentUserId) selectedUserId = state.auth.currentUserId;
     userSelect.value = selectedUserId;
   }
@@ -4900,6 +4903,9 @@
       if(btnAddBusiness) btnAddBusiness.disabled = false;
       if(btnDeleteBusiness) btnDeleteBusiness.disabled = false;
       if(businessSelect) businessSelect.disabled = false;
+      if(btnAddUser) btnAddUser.disabled = false;
+      if(btnEditUser) btnEditUser.disabled = false;
+      if(btnDeleteUser) btnDeleteUser.disabled = false;
       // Edit business may still be restricted per entityLocked
     }
   }
@@ -8570,6 +8576,22 @@
       return;
     }
     
+    // Snapshot Summary - Revenue, Expenses, and Profit - Calculate first to get turnover
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    let revenue = 0, expenses = 0;
+    
+    for(const t of arr){
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Exclude tax payments from revenue/expenses
+      if (!isTaxPayment) {
+        if(t.accountCategory === 'Revenue') revenue += Number(t.amount || 0);
+        if(t.accountCategory === 'Expense') expenses += Number(t.amount || 0);
+      }
+    }
+    
     // Business Info
     // Calculate turnover for CIT determination
     const turnover = revenue;
@@ -8607,22 +8629,6 @@
     `;
     
     document.getElementById('dashboardBusinessInfo').innerHTML = businessInfo;
-    
-    // Snapshot Summary - Revenue, Expenses, and Profit
-    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
-    let revenue = 0, expenses = 0;
-    
-    for(const t of arr){
-      const acct = findAccount(b, t.accountId);
-      const accountName = acct?.name || t.accountName || '';
-      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
-      
-      // Exclude tax payments from revenue/expenses
-      if (!isTaxPayment) {
-        if(t.accountCategory === 'Revenue') revenue += Number(t.amount || 0);
-        if(t.accountCategory === 'Expense') expenses += Number(t.amount || 0);
-      }
-    }
     
     // Add depreciation to expenses
     const depreciation = computeTotalDepreciation();
@@ -9233,8 +9239,10 @@
     for(const c of b.contacts || []){
       const div = document.createElement('div'); div.className='account-row';
       const editBtn = document.createElement('button'); editBtn.className='small'; editBtn.textContent='Edit'; editBtn.addEventListener('click', ()=> editContact(c.id));
+      const deleteBtn = document.createElement('button'); deleteBtn.className='small danger'; deleteBtn.textContent='Delete'; deleteBtn.addEventListener('click', ()=> deleteContact(c.id));
       div.innerHTML = `<div><strong>${c.name}</strong> <span class="small-muted">(${c.type})</span></div>`;
       div.appendChild(editBtn);
+      div.appendChild(deleteBtn);
       bizContactsList.appendChild(div);
     }
   }
@@ -9265,6 +9273,7 @@
     const contactDedLife = document.getElementById('contactDedLife');
     const contactDedMortgage = document.getElementById('contactDedMortgage');
     const contactDedNHF = document.getElementById('contactDedNHF');
+    const contactDedNHIS = document.getElementById('contactDedNHIS');
     const contactDeductionsSection = document.getElementById('contactDeductionsSection');
     
     if(!contactEditModal) return;
@@ -9280,12 +9289,34 @@
     contactDedLife.value = ded.life || 0;
     contactDedMortgage.value = ded.mortgage || 0;
     contactDedNHF.value = ded.nhf || 0;
+    contactDedNHIS.value = ded.nhis || 0;
     
     // Show/hide deductions section based on contact type
     const showDeductions = (contact.type === 'Employee' || contact.type === 'SoleTrader');
     contactDeductionsSection.style.display = showDeductions ? 'block' : 'none';
     
     openModal(contactEditModal);
+  }
+
+  function deleteContact(id){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    const contact = (b.contacts || []).find(c => c.id === id);
+    if(!contact) {
+      alert('Contact not found');
+      return;
+    }
+    
+    if(!confirm(`Delete contact "${contact.name}"? This cannot be undone.`)) return;
+    
+    // Remove the contact from the business
+    b.contacts = (b.contacts || []).filter(c => c.id !== id);
+    
+    saveState();
+    addAudit('contact.delete', 'contact', id, 'Deleted contact: ' + contact.name);
+    renderBizContacts(b);
+    alert('Contact deleted successfully');
   }
   
   /**
@@ -10269,7 +10300,8 @@
             rent: Number(document.getElementById('contactDedRent').value || 0),
             life: Number(document.getElementById('contactDedLife').value || 0),
             mortgage: Number(document.getElementById('contactDedMortgage').value || 0),
-            nhf: Number(document.getElementById('contactDedNHF').value || 0)
+            nhf: Number(document.getElementById('contactDedNHF').value || 0),
+            nhis: Number(document.getElementById('contactDedNHIS').value || 0)
           };
         } else {
           // Clear deductions for non-employee/non-soletrader contacts
