@@ -77,7 +77,7 @@
       users.push(newUser); saveUsers(users);
       setTokenFor(newUser.id);
       showMsg(signupMsg,'Account created — redirecting...', true);
-      setTimeout(()=>{ window.location.href = '/index.html'; }, 700);
+      setTimeout(()=>{ window.location.href = '/welcome.html'; }, 700);
     });
 
     loginForm.addEventListener('submit', async (e)=>{
