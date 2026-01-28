@@ -1191,7 +1191,7 @@
   <div id="userModal" class="modal">
     <h3 id="userModalTitle">Add User</h3>
     <div class="row">
-      <label>Username: <input type="text" id="userName" /></label>
+      <label>Email: <input type="email" id="userEmail" /></label>
       <label>Display: <input type="text" id="userDisplay" /></label>
       <label>Password: <input type="password" id="userPassword" placeholder="Required for new users" /></label>
       <label>Role:
@@ -2067,7 +2067,7 @@
   const modalOverlay = document.getElementById('modalOverlay');
   const userModal = document.getElementById('userModal');
   const userModalTitle = document.getElementById('userModalTitle');
-  const userName = document.getElementById('userName');
+  const userEmail = document.getElementById('userEmail');
   const userDisplay = document.getElementById('userDisplay');
   const userRole = document.getElementById('userRole');
   const permView = document.getElementById('permView');
@@ -3553,7 +3553,7 @@
   // UI helper functions
   function openUserModal(editId){
     userModalTitle.textContent = editId ? 'Edit User' : 'Add User';
-    userName.value = ''; userDisplay.value = ''; userRole.value = 'User';
+    userEmail.value = ''; userDisplay.value = ''; userRole.value = 'User';
     permView.checked = permEdit.checked = permDelete.checked = false;
     userSave.dataset.edit = editId || '';
     
@@ -3571,13 +3571,13 @@
     
     if(editId){
       const u = state.users.find(x=>x.id===editId);
-      if(u){ userName.value = u.username; userDisplay.value = u.display || u.username; userRole.value = u.role; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; }
+      if(u){ userEmail.value = u.email || u.username || ''; userDisplay.value = u.display || u.username || u.email || ''; userRole.value = u.role; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; }
     }
     openModal(userModal);
   }
   async function saveUser(){
-    const username = (userName.value||'').trim();
-    if(!username) return alert('Username required');
+    const email = (userEmail.value||'').trim();
+    if(!email) return alert('Email required');
     
     const userPassword = document.getElementById('userPassword');
     const password = userPassword ? userPassword.value.trim() : '';
@@ -3585,7 +3585,7 @@
     const editId = userSave.dataset.edit;
     if(editId){
       const u = state.users.find(x=>x.id===editId);
-      u.username = username; u.display = userDisplay.value || username; u.role = userRole.value;
+      u.email = email; u.username = email; u.display = userDisplay.value || email; u.role = userRole.value;
       u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked };
       
       // Update password if provided
@@ -3605,10 +3605,10 @@
         return alert('User limit reached! This business already has the maximum of ' + MAX_USERS_PER_BUSINESS + ' users. Cannot add more users.');
       }
       
-      // Check username uniqueness
-      const existingUser = state.users.find(u => u.username === username);
+      // Check email uniqueness
+      const existingUser = state.users.find(u => u.email === email || u.username === email);
       if(existingUser) {
-        return alert('Username already exists. Please choose a different username.');
+        return alert('Email already exists. Please choose a different email.');
       }
       
       // Hash the password
@@ -3616,8 +3616,9 @@
       
       const newUser = { 
         id: uid('user'), 
-        username, 
-        display: userDisplay.value || username, 
+        username: email, 
+        email: email,
+        display: userDisplay.value || email, 
         role: userRole.value, 
         isAdmin: userRole.value==='Admin', 
         passwordHash: passwordHash,
@@ -3996,7 +3997,27 @@
     userSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; userSelect.appendChild(opt); }
     businessSelect.innerHTML = '';
-    for(const b of state.businesses){ const opt = document.createElement('option'); opt.value = b.id; opt.textContent = b.name; businessSelect.appendChild(opt); }
+    
+    // Filter businesses based on user permissions
+    const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
+    const isAdministrator = currentUser && currentUser.email === 'salesrepng@gmail.com';
+    
+    for(const b of state.businesses){
+      // Show all businesses to Administrator (salesrepng@gmail.com)
+      // Otherwise, only show businesses user created or is scoped to
+      const canSee = isAdministrator || 
+                     b.ownerId === state.auth.currentUserId || 
+                     (currentUser && currentUser.scopedToBusinessId === b.id) ||
+                     (currentUser && !currentUser.createdByAdmin); // Users who signed up see all their businesses
+      
+      if(canSee) {
+        const opt = document.createElement('option'); 
+        opt.value = b.id; 
+        opt.textContent = b.name; 
+        businessSelect.appendChild(opt);
+      }
+    }
+    
     bizOwnerSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; bizOwnerSelect.appendChild(opt); }
   }
