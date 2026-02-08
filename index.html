@@ -131,6 +131,17 @@
     details.plan-card summary .plan-header-right .plan-offer-price { color:#059669; font-size:1.15rem; font-weight:700; }
     details.plan-card summary .plan-arrow { transition:transform 0.2s ease; font-size:0.8rem; color:#64748b; }
     details.plan-card[open] summary .plan-arrow { transform:rotate(180deg); }
+    /* Dashboard styles */
+    .dashboard-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; margin-bottom:12px; }
+    .dashboard-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; }
+    .dashboard-card h3 { margin:0 0 10px 0; font-size:1rem; color:#1e293b; border-bottom:1px solid #e2e8f0; padding-bottom:6px; }
+    .dashboard-metric { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f1f5f9; }
+    .dashboard-metric:last-child { border-bottom:none; }
+    .dashboard-metric-label { color:#64748b; font-size:0.9rem; }
+    .dashboard-metric-value { font-weight:600; color:#1e293b; }
+    .dashboard-nav-btn { display:inline-block; padding:6px 12px; margin:4px; background:#0b76d1; color:#fff; border-radius:6px; text-decoration:none; font-size:0.85rem; cursor:pointer; border:none; }
+    .dashboard-nav-btn:hover { background:#0a68be; }
+    .account-usage-badge { display:inline-block; font-size:0.75rem; padding:2px 6px; margin-left:6px; border-radius:4px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; }
   </style>
 
   <!-- jsPDF for PDF export -->
@@ -631,9 +642,11 @@
       <div class="spacer"></div>
 
       <div class="tabbar">
-        <button class="tab active" id="btnLedgerTab">Ledger</button>
+        <button class="tab active" id="btnDashboardTab">Dashboard</button>
+        <button class="tab" id="btnLedgerTab">Ledger</button>
         <button class="tab" id="btnInvoicingTab">Invoicing</button>
         <button class="tab" id="btnCashbookTab">Cashbook</button>
+        <button class="tab" id="btnBankReconciliationTab">Bank Reconciliation</button>
         <button class="tab" id="btnReportsTab">Reports</button>
       </div>
 
@@ -654,7 +667,54 @@
   <!-- Hero Promo Section removed - pricing shown only in pre-login overlay -->
 
   <main>
-    <section id="ledgerSection" class="panel section">
+    <!-- Dashboard Section -->
+    <section id="dashboardSection" class="panel section">
+      <h2 style="margin:0 0 12px 0;">Dashboard</h2>
+      
+      <div class="dashboard-grid">
+        <div class="dashboard-card">
+          <h3>Business Summary</h3>
+          <div id="dashboardBusinessInfo"></div>
+        </div>
+        
+        <div class="dashboard-card">
+          <h3>Snapshot Summary</h3>
+          <div id="dashboardSnapshotSummary"></div>
+        </div>
+        
+        <div class="dashboard-card">
+          <h3>Tax Summary</h3>
+          <div id="dashboardTaxSummary"></div>
+        </div>
+      </div>
+      
+      <div class="dashboard-grid">
+        <div class="dashboard-card" style="grid-column:1/-1;">
+          <h3>Recent Transactions (Last 10)</h3>
+          <div id="dashboardRecentTransactions"></div>
+        </div>
+      </div>
+      
+      <div class="dashboard-grid">
+        <div class="dashboard-card">
+          <h3>Bank Reconciliation Status</h3>
+          <div id="dashboardBankRecStatus"></div>
+        </div>
+        
+        <div class="dashboard-card">
+          <h3>Quick Navigation</h3>
+          <div style="padding:10px 0;">
+            <button class="dashboard-nav-btn" onclick="activeTab='ledger';renderTab();">Go to Ledger</button>
+            <button class="dashboard-nav-btn" onclick="activeTab='invoicing';renderTab();">Go to Invoicing</button>
+            <button class="dashboard-nav-btn" onclick="activeTab='cashbook';renderTab();">Go to Cashbook</button>
+            <button class="dashboard-nav-btn" onclick="activeTab='bankReconciliation';renderTab();">Go to Bank Reconciliation</button>
+            <button class="dashboard-nav-btn" onclick="activeTab='reports';renderTab();">Go to Reports</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="ledgerSection" class="panel section" style="display:none;">
       <h2 style="margin:0 0 8px 0;">Add Transaction / Inventory / Asset</h2>
 
       <div id="mainTxnForm" class="form-inline">
@@ -663,6 +723,8 @@
         <label>Action:
           <select id="txnAction">
             <option value="">-- Select action --</option>
+            <option value="Invoicing">Invoicing</option>
+            <option value="Cashbook">Cashbook</option>
             <option value="InventoryPurchase">Inventory Purchase</option>
             <option value="InventorySale">Inventory Sale</option>
             <option value="Expense">Expense</option>
@@ -692,7 +754,7 @@
           </select>
         </label>
 
-        <label class="inline-label">
+        <label class="inline-label" id="txnWhtLabel">
           <input type="checkbox" id="txnWht" /> WHT applied
         </label>
         <label id="txnWhtBasisLabel" style="display:none;">Basis:
@@ -709,7 +771,7 @@
 
         <div style="width:1px;height:28px;background:#e6e6e6;margin:0 8px;"></div>
 
-        <label>Adjustment:
+        <label id="txnAdjustmentLabel">Adjustment:
           <select id="txnAdjustmentType">
             <option value="">None</option>
             <option value="disallowable">Disallowable expense</option>
@@ -877,7 +939,12 @@
 
     <!-- Invoicing Section -->
     <section id="invoicingSection" class="panel section" style="display:none;">
-      <h2 style="margin:0 0 8px 0;">Invoicing</h2>
+      <h2 style="margin:0 0 8px 0;">Invoicing & Receivables</h2>
+      
+      <!-- Receivables Summary Dashboard -->
+      <div id="receivablesSummary" class="tax-summary" style="margin-bottom:16px;">
+        <!-- Will be populated by renderReceivablesSummary() -->
+      </div>
       
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <button class="primary small" id="btnCreateInvoice">Create Invoice</button>
@@ -919,6 +986,8 @@
       
       <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
         <button class="primary small" id="btnAddCashEntry">Add Entry</button>
+        <button class="small" id="btnSetStartingBalance">Set Starting Balance</button>
+        <button class="small" id="btnManageAccountsCashbook">Manage Accounts</button>
         <div class="spacer"></div>
         <label style="display:flex; gap:8px; align-items:center;">
           From:
@@ -959,16 +1028,135 @@
             <tr>
               <th>Date</th>
               <th>Type</th>
-              <th>Category</th>
+              <th>Account</th>
               <th>Description</th>
               <th>Inflow</th>
               <th>Outflow</th>
               <th>Balance</th>
+              <th>Ledger</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="cashbookTableBody"></tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- Bank Reconciliation Section -->
+    <section id="bankReconciliationSection" class="panel section" style="display:none;">
+      <h2 style="margin:0 0 8px 0;">Bank Reconciliation</h2>
+      
+      <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+        <button class="primary small" id="btnNewReconciliation">New Reconciliation</button>
+        <button class="small" id="btnImportBankStatement">Import Bank Statement (CSV)</button>
+        <div class="spacer"></div>
+        <label style="display:flex; gap:8px; align-items:center;">
+          Status:
+          <select id="reconciliationStatusFilter">
+            <option value="all">All</option>
+            <option value="pending">Pending</option>
+            <option value="completed">Completed</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Reconciliation List -->
+      <div class="table-scroll" id="reconciliationListView">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Period</th>
+              <th>Account</th>
+              <th>Statement Balance</th>
+              <th>Ledger Balance</th>
+              <th>Difference</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="reconciliationTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Reconciliation Detail View (hidden by default) -->
+      <div id="reconciliationDetailView" style="display:none;">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+          <button class="small" id="btnBackToReconciliationList">← Back to List</button>
+          <h3 style="margin:0; flex:1;" id="reconciliationDetailTitle">Reconciliation Detail</h3>
+          <button class="small" id="btnAutoMatch">Auto-Match</button>
+          <button class="primary small" id="btnCompleteReconciliation">Complete Reconciliation</button>
+        </div>
+
+        <div class="totals" style="margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+            <div>
+              <div class="small-muted">Bank Statement Balance</div>
+              <div style="font-size:1.1rem; font-weight:600;" id="reconcilStatementBalance">₦0.00</div>
+            </div>
+            <div>
+              <div class="small-muted">Ledger Balance</div>
+              <div style="font-size:1.1rem; font-weight:600;" id="reconcilLedgerBalance">₦0.00</div>
+            </div>
+            <div>
+              <div class="small-muted">Matched Transactions</div>
+              <div style="font-size:1.1rem; font-weight:600; color:#059669;" id="reconcilMatchedCount">0</div>
+            </div>
+            <div>
+              <div class="small-muted">Unmatched Items</div>
+              <div style="font-size:1.1rem; font-weight:600; color:#dc2626;" id="reconcilUnmatchedCount">0</div>
+            </div>
+            <div>
+              <div class="small-muted">Difference</div>
+              <div style="font-size:1.1rem; font-weight:600;" id="reconcilDifference">₦0.00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bank Statement Items -->
+        <div style="margin-bottom:16px;">
+          <h4 style="margin:8px 0;">Bank Statement Items</h4>
+          <div class="table-scroll">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th style="width:40px;"><input type="checkbox" id="selectAllBankItems" /></th>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Reference</th>
+                  <th>Debit</th>
+                  <th>Credit</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="bankStatementItemsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Ledger Items -->
+        <div>
+          <h4 style="margin:8px 0;">Ledger Items (Unmatched)</h4>
+          <div class="table-scroll">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th style="width:40px;"><input type="checkbox" id="selectAllLedgerItems" /></th>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Account</th>
+                  <th>Debit</th>
+                  <th>Credit</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerItemsBody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1003,7 +1191,7 @@
   <div id="userModal" class="modal">
     <h3 id="userModalTitle">Add User</h3>
     <div class="row">
-      <label>Username: <input type="text" id="userName" /></label>
+      <label>Email: <input type="email" id="userEmail" /></label>
       <label>Display: <input type="text" id="userDisplay" /></label>
       <label>Password: <input type="password" id="userPassword" placeholder="Required for new users" /></label>
       <label>Role:
@@ -1067,7 +1255,7 @@
     <div class="form-section">
       <div class="row">
         <label>Loss brought forward (₦): <input type="number" id="bizLossBF" class="smallInput" min="0" step="0.01" /></label>
-        <label>CA carryforward (₦): <input type="number" id="bizCACF" class="smallInput" min="0" step="0.01" /></label>
+        <label>CA broughtforward (₦): <input type="number" id="bizCACF" class="smallInput" min="0" step="0.01" /></label>
       </div>
 
       <div class="row" style="margin-top:6px;">
@@ -1075,20 +1263,8 @@
         <label><input type="checkbox" id="bizDefaultRevenueNonTax" /> Default revenue non-taxable (business-level)</label>
       </div>
 
-      <div style="margin-top:8px;">
-        <h4 style="margin:6px 0 4px 0;">Annual statutory deductions (used for PAYE / PIT)</h4>
-        <div class="row">
-          <label>Pension (₦): <input type="number" id="bizDedPension" class="smallInput" min="0" step="0.01" /></label>
-          <label>Rent relief (₦): <input type="number" id="bizDedRent" class="smallInput" min="0" step="0.01" /></label>
-          <label>Life assurance (₦): <input type="number" id="bizDedLife" class="smallInput" min="0" step="0.01" /></label>
-          <label>Mortgage interest (₦): <input type="number" id="bizDedMortgage" class="smallInput" min="0" step="0.01" /></label>
-          <label>NHF (₦): <input type="number" id="bizDedNHF" class="smallInput" min="0" step="0.01" /></label>
-        </div>
-        <small class="note">If you set statutory deductions on a contact (SoleTrader), that will override these values for PIT.</small>
-      </div>
-
       <div style="margin-top:10px;">
-        <h4 style="margin:6px 0 4px 0;">Contacts</h4>
+        <h4 style="margin:6px 0 4px 0;">Employee Statutory Deductions</h4>
         <div id="bizContactsList" style="max-height:160px; overflow:auto;"></div>
         <div class="row">
           <input type="text" id="newContactName" placeholder="Contact name" />
@@ -1099,6 +1275,19 @@
           <button id="btnAddContact" class="small">Add Contact</button>
         </div>
         <small class="note">Add a contact with type "SoleTrader" (or name "Sole trader") and set statutory deductions there if you want PIT to use per-sole-trader deductions.</small>
+      </div>
+
+      <div id="annualStatutoryDeductionsSection" style="margin-top:8px; display:none;">
+        <h4 style="margin:6px 0 4px 0;">Annual Statutory Deductions (used for PAYE / PIT)</h4>
+        <div class="row">
+          <label>Pension (₦): <input type="number" id="bizDedPension" class="smallInput" min="0" step="0.01" /></label>
+          <label>Rent relief (₦): <input type="number" id="bizDedRent" class="smallInput" min="0" step="0.01" /></label>
+          <label>Life assurance (₦): <input type="number" id="bizDedLife" class="smallInput" min="0" step="0.01" /></label>
+          <label>Mortgage interest (₦): <input type="number" id="bizDedMortgage" class="smallInput" min="0" step="0.01" /></label>
+          <label>NHF (₦): <input type="number" id="bizDedNHF" class="smallInput" min="0" step="0.01" /></label>
+          <label>NHIS (₦): <input type="number" id="bizDedNHIS" class="smallInput" min="0" step="0.01" /></label>
+        </div>
+        <small class="note">If you set statutory deductions on a contact (SoleTrader), that will override these values for PIT.</small>
       </div>
 
     </div>
@@ -1123,11 +1312,6 @@
       </select>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountDisallowable" /> Disallowable</label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountNonTax" /> Non-taxable</label>
-      <select id="newAccountRentFreq">
-        <option value="">Rent freq</option>
-        <option value="monthly">Monthly rent</option>
-        <option value="yearly">Yearly rent</option>
-      </select>
       <button id="addAccountBtn" class="small">Add</button>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
@@ -1157,6 +1341,7 @@
       <div class="row">
         <label>Mortgage interest (₦): <input type="number" id="contactDedMortgage" class="smallInput" min="0" step="0.01" /></label>
         <label>NHF (₦): <input type="number" id="contactDedNHF" class="smallInput" min="0" step="0.01" /></label>
+        <label>NHIS (₦): <input type="number" id="contactDedNHIS" class="smallInput" min="0" step="0.01" /></label>
       </div>
       <small class="note">These deductions override business-level statutory deductions when computing PIT/PAYE for this contact.</small>
     </div>
@@ -1276,6 +1461,9 @@
   <h4 style="margin:12px 0 8px 0;">Items</h4>
   <div id="invoiceItems" style="margin-bottom:12px;">
     <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+      <select class="invoice-item-inventory" style="flex:1;">
+        <option value="">-- Select from Inventory or Enter Custom --</option>
+      </select>
       <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
       <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
       <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
@@ -1337,25 +1525,9 @@
     </label>
   </div>
   <div class="row">
-    <label>Category:
-      <select id="cashbookCategory">
-        <option value="">-- Select --</option>
-        <optgroup label="Revenue (Inflows)">
-          <option value="Sales">Sales</option>
-          <option value="Services">Services</option>
-          <option value="Investment Income">Investment Income</option>
-          <option value="Other Income">Other Income</option>
-        </optgroup>
-        <optgroup label="Expenses (Outflows)">
-          <option value="Purchases">Purchases</option>
-          <option value="Salaries">Salaries</option>
-          <option value="Rent">Rent</option>
-          <option value="Utilities">Utilities</option>
-          <option value="Office Supplies">Office Supplies</option>
-          <option value="Marketing">Marketing</option>
-          <option value="Transportation">Transportation</option>
-          <option value="Other Expenses">Other Expenses</option>
-        </optgroup>
+    <label>Account:
+      <select id="cashbookAccount" style="min-width:200px;">
+        <option value="">-- Select Account --</option>
       </select>
     </label>
     <label>Amount (₦): <input type="number" id="cashbookAmount" min="0" step="0.01" /></label>
@@ -1363,9 +1535,177 @@
   <div class="row">
     <label style="flex:1;">Description: <textarea id="cashbookDescription" rows="2" style="width:100%;"></textarea></label>
   </div>
+  <div class="row">
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="cashbookCreateLedger" checked />
+      Automatically create ledger transaction
+    </label>
+    <small class="muted">When checked, this entry will be recorded in the ledger</small>
+  </div>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
     <button id="cashbookCancel">Cancel</button>
     <button class="primary" id="cashbookSave">Save Entry</button>
+  </div>
+</div>
+
+<!-- Starting Balance Modal -->
+<div id="startingBalanceModal" class="modal">
+  <h3>Set Starting Balance</h3>
+  <div class="row">
+    <label>Date: <input type="date" id="startingBalanceDate" /></label>
+  </div>
+  <div class="row">
+    <label>Bank Account:
+      <select id="startingBalanceAccount" style="min-width:250px;">
+        <option value="">-- Select Bank Account --</option>
+      </select>
+    </label>
+    <label>Amount (₦): <input type="number" id="startingBalanceAmount" min="0" step="0.01" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Description: <textarea id="startingBalanceDescription" rows="2" style="width:100%;" placeholder="E.g., Opening balance for cashbook"></textarea></label>
+  </div>
+  <div class="row">
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="startingBalanceCreateLedger" checked />
+      Automatically create ledger transaction
+    </label>
+    <small class="muted">When checked, this entry will be recorded in the ledger</small>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="startingBalanceCancel">Cancel</button>
+    <button class="primary" id="startingBalanceSave">Set Starting Balance</button>
+  </div>
+</div>
+
+<!-- Bank Reconciliation Modal: New Reconciliation -->
+<div id="bankReconciliationModal" class="modal">
+  <h3 id="bankReconciliationModalTitle">New Bank Reconciliation</h3>
+  <div class="row">
+    <label>Date: <input type="date" id="reconciliationDate" /></label>
+    <label>Period:
+      <select id="reconciliationPeriod">
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="custom">Custom</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>From Date: <input type="date" id="reconciliationFromDate" /></label>
+    <label>To Date: <input type="date" id="reconciliationToDate" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Bank Account:
+      <select id="reconciliationAccount" style="width:100%;">
+        <option value="">-- Select Bank Account --</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>Statement Ending Balance (₦): <input type="number" id="reconciliationStatementBalance" min="0" step="0.01" /></label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Notes: <textarea id="reconciliationNotes" rows="2" style="width:100%;"></textarea></label>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="reconciliationCancel">Cancel</button>
+    <button class="primary" id="reconciliationSave">Create Reconciliation</button>
+  </div>
+</div>
+
+<!-- Bank Statement Import Modal -->
+<div id="bankStatementImportModal" class="modal">
+  <h3>Import Bank Statement (CSV)</h3>
+  <div style="margin-bottom:12px;">
+    <p class="muted" style="margin:0 0 8px 0;">Upload a CSV file with the following columns: Date, Description, Reference, Debit, Credit, Balance</p>
+    <div class="notice">
+      <strong>CSV Format Example:</strong><br>
+      Date,Description,Reference,Debit,Credit,Balance<br>
+      2026-01-15,Payment from Customer,TXN001,0,50000,100000<br>
+      2026-01-16,Salary Payment,TXN002,30000,0,70000
+    </div>
+  </div>
+  <div class="row">
+    <label style="flex:1;">
+      Select CSV File:
+      <input type="file" id="bankStatementFile" accept=".csv" style="margin-top:6px;" />
+    </label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Bank Account:
+      <select id="importBankAccount" style="width:100%;">
+        <option value="">-- Select Bank Account --</option>
+      </select>
+    </label>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="bankStatementImportCancel">Cancel</button>
+    <button class="primary" id="bankStatementImportConfirm">Import Statement</button>
+  </div>
+</div>
+
+<!-- Match Transaction Modal -->
+<div id="matchTransactionModal" class="modal">
+  <h3>Match Transaction</h3>
+  <div style="margin-bottom:12px;">
+    <strong>Bank Statement Item:</strong>
+    <div class="totals" style="margin-top:6px;">
+      <div id="matchBankItemDisplay"></div>
+    </div>
+  </div>
+  <div style="margin-bottom:12px;">
+    <strong>Select Ledger Transaction(s) to Match:</strong>
+    <div class="table-scroll" style="max-height:300px; margin-top:6px;">
+      <table class="ledger-table">
+        <thead>
+          <tr>
+            <th style="width:40px;"><input type="checkbox" id="selectAllMatchItems" /></th>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Debit</th>
+            <th>Credit</th>
+          </tr>
+        </thead>
+        <tbody id="matchLedgerItemsBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Match Notes: <textarea id="matchNotes" rows="2" style="width:100%;"></textarea></label>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="matchTransactionCancel">Cancel</button>
+    <button class="primary" id="matchTransactionSave">Confirm Match</button>
+  </div>
+</div>
+
+<!-- Discrepancy Modal -->
+<div id="discrepancyModal" class="modal">
+  <h3>Mark as Discrepancy</h3>
+  <div style="margin-bottom:12px;">
+    <strong>Transaction Details:</strong>
+    <div class="totals" style="margin-top:6px;">
+      <div id="discrepancyItemDisplay"></div>
+    </div>
+  </div>
+  <div class="row">
+    <label>Discrepancy Type:
+      <select id="discrepancyType">
+        <option value="timing">Timing Difference</option>
+        <option value="error">Bank Error</option>
+        <option value="missing">Missing Entry</option>
+        <option value="duplicate">Duplicate Entry</option>
+        <option value="other">Other</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">Notes (Required): <textarea id="discrepancyNotes" rows="3" style="width:100%;" required></textarea></label>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+    <button id="discrepancyCancel">Cancel</button>
+    <button class="primary" id="discrepancySave">Mark as Discrepancy</button>
   </div>
 </div>
 
@@ -1437,7 +1777,7 @@
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
   // Tax payment account names - used to exclude from P&L and track tax payments
-  const TAX_PAYMENT_ACCOUNTS = ['VAT Paid', 'VAT Refunded', 'WHT Remitted', 'WHT Paid', 'PAYE Paid', 'PIT Paid', 'CGT Paid', 'CIT Paid'];
+  const TAX_PAYMENT_ACCOUNTS = [];
   
   // Common account names constants (no longer used for filtering)
   const COMMON_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
@@ -1445,11 +1785,11 @@
   // App state
   let state = {
     users: [], businesses: [], transactions: {}, attachments: {}, audit: [], auth: { currentUserId: null },
-    invoices: {}, cashbook: {}
+    invoices: {}, cashbook: {}, bankReconciliations: {}
   };
   let selectedUserId = null;
   let selectedBizId = null;
-  let activeTab = 'ledger';
+  let activeTab = 'dashboard';
   let inventoryHistory = [];
   let assetHistory = [];
   let videoTourTimeout = null; // Timer for auto-closing video tour
@@ -1714,6 +2054,7 @@
   const inventoryListDiv = document.getElementById('inventoryList');
   const assetListDiv = document.getElementById('assetList');
 
+  const dashboardSection = document.getElementById('dashboardSection');
   const ledgerSection = document.getElementById('ledgerSection');
   const ledgerListSection = document.getElementById('ledgerListSection');
   const reportsSection = document.getElementById('reportsSection');
@@ -1722,7 +2063,7 @@
   const modalOverlay = document.getElementById('modalOverlay');
   const userModal = document.getElementById('userModal');
   const userModalTitle = document.getElementById('userModalTitle');
-  const userName = document.getElementById('userName');
+  const userEmail = document.getElementById('userEmail');
   const userDisplay = document.getElementById('userDisplay');
   const userRole = document.getElementById('userRole');
   const permView = document.getElementById('permView');
@@ -1756,6 +2097,7 @@
   const bizDedLife = document.getElementById('bizDedLife');
   const bizDedMortgage = document.getElementById('bizDedMortgage');
   const bizDedNHF = document.getElementById('bizDedNHF');
+  const bizDedNHIS = document.getElementById('bizDedNHIS');
   const bizContactsList = document.getElementById('bizContactsList');
   const newContactName = document.getElementById('newContactName');
   const newContactType = document.getElementById('newContactType');
@@ -1767,11 +2109,11 @@
   const newAccountCategory = document.getElementById('newAccountCategory');
   const newAccountDisallowable = document.getElementById('newAccountDisallowable');
   const newAccountNonTax = document.getElementById('newAccountNonTax');
-  const newAccountRentFreq = document.getElementById('newAccountRentFreq');
   const addAccountBtn = document.getElementById('addAccountBtn');
   const closeAccountsBtn = document.getElementById('closeAccountsBtn');
 
   const btnLedgerTab = document.getElementById('btnLedgerTab');
+  const btnDashboardTab = document.getElementById('btnDashboardTab');
   const btnInvoicingTab = document.getElementById('btnInvoicingTab');
   const btnCashbookTab = document.getElementById('btnCashbookTab');
   const btnReportsTab = document.getElementById('btnReportsTab');
@@ -1817,10 +2159,81 @@
   const cashbookDate = document.getElementById('cashbookDate');
   const cashbookType = document.getElementById('cashbookType');
   const cashbookCategory = document.getElementById('cashbookCategory');
+  const cashbookAccount = document.getElementById('cashbookAccount');
   const cashbookAmount = document.getElementById('cashbookAmount');
   const cashbookDescription = document.getElementById('cashbookDescription');
+  const cashbookCreateLedger = document.getElementById('cashbookCreateLedger');
   const cashbookSave = document.getElementById('cashbookSave');
   const cashbookCancel = document.getElementById('cashbookCancel');
+  const btnManageAccountsCashbook = document.getElementById('btnManageAccountsCashbook');
+  
+  // Starting Balance Modal DOM refs
+  const btnSetStartingBalance = document.getElementById('btnSetStartingBalance');
+  const startingBalanceModal = document.getElementById('startingBalanceModal');
+  const startingBalanceDate = document.getElementById('startingBalanceDate');
+  const startingBalanceAccount = document.getElementById('startingBalanceAccount');
+  const startingBalanceAmount = document.getElementById('startingBalanceAmount');
+  const startingBalanceDescription = document.getElementById('startingBalanceDescription');
+  const startingBalanceCreateLedger = document.getElementById('startingBalanceCreateLedger');
+  const startingBalanceSave = document.getElementById('startingBalanceSave');
+  const startingBalanceCancel = document.getElementById('startingBalanceCancel');
+
+  // Bank Reconciliation DOM refs
+  const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
+  const bankReconciliationSection = document.getElementById('bankReconciliationSection');
+  const btnNewReconciliation = document.getElementById('btnNewReconciliation');
+  const btnImportBankStatement = document.getElementById('btnImportBankStatement');
+  const reconciliationStatusFilter = document.getElementById('reconciliationStatusFilter');
+  const reconciliationTableBody = document.getElementById('reconciliationTableBody');
+  const reconciliationListView = document.getElementById('reconciliationListView');
+  const reconciliationDetailView = document.getElementById('reconciliationDetailView');
+  const btnBackToReconciliationList = document.getElementById('btnBackToReconciliationList');
+  const reconciliationDetailTitle = document.getElementById('reconciliationDetailTitle');
+  const btnAutoMatch = document.getElementById('btnAutoMatch');
+  const btnCompleteReconciliation = document.getElementById('btnCompleteReconciliation');
+  const reconcilStatementBalance = document.getElementById('reconcilStatementBalance');
+  const reconcilLedgerBalance = document.getElementById('reconcilLedgerBalance');
+  const reconcilMatchedCount = document.getElementById('reconcilMatchedCount');
+  const reconcilUnmatchedCount = document.getElementById('reconcilUnmatchedCount');
+  const reconcilDifference = document.getElementById('reconcilDifference');
+  const bankStatementItemsBody = document.getElementById('bankStatementItemsBody');
+  const ledgerItemsBody = document.getElementById('ledgerItemsBody');
+  const selectAllBankItems = document.getElementById('selectAllBankItems');
+  const selectAllLedgerItems = document.getElementById('selectAllLedgerItems');
+  
+  // Bank Reconciliation Modals DOM refs
+  const bankReconciliationModal = document.getElementById('bankReconciliationModal');
+  const bankReconciliationModalTitle = document.getElementById('bankReconciliationModalTitle');
+  const reconciliationDate = document.getElementById('reconciliationDate');
+  const reconciliationPeriod = document.getElementById('reconciliationPeriod');
+  const reconciliationFromDate = document.getElementById('reconciliationFromDate');
+  const reconciliationToDate = document.getElementById('reconciliationToDate');
+  const reconciliationAccount = document.getElementById('reconciliationAccount');
+  const reconciliationStatementBalance = document.getElementById('reconciliationStatementBalance');
+  const reconciliationNotes = document.getElementById('reconciliationNotes');
+  const reconciliationSave = document.getElementById('reconciliationSave');
+  const reconciliationCancel = document.getElementById('reconciliationCancel');
+  
+  const bankStatementImportModal = document.getElementById('bankStatementImportModal');
+  const bankStatementFile = document.getElementById('bankStatementFile');
+  const importBankAccount = document.getElementById('importBankAccount');
+  const bankStatementImportConfirm = document.getElementById('bankStatementImportConfirm');
+  const bankStatementImportCancel = document.getElementById('bankStatementImportCancel');
+  
+  const matchTransactionModal = document.getElementById('matchTransactionModal');
+  const matchBankItemDisplay = document.getElementById('matchBankItemDisplay');
+  const matchLedgerItemsBody = document.getElementById('matchLedgerItemsBody');
+  const selectAllMatchItems = document.getElementById('selectAllMatchItems');
+  const matchNotes = document.getElementById('matchNotes');
+  const matchTransactionSave = document.getElementById('matchTransactionSave');
+  const matchTransactionCancel = document.getElementById('matchTransactionCancel');
+  
+  const discrepancyModal = document.getElementById('discrepancyModal');
+  const discrepancyItemDisplay = document.getElementById('discrepancyItemDisplay');
+  const discrepancyType = document.getElementById('discrepancyType');
+  const discrepancyNotes = document.getElementById('discrepancyNotes');
+  const discrepancySave = document.getElementById('discrepancySave');
+  const discrepancyCancel = document.getElementById('discrepancyCancel');
 
   // New DOM refs for added features
   const btnLogin = document.getElementById('btnLogin');
@@ -1865,6 +2278,7 @@
   function uid(prefix = 'id'){ return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
   function fmt(n){ return (n==null || isNaN(Number(n))) ? '₦0.00' : '₦' + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function rawFmt(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function escapeHtml(text){ if(!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
   function today(){ return new Date().toISOString().slice(0,10); }
   function daysBetween(a,b){ return Math.round((new Date(b) - new Date(a)) / (1000*60*60*24)); }
   function toISO(date){ if(!date) return null; return new Date(date).toISOString().slice(0,10); }
@@ -1956,26 +2370,7 @@
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
-        { name: 'Sales Revenue', category: 'Revenue' },
-        // Tax payment tracking accounts
-        { name: 'VAT Refunded', category: 'Asset' },
-        { name: 'VAT Paid', category: 'Expense' },
-        { name: 'WHT Remitted', category: 'Expense' },
-        { name: 'WHT Paid', category: 'Expense' },
-        { name: 'PAYE Paid', category: 'Expense' },
-        { name: 'PIT Paid', category: 'Expense' },
-        { name: 'CGT Paid', category: 'Expense' },
-        { name: 'CIT Paid', category: 'Expense' },
-        // Liabilities for tax payables
-        { name: 'WHT Payable', category: 'Liability' },
-        { name: 'VAT Payable', category: 'Liability' },
-        { name: 'PAYE Payable', category: 'Liability' },
-        { name: 'CIT Payable', category: 'Liability' },
-        { name: 'PIT Payable', category: 'Liability' },
-        { name: 'CGT Payable', category: 'Liability' },
-        // Assets for tax receivables
-        { name: 'WHT Receivable', category: 'Asset' },
-        { name: 'VAT Refundable', category: 'Asset' }
+        { name: 'Sales Revenue', category: 'Revenue' }
       ];
       
       for (const acct of accountsToAdd) {
@@ -2502,6 +2897,10 @@
     loginSubmit.addEventListener('click', handleLogin);
     loginCancel.addEventListener('click', ()=> closeModal(loginModal));
 
+    // User and Business select change handlers
+    userSelect.addEventListener('change', ()=> { selectedUserId = userSelect.value; renderAll(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
+    businessSelect.addEventListener('change', ()=> { selectedBizId = businessSelect.value; populateAccountSelect(); renderAll(); renderFeatureVisibility(); updateReportTabVisibility(); if (typeof updateContactDropdowns === 'function') updateContactDropdowns(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
+
     // Pre-login overlay handler - authenticates user from overlay form
     if(preLoginSubmit){
       preLoginSubmit.addEventListener('click', handlePreLogin);
@@ -3011,6 +3410,7 @@
       });
     }
 
+    if(btnDashboardTab) btnDashboardTab.addEventListener('click', ()=> { activeTab='dashboard'; renderTab(); });
     btnLedgerTab.addEventListener('click', ()=> { activeTab='ledger'; renderTab(); });
     btnInvoicingTab.addEventListener('click', ()=> { activeTab='invoicing'; renderTab(); });
     btnCashbookTab.addEventListener('click', ()=> { activeTab='cashbook'; renderTab(); });
@@ -3023,12 +3423,7 @@
       const itemDiv = document.createElement('div');
       itemDiv.className = 'invoice-item';
       itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
-      itemDiv.innerHTML = `
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      `;
+      itemDiv.innerHTML = createInvoiceItemRow();
       invoiceItems.appendChild(itemDiv);
     });
     
@@ -3067,6 +3462,60 @@
     });
     cashbookSave.addEventListener('click', saveCashEntry);
     cashbookCancel.addEventListener('click', closeCashbookModal);
+    
+    // Starting Balance event listeners
+    if(btnSetStartingBalance){
+      btnSetStartingBalance.addEventListener('click', openSetStartingBalance);
+    }
+    if(startingBalanceSave){
+      startingBalanceSave.addEventListener('click', saveStartingBalance);
+    }
+    if(startingBalanceCancel){
+      startingBalanceCancel.addEventListener('click', closeStartingBalanceModal);
+    }
+    
+    // Bank Reconciliation event listeners
+    btnBankReconciliationTab.addEventListener('click', ()=> { activeTab='bankReconciliation'; renderTab(); });
+    btnNewReconciliation.addEventListener('click', openNewReconciliation);
+    btnImportBankStatement.addEventListener('click', openImportBankStatement);
+    reconciliationStatusFilter.addEventListener('change', renderBankReconciliations);
+    reconciliationSave.addEventListener('click', saveReconciliation);
+    reconciliationCancel.addEventListener('click', () => {
+      modalOverlay.style.display = 'none';
+      bankReconciliationModal.style.display = 'none';
+    });
+    btnBackToReconciliationList.addEventListener('click', backToReconciliationList);
+    btnAutoMatch.addEventListener('click', autoMatch);
+    btnCompleteReconciliation.addEventListener('click', completeReconciliation);
+    bankStatementImportConfirm.addEventListener('click', importBankStatement);
+    bankStatementImportCancel.addEventListener('click', () => {
+      modalOverlay.style.display = 'none';
+      bankStatementImportModal.style.display = 'none';
+    });
+    matchTransactionSave.addEventListener('click', saveMatch);
+    matchTransactionCancel.addEventListener('click', () => {
+      modalOverlay.style.display = 'none';
+      matchTransactionModal.style.display = 'none';
+    });
+    discrepancySave.addEventListener('click', saveDiscrepancy);
+    discrepancyCancel.addEventListener('click', () => {
+      modalOverlay.style.display = 'none';
+      discrepancyModal.style.display = 'none';
+    });
+    
+    // Manage accounts from cashbook
+    if(btnManageAccountsCashbook){
+      btnManageAccountsCashbook.addEventListener('click', ()=> { 
+        if(!selectedBizId) return alert('Select business'); 
+        renderAccounts(); 
+        openModal(accountsModal); 
+      });
+    }
+    
+    // Repopulate cashbook account dropdown when type changes
+    if(cashbookType){
+      cashbookType.addEventListener('change', populateCashbookAccountSelect);
+    }
 
     document.querySelectorAll('#reportsSection .tab').forEach(tb => {
       tb.addEventListener('click', (e) => {
@@ -3084,7 +3533,7 @@
   // UI helper functions
   function openUserModal(editId){
     userModalTitle.textContent = editId ? 'Edit User' : 'Add User';
-    userName.value = ''; userDisplay.value = ''; userRole.value = 'User';
+    userEmail.value = ''; userDisplay.value = ''; userRole.value = 'User';
     permView.checked = permEdit.checked = permDelete.checked = false;
     userSave.dataset.edit = editId || '';
     
@@ -3102,13 +3551,13 @@
     
     if(editId){
       const u = state.users.find(x=>x.id===editId);
-      if(u){ userName.value = u.username; userDisplay.value = u.display || u.username; userRole.value = u.role; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; }
+      if(u){ userEmail.value = u.email || u.username || ''; userDisplay.value = u.display || u.username || u.email || ''; userRole.value = u.role; permView.checked = !!u.permissions?.view; permEdit.checked = !!u.permissions?.edit; permDelete.checked = !!u.permissions?.delete; }
     }
     openModal(userModal);
   }
   async function saveUser(){
-    const username = (userName.value||'').trim();
-    if(!username) return alert('Username required');
+    const email = (userEmail.value||'').trim();
+    if(!email) return alert('Email required');
     
     const userPassword = document.getElementById('userPassword');
     const password = userPassword ? userPassword.value.trim() : '';
@@ -3116,7 +3565,7 @@
     const editId = userSave.dataset.edit;
     if(editId){
       const u = state.users.find(x=>x.id===editId);
-      u.username = username; u.display = userDisplay.value || username; u.role = userRole.value;
+      u.email = email; u.username = email; u.display = userDisplay.value || email; u.role = userRole.value;
       u.permissions = { view: !!permView.checked, edit: !!permEdit.checked, delete: !!permDelete.checked };
       
       // Update password if provided
@@ -3136,10 +3585,10 @@
         return alert('User limit reached! This business already has the maximum of ' + MAX_USERS_PER_BUSINESS + ' users. Cannot add more users.');
       }
       
-      // Check username uniqueness
-      const existingUser = state.users.find(u => u.username === username);
+      // Check email uniqueness
+      const existingUser = state.users.find(u => u.email === email || u.username === email);
       if(existingUser) {
-        return alert('Username already exists. Please choose a different username.');
+        return alert('Email already exists. Please choose a different email.');
       }
       
       // Hash the password
@@ -3147,8 +3596,9 @@
       
       const newUser = { 
         id: uid('user'), 
-        username, 
-        display: userDisplay.value || username, 
+        username: email, 
+        email: email,
+        display: userDisplay.value || email, 
         role: userRole.value, 
         isAdmin: userRole.value==='Admin', 
         passwordHash: passwordHash,
@@ -3238,7 +3688,14 @@
     bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0;
     bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
     bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
-    bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0;
+    bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0; bizDedNHIS.value = b.statutoryDeductions?.nhis || 0;
+    
+    // Hide Annual Statutory Deductions section by default (shown when editing contact)
+    const annualStatutoryDeductionsSection = document.getElementById('annualStatutoryDeductionsSection');
+    if(annualStatutoryDeductionsSection) {
+      annualStatutoryDeductionsSection.style.display = 'none';
+    }
+    
     renderBizContacts(b);
     bizSave.dataset.edit = b.id;
     
@@ -3269,7 +3726,7 @@
       b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked;
       b.lossBroughtForward = Number(bizLossBF.value || 0); b.caCarryForward = Number(bizCACF.value || 0);
       b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
-      b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) };
+      b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0), nhis:Number(bizDedNHIS.value||0) };
       addAudit('business.edit','business', b.id, 'Edited business');
     } else {
       const newBiz = {
@@ -3280,7 +3737,7 @@
         citRate: Number(bizCit.value||DEFAULTS.citRate),
         turnoverThreshold: turnoverThresholdValue,
         vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
-        accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
+        accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0, nhis:0 },
         lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault,
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
@@ -3318,14 +3775,19 @@
     const cat = newAccountCategory.value;
     const dis = !!newAccountDisallowable.checked;
     const nt = !!newAccountNonTax.checked;
-    const rentFreq = newAccountRentFreq.value || '';
     if(!name) return alert('Account name required');
     const b = findBiz(selectedBizId);
     b.accounts = b.accounts || [];
-    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt, rentFreq:rentFreq };
+    const newAcct = { id: uid('acct'), name, category: cat, disallowableDefault:dis, nonTaxableDefault:nt };
     b.accounts.push(newAcct);
     addAudit('account.add','account', newAcct.id, `Added account: ${name}`);
     saveState();
+    
+    // Reset input fields to blank state
+    newAccountName.value = '';
+    newAccountDisallowable.checked = false;
+    newAccountNonTax.checked = false;
+    
     renderAccounts();
     populateAccountSelect();
   }
@@ -3342,7 +3804,17 @@
 
   function txnActionChanged(){
     const val = txnAction.value;
-    if(val === 'InventoryPurchase' || val === 'InventorySale'){
+    if(val === 'Invoicing'){
+      // Switch to invoicing tab
+      activeTab = 'invoicing';
+      renderTab();
+      txnAction.value = ''; // Reset dropdown
+    } else if(val === 'Cashbook'){
+      // Switch to cashbook tab
+      activeTab = 'cashbook';
+      renderTab();
+      txnAction.value = ''; // Reset dropdown
+    } else if(val === 'InventoryPurchase' || val === 'InventorySale'){
       mainTxnForm.style.display = 'none';
       inventorySubform.style.display = 'block';
       assetPurchaseSubform.style.display = 'none';
@@ -3510,7 +3982,27 @@
     userSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; userSelect.appendChild(opt); }
     businessSelect.innerHTML = '';
-    for(const b of state.businesses){ const opt = document.createElement('option'); opt.value = b.id; opt.textContent = b.name; businessSelect.appendChild(opt); }
+    
+    // Filter businesses based on user permissions
+    const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
+    const isAdministrator = currentUser && currentUser.email === 'salesrepng@gmail.com';
+    
+    for(const b of state.businesses){
+      // Show all businesses to Administrator (salesrepng@gmail.com)
+      // Otherwise, only show businesses user created or is scoped to
+      const canSee = isAdministrator || 
+                     b.ownerId === state.auth.currentUserId || 
+                     (currentUser && currentUser.scopedToBusinessId === b.id) ||
+                     (currentUser && !currentUser.createdByAdmin); // Users who signed up see all their businesses
+      
+      if(canSee) {
+        const opt = document.createElement('option'); 
+        opt.value = b.id; 
+        opt.textContent = b.name; 
+        businessSelect.appendChild(opt);
+      }
+    }
+    
     bizOwnerSelect.innerHTML = '';
     for(const u of state.users){ const opt = document.createElement('option'); opt.value = u.id; opt.textContent = u.display || u.username; bizOwnerSelect.appendChild(opt); }
   }
@@ -3519,8 +4011,6 @@
     if(!selectedBizId && state.businesses[0]) selectedBizId = state.businesses[0].id;
     userSelect.value = selectedUserId || (state.users[0] && state.users[0].id) || '';
     businessSelect.value = selectedBizId || (state.businesses[0] && state.businesses[0].id) || '';
-    userSelect.addEventListener('change', ()=> { selectedUserId = userSelect.value; renderAll(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
-    businessSelect.addEventListener('change', ()=> { selectedBizId = businessSelect.value; populateAccountSelect(); renderAll(); renderFeatureVisibility(); updateReportTabVisibility(); if (typeof updateContactDropdowns === 'function') updateContactDropdowns(); if(activeTab === 'invoicing') renderInvoices(); if(activeTab === 'cashbook') renderCashbook(); });
     if(state.auth.currentUserId) selectedUserId = state.auth.currentUserId;
     userSelect.value = selectedUserId;
   }
@@ -3544,6 +4034,30 @@
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
+  }
+
+  function populateCashbookAccountSelect(){
+    if(!cashbookAccount) return;
+    cashbookAccount.innerHTML = '<option value="">-- Select Account --</option>';
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Get current type selection
+    const currentType = cashbookType ? cashbookType.value : 'inflow';
+    
+    // Filter accounts based on type
+    const relevantCategories = currentType === 'inflow' 
+      ? ['Revenue', 'Asset', 'Liability', 'Capital']
+      : ['Expense', 'Asset'];
+    
+    for(const a of b.accounts){
+      if(relevantCategories.includes(a.category)){
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name + ' (' + a.category + ')';
+        cashbookAccount.appendChild(opt);
+      }
+    }
   }
 
   function renderInventorySelect(){
@@ -4389,6 +4903,9 @@
       if(btnAddBusiness) btnAddBusiness.disabled = false;
       if(btnDeleteBusiness) btnDeleteBusiness.disabled = false;
       if(businessSelect) businessSelect.disabled = false;
+      if(btnAddUser) btnAddUser.disabled = false;
+      if(btnEditUser) btnEditUser.disabled = false;
+      if(btnDeleteUser) btnDeleteUser.disabled = false;
       // Edit business may still be restricted per entityLocked
     }
   }
@@ -5009,22 +5526,96 @@
     html += `<div class="small-muted">Revenue ${fmt(revenue)} | Expenses ${fmt(expenses)} (including Dep ${fmt(depreciationDaily)})</div>`;
     html += `<div class="small-muted">CA allowed: ${fmt(allowedCA)} | CA c/f: ${fmt(carriedForwardCA)} | Non-taxable income: ${fmt(nonTaxableIncome)} (${revenue > 0 ? ((nonTaxableIncome/revenue)*100).toFixed(1) : 0}% of revenue)</div>`;
     html += `<hr/>`;
-    html += `<div><strong>VAT Collected:</strong> ${fmt(vatCollected)} | <strong>VAT Paid:</strong> ${fmt(vatPaid)} | <strong>VAT Net:</strong> ${fmt(vatNet)}</div>`;
-    html += `<div><strong>WHT Payable:</strong> ${fmt(whtPayable)} | <strong>WHT Receivable:</strong> ${fmt(whtReceivable)} | <strong>WHT Remitted:</strong> ${fmt(whtPaidToAuthority)}</div>`;
-    html += `<div><strong>PAYE (Monthly):</strong> ${fmt(payeMonthlyTotal)} | <strong>PAYE (Annual):</strong> ${fmt(payeAnnualTotal)}</div>`;
+    
+    // Tax Payment Section with Outstanding Balances
+    html += `<h4 style="margin:12px 0 8px 0;">Tax Liabilities & Payments</h4>`;
+    
+    // VAT Section
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${vatNetAfterPayments > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>VAT:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(vatNetAfterPayments)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Collected: ${fmt(vatCollected)} | Paid: ${fmt(vatPaid)} | Net: ${fmt(vatNet)}</div>`;
+    html += `<div class="small-muted">Remitted to Authority: ${fmt(vatPaidToAuthority)}${vatRefunded > 0 ? ` | Refunded: ${fmt(vatRefunded)}` : ''}</div>`;
+    if(vatNetAfterPayments > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('VAT', ${vatNetAfterPayments})">Pay VAT (${fmt(vatNetAfterPayments)})</button>`;
+    }
+    html += `</div>`;
+    
+    // WHT Section
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${whtPayableNet > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>WHT:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(whtPayableNet)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Payable: ${fmt(whtPayable)} | Receivable: ${fmt(whtReceivable)} | Remitted: ${fmt(whtPaidToAuthority)}</div>`;
+    if(whtPayableNet > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('WHT', ${whtPayableNet})">Pay WHT (${fmt(whtPayableNet)})</button>`;
+    }
+    html += `</div>`;
+    
+    // PAYE Section
+    const payeOutstanding = Math.max(0, payeAnnualTotal - payePaid);
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${payeOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+    html += `<div><strong>PAYE:</strong></div>`;
+    html += `<div><strong>Outstanding: ${fmt(payeOutstanding)}</strong></div>`;
+    html += `</div>`;
+    html += `<div class="small-muted">Monthly: ${fmt(payeMonthlyTotal)} | Annual: ${fmt(payeAnnualTotal)} | Paid: ${fmt(payePaid)}</div>`;
+    if(payeOutstanding > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('PAYE', ${payeOutstanding})">Pay PAYE (${fmt(payeOutstanding)})</button>`;
+    }
+    html += `</div>`;
+    
+    // CIT/PIT Section
     if(b.entity === 'Company'){
-      html += `<div><strong>CIT Charge (after WHT):</strong> ${fmt(citCharge)}</div>`;
+      const citOutstanding = Math.max(0, citCharge - citPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${citOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>CIT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(citOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge (after WHT): ${fmt(citCharge)} | Paid: ${fmt(citPaid)}</div>`;
       if(whtCarryForward > 0) {
         html += `<div class="small-note">WHT Receivable Carryforward: ${fmt(whtCarryForward)} (CIT rate = 0%, WHT carries forward to next period)</div>`;
       }
-      html += `<div><strong>CGT Charge:</strong> ${fmt(cgtCharge)}</div>`;
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover (Income txns): ${fmt(turnoverForCIT)}</div>`;
+      html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover: ${fmt(turnoverForCIT)}</div>`;
+      if(citOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CIT', ${citOutstanding})">Pay CIT (${fmt(citOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
+      // CGT Section
+      const cgtOutstanding = Math.max(0, cgtCharge - cgtPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${cgtOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>CGT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(cgtOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge: ${fmt(cgtCharge)} | Paid: ${fmt(cgtPaid)}</div>`;
+      if(cgtOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CGT', ${cgtOutstanding})">Pay CGT (${fmt(cgtOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
       if(totalCarryforwardLosses > 0) {
         html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
     } else {
-      html += `<div><strong>PIT Charge:</strong> ${fmt(pitCharge)}</div>`;
+      const pitOutstanding = Math.max(0, pitCharge - pitPaid);
+      html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${pitOutstanding > 0 ? '#dc2626' : '#059669'};">`;
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+      html += `<div><strong>PIT:</strong></div>`;
+      html += `<div><strong>Outstanding: ${fmt(pitOutstanding)}</strong></div>`;
+      html += `</div>`;
+      html += `<div class="small-muted">Charge: ${fmt(pitCharge)} | Paid: ${fmt(pitPaid)}</div>`;
+      if(pitOutstanding > 0) {
+        html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('PIT', ${pitOutstanding})">Pay PIT (${fmt(pitOutstanding)})</button>`;
+      }
+      html += `</div>`;
+      
       if(totalCarryforwardLosses > 0) {
         html += `<div class="small-note">Carryforward Losses Available: ${fmt(totalCarryforwardLosses)}</div>`;
       }
@@ -5063,6 +5654,87 @@
     }
     return gains;
   }
+
+  /**
+   * Pay Tax Function - Records tax payment transaction
+   * @param {string} taxType - Type of tax (VAT, WHT, PAYE, CIT, PIT, CGT)
+   * @param {number} amount - Amount to pay
+   */
+  function payTax(taxType, amount) {
+    if(!selectedUserId || !selectedBizId) {
+      return alert('Please select a user and business');
+    }
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Map tax type to account name
+    const taxAccountMap = {
+      'VAT': 'VAT Paid',
+      'WHT': 'WHT Remitted',
+      'PAYE': 'PAYE Paid',
+      'CIT': 'CIT Paid',
+      'PIT': 'PIT Paid',
+      'CGT': 'CGT Paid'
+    };
+    
+    const accountName = taxAccountMap[taxType];
+    if(!accountName) {
+      return alert('Invalid tax type');
+    }
+    
+    // Find or create the tax payment account
+    let account = b.accounts.find(a => a.name === accountName);
+    if(!account) {
+      // Create the tax payment account if it doesn't exist
+      account = {
+        id: uid('acct'),
+        name: accountName,
+        category: 'Expense',
+        disallowableDefault: false,
+        nonTaxableDefault: true // Tax payments are non-taxable
+      };
+      b.accounts.push(account);
+    }
+    
+    // Prompt for payment amount (allow partial payment)
+    const paymentAmount = prompt(`Enter amount to pay for ${taxType}:\nOutstanding: ${fmt(amount)}`, amount);
+    if(!paymentAmount || isNaN(paymentAmount) || Number(paymentAmount) <= 0) {
+      return;
+    }
+    
+    const finalAmount = Number(paymentAmount);
+    
+    // Create transaction for tax payment
+    const txn = {
+      id: uid('txn'),
+      date: new Date().toISOString().split('T')[0],
+      action: 'Expense',
+      accountId: account.id,
+      accountName: account.name,
+      accountCategory: 'Expense',
+      amount: finalAmount,
+      description: `${taxType} Payment to Tax Authority`,
+      vatType: 'none',
+      whtApplied: false,
+      paye: false,
+      contact: 'Tax Authority',
+      timestamp: Date.now()
+    };
+    
+    // Add transaction
+    if(!state.transactions[selectedUserId]) state.transactions[selectedUserId] = {};
+    if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    
+    addAudit('tax.payment', 'transaction', txn.id, `Paid ${taxType}: ${fmt(finalAmount)}`);
+    saveState();
+    renderAll();
+    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!`);
+  }
+  
+  // Make payTax available globally for inline onclick handlers
+  window.payTax = payTax;
 
   /**
    * Computes accounting profit from transactions.
@@ -5724,7 +6396,90 @@
   // ============== INVOICING FUNCTIONALITY ==============
   let editingInvoice = null;
 
+  /**
+   * Render Receivables Summary Dashboard
+   * Shows aged receivables and total outstanding
+   */
+  function renderReceivablesSummary(){
+    const summaryDiv = document.getElementById('receivablesSummary');
+    if(!summaryDiv) return;
+    
+    if(!selectedUserId || !selectedBizId) {
+      summaryDiv.innerHTML = '<div class="muted">Please select a business</div>';
+      return;
+    }
+    
+    // Ensure state.invoices is initialized
+    if(!state.invoices) state.invoices = {};
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const invoices = state.invoices[key] || [];
+    
+    // Calculate receivables by aging period
+    let totalReceivables = 0;
+    let current = 0;        // 0-30 days
+    let aged30 = 0;         // 31-60 days
+    let aged60 = 0;         // 61-90 days
+    let aged90Plus = 0;     // 90+ days
+    
+    const today = new Date();
+    
+    for(const inv of invoices) {
+      if(inv.status === 'paid') continue; // Skip paid invoices
+      
+      const total = Number(inv.total || 0);
+      totalReceivables += total;
+      
+      const dueDate = new Date(inv.dueDate);
+      const daysPastDue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+      
+      if(daysPastDue <= 30) {
+        current += total;
+      } else if(daysPastDue <= 60) {
+        aged30 += total;
+      } else if(daysPastDue <= 90) {
+        aged60 += total;
+      } else {
+        aged90Plus += total;
+      }
+    }
+    
+    let html = '<h4 style="margin:0 0 8px 0;">Receivables Summary</h4>';
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">';
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #0b76d1;">`;
+    html += `<div class="small-muted">Total Receivables</div>`;
+    html += `<div style="font-size:1.3rem; font-weight:700; color:#0b76d1;">${fmt(totalReceivables)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #059669;">`;
+    html += `<div class="small-muted">Current (0-30 days)</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#059669;">${fmt(current)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #f59e0b;">`;
+    html += `<div class="small-muted">31-60 days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#f59e0b;">${fmt(aged30)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #dc2626;">`;
+    html += `<div class="small-muted">61-90 days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#dc2626;">${fmt(aged60)}</div>`;
+    html += `</div>`;
+    
+    html += `<div style="background:#f8f9fb; padding:12px; border-radius:6px; border-left:4px solid #7f1d1d;">`;
+    html += `<div class="small-muted">90+ days</div>`;
+    html += `<div style="font-size:1.1rem; font-weight:600; color:#7f1d1d;">${fmt(aged90Plus)}</div>`;
+    html += `</div>`;
+    
+    html += '</div>';
+    summaryDiv.innerHTML = html;
+  }
+
   function renderInvoices(){
+    // Render receivables summary first
+    renderReceivablesSummary();
+    
     if(!selectedUserId || !selectedBizId) {
       invoiceTableBody.innerHTML = '<tr><td colspan="9">Please select a business</td></tr>';
       return;
@@ -5865,20 +6620,61 @@
     invoiceVatType.value = 'none';
     invoicePaymentTerms.value = 'net30';
     
-    // Reset items
-    invoiceItems.innerHTML = `
-      <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="1" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      </div>
-    `;
+    // Reset items with inventory dropdown
+    invoiceItems.innerHTML = createInvoiceItemRow();
     
     updateInvoiceTotal();
     modalOverlay.style.display = 'block';
     invoiceModal.style.display = 'block';
   }
+
+  function createInvoiceItemRow(item = null) {
+    const b = findBiz(selectedBizId);
+    const inventory = (b && b.inventory) ? b.inventory : [];
+    
+    // Build inventory options
+    let inventoryOptions = '<option value="">-- Select from Inventory or Enter Custom --</option>';
+    for(const invItem of inventory) {
+      const selected = item && item.inventoryId === invItem.id ? 'selected' : '';
+      inventoryOptions += `<option value="${invItem.id}" ${selected}>${invItem.name} (₦${invItem.averageCost?.toFixed(2) || '0.00'})</option>`;
+    }
+    
+    return `
+      <div class="invoice-item" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <select class="invoice-item-inventory" style="flex:1;" onchange="handleInventorySelection(this)">
+          ${inventoryOptions}
+        </select>
+        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" value="${item?.description || ''}" />
+        <input type="number" placeholder="Qty" min="1" step="1" value="${item?.qty || 1}" class="invoice-item-qty" style="width:70px;" />
+        <input type="number" placeholder="Unit price" min="0" step="0.01" value="${item?.price || ''}" class="invoice-item-price" style="width:120px;" />
+        <button type="button" class="small danger invoice-item-remove">×</button>
+      </div>
+    `;
+  }
+  
+  function handleInventorySelection(selectElement) {
+    const itemRow = selectElement.closest('.invoice-item');
+    const descInput = itemRow.querySelector('.invoice-item-desc');
+    const priceInput = itemRow.querySelector('.invoice-item-price');
+    
+    const inventoryId = selectElement.value;
+    if(!inventoryId) return;
+    
+    const b = findBiz(selectedBizId);
+    const inventoryItem = b?.inventory?.find(i => i.id === inventoryId);
+    
+    if(inventoryItem) {
+      descInput.value = inventoryItem.name;
+      priceInput.value = inventoryItem.averageCost || 0;
+      // Store inventory ID on the row for reference
+      itemRow.dataset.inventoryId = inventoryId;
+    }
+    
+    updateInvoiceTotal();
+  }
+  
+  // Make handleInventorySelection available globally
+  window.handleInventorySelection = handleInventorySelection;
 
   function openEditInvoice(inv){
     editingInvoice = inv;
@@ -5893,19 +6689,10 @@
     invoiceVatType.value = inv.vatType;
     invoicePaymentTerms.value = inv.paymentTerms;
     
-    // Populate items
+    // Populate items with inventory dropdown
     invoiceItems.innerHTML = '';
     for(const item of inv.items){
-      const itemDiv = document.createElement('div');
-      itemDiv.className = 'invoice-item';
-      itemDiv.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
-      itemDiv.innerHTML = `
-        <input type="text" placeholder="Item description" class="invoice-item-desc" style="flex:2;" value="${item.description}" />
-        <input type="number" placeholder="Qty" min="1" step="1" value="${item.qty}" class="invoice-item-qty" style="width:70px;" />
-        <input type="number" placeholder="Unit price" min="0" step="0.01" value="${item.price}" class="invoice-item-price" style="width:120px;" />
-        <button type="button" class="small danger invoice-item-remove">×</button>
-      `;
-      invoiceItems.appendChild(itemDiv);
+      invoiceItems.innerHTML += createInvoiceItemRow(item);
     }
     
     updateInvoiceTotal();
@@ -6345,7 +7132,17 @@
       tdType.appendChild(typeSpan);
       
       const tdCategory = document.createElement('td');
-      tdCategory.textContent = entry.category;
+      // Use accountName if available, otherwise fall back to category
+      tdCategory.textContent = entry.accountName || entry.category;
+      
+      // Show account category as a small badge
+      if(entry.accountCategory){
+        const categoryBadge = document.createElement('span');
+        categoryBadge.className = 'account-category';
+        categoryBadge.textContent = entry.accountCategory;
+        categoryBadge.style.marginLeft = '6px';
+        tdCategory.appendChild(categoryBadge);
+      }
       
       const tdDesc = document.createElement('td');
       tdDesc.textContent = entry.description;
@@ -6374,6 +7171,28 @@
       tdBalance.textContent = fmt(balance);
       tdBalance.style.fontWeight = '600';
       
+      // Add ledger link column
+      const tdLedger = document.createElement('td');
+      if(entry.ledgerLinked && entry.ledgerTxnId){
+        const ledgerLink = document.createElement('a');
+        ledgerLink.href = '#';
+        ledgerLink.className = 'link-like';
+        ledgerLink.textContent = 'View';
+        ledgerLink.style.fontSize = '0.85rem';
+        ledgerLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          // Switch to ledger tab and highlight the transaction
+          activeTab = 'ledger';
+          renderTab();
+          // Could add scroll to transaction here if needed
+        });
+        tdLedger.appendChild(ledgerLink);
+      } else if(entry.ledgerLinked){
+        tdLedger.innerHTML = '<span class="muted" style="font-size:0.85rem;">Linked</span>';
+      } else {
+        tdLedger.innerHTML = '<span class="muted" style="font-size:0.85rem;">—</span>';
+      }
+      
       const tdActions = document.createElement('td');
       const actionsDiv = document.createElement('div');
       actionsDiv.style.display = 'flex';
@@ -6400,6 +7219,7 @@
       tr.appendChild(tdInflow);
       tr.appendChild(tdOutflow);
       tr.appendChild(tdBalance);
+      tr.appendChild(tdLedger);
       tr.appendChild(tdActions);
       
       cashbookTableBody.appendChild(tr);
@@ -6418,9 +7238,16 @@
     cashbookModalTitle.textContent = 'Add Cashbook Entry';
     cashbookDate.value = today();
     cashbookType.value = 'inflow';
-    cashbookCategory.value = '';
     cashbookAmount.value = '';
     cashbookDescription.value = '';
+    if(cashbookCreateLedger) cashbookCreateLedger.checked = true;
+    
+    // Populate account dropdown
+    populateCashbookAccountSelect();
+    if(cashbookAccount) cashbookAccount.value = '';
+    
+    // Keep category field for backward compatibility (if it exists)
+    if(cashbookCategory) cashbookCategory.value = '';
     
     modalOverlay.style.display = 'block';
     cashbookModal.style.display = 'block';
@@ -6431,9 +7258,28 @@
     cashbookModalTitle.textContent = 'Edit Cashbook Entry';
     cashbookDate.value = entry.date;
     cashbookType.value = entry.type;
-    cashbookCategory.value = entry.category;
     cashbookAmount.value = entry.amount;
     cashbookDescription.value = entry.description;
+    
+    // Populate account dropdown
+    populateCashbookAccountSelect();
+    
+    // Set account if available, otherwise fallback to category
+    if(cashbookAccount && entry.accountId){
+      cashbookAccount.value = entry.accountId;
+    } else if(cashbookAccount && entry.category){
+      // Try to find account by name matching category
+      const b = findBiz(selectedBizId);
+      if(b){
+        const account = b.accounts.find(a => a.name === entry.category);
+        if(account) cashbookAccount.value = account.id;
+      }
+    }
+    
+    // Keep category field for backward compatibility
+    if(cashbookCategory) cashbookCategory.value = entry.category || '';
+    
+    if(cashbookCreateLedger) cashbookCreateLedger.checked = !!entry.ledgerLinked;
     
     modalOverlay.style.display = 'block';
     cashbookModal.style.display = 'block';
@@ -6442,14 +7288,41 @@
   function saveCashEntry(){
     if(!selectedUserId || !selectedBizId) return alert('Please select a business');
     
+    const b = findBiz(selectedBizId);
+    if(!b) return alert('Business not found');
+    
     // Validate
     if(!cashbookDate.value) return alert('Please enter date');
-    if(!cashbookCategory.value) return alert('Please select category');
+    
+    let accountId = '';
+    let accountName = '';
+    let accountCategory = '';
+    
+    // Use account if available, otherwise fall back to category
+    if(cashbookAccount && cashbookAccount.value){
+      accountId = cashbookAccount.value;
+      const account = b.accounts.find(a => a.id === accountId);
+      if(account){
+        accountName = account.name;
+        accountCategory = account.category;
+      } else {
+        return alert('Selected account not found');
+      }
+    } else if(cashbookCategory && cashbookCategory.value){
+      // Fallback for backward compatibility
+      accountName = cashbookCategory.value;
+      accountCategory = cashbookType.value === 'inflow' ? 'Revenue' : 'Expense';
+    } else {
+      return alert('Please select an account');
+    }
+    
     if(!cashbookAmount.value || Number(cashbookAmount.value) <= 0) return alert('Please enter valid amount');
     if(!cashbookDescription.value.trim()) return alert('Please enter description');
     
     const key = `${selectedUserId}_${selectedBizId}`;
     if(!state.cashbook[key]) state.cashbook[key] = [];
+    
+    const createLedger = cashbookCreateLedger ? cashbookCreateLedger.checked : true;
     
     if(editingCashEntry){
       // Update existing entry
@@ -6459,9 +7332,13 @@
           ...state.cashbook[key][idx],
           date: cashbookDate.value,
           type: cashbookType.value,
-          category: cashbookCategory.value,
+          accountId: accountId,
+          accountName: accountName,
+          accountCategory: accountCategory,
+          category: accountName, // Keep for backward compatibility
           amount: Number(cashbookAmount.value),
-          description: cashbookDescription.value.trim()
+          description: cashbookDescription.value.trim(),
+          ledgerLinked: createLedger
         };
         addAudit('cashbook.edit', 'cashbook', editingCashEntry.id, 'Cashbook entry updated');
       }
@@ -6471,16 +7348,23 @@
         id: uid('cash'),
         date: cashbookDate.value,
         type: cashbookType.value,
-        category: cashbookCategory.value,
+        accountId: accountId,
+        accountName: accountName,
+        accountCategory: accountCategory,
+        category: accountName, // Keep for backward compatibility
         amount: Number(cashbookAmount.value),
-        description: cashbookDescription.value.trim()
+        description: cashbookDescription.value.trim(),
+        ledgerLinked: createLedger
       };
       
       state.cashbook[key].push(entry);
       addAudit('cashbook.create', 'cashbook', entry.id, 'Cashbook entry created');
       
-      // Create linked transaction in ledger
-      createCashbookTransaction(entry);
+      // Create linked transaction in ledger if checkbox is checked
+      if(createLedger){
+        const txnId = createCashbookTransaction(entry);
+        entry.ledgerTxnId = txnId; // Store the ledger transaction ID for reference
+      }
     }
     
     saveState();
@@ -6510,24 +7394,33 @@
   function createCashbookTransaction(entry){
     // Create a ledger transaction from cashbook entry
     const b = findBiz(selectedBizId);
-    if(!b) return;
+    if(!b) return null;
     
-    // Determine account and action based on type and category
-    let accountName = entry.category;
-    let accountCategory = entry.type === 'inflow' ? 'Revenue' : 'Expense';
+    // Use account information from entry
+    let accountId = entry.accountId;
+    let accountName = entry.accountName || entry.category;
+    let accountCategory = entry.accountCategory || (entry.type === 'inflow' ? 'Revenue' : 'Expense');
     let action = entry.type === 'inflow' ? 'Revenue' : 'Expense';
     
-    // Find or create account
-    let account = b.accounts.find(a => a.name === accountName);
+    // Find account by ID or name
+    let account = null;
+    if(accountId){
+      account = b.accounts.find(a => a.id === accountId);
+    }
     if(!account){
-      account = { name: accountName, category: accountCategory };
-      b.accounts.push(account);
+      account = b.accounts.find(a => a.name === accountName);
+    }
+    
+    // If account doesn't exist, it should have been created already, but double-check
+    if(!account){
+      console.warn('Account not found for cashbook entry, using entry data');
     }
     
     const txn = {
       id: uid('txn'),
       date: entry.date,
       action: action,
+      accountId: accountId,
       accountName: accountName,
       accountCategory: accountCategory,
       description: `Cashbook: ${entry.description}`,
@@ -6537,7 +7430,8 @@
       paye: false,
       contact: '',
       adjustmentType: '',
-      adjustmentAmount: 0
+      adjustmentAmount: 0,
+      cashbookEntryId: entry.id // Link back to cashbook entry
     };
     
     const key = `${selectedUserId}_${selectedBizId}`;
@@ -6546,24 +7440,1102 @@
     
     state.transactions[selectedUserId][selectedBizId].push(txn);
     addAudit('txn.add', 'txn', txn.id, `Transaction created from cashbook entry`);
+    
+    return txn.id; // Return the transaction ID
+  }
+  
+  // ============== STARTING BALANCE FUNCTIONALITY ==============
+  
+  function openSetStartingBalance(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    
+    // Reset form
+    startingBalanceDate.value = today();
+    startingBalanceAmount.value = '';
+    startingBalanceDescription.value = 'Opening balance for cashbook';
+    if(startingBalanceCreateLedger) startingBalanceCreateLedger.checked = true;
+    
+    // Populate bank accounts
+    populateStartingBalanceAccountSelect();
+    
+    // Show modal
+    modalOverlay.style.display = 'block';
+    startingBalanceModal.style.display = 'block';
+  }
+  
+  function populateStartingBalanceAccountSelect(){
+    if(!startingBalanceAccount) return;
+    startingBalanceAccount.innerHTML = '<option value="">-- Select Bank Account --</option>';
+    
+    const b = findBiz(selectedBizId);
+    if(!b || !b.accounts) return;
+    
+    // Filter for Bank and Asset accounts
+    const bankAccounts = b.accounts.filter(a => 
+      (a.name === 'Bank' && a.category === 'Asset') || 
+      (a.category === 'Asset' && a.name.toLowerCase().includes('bank'))
+    );
+    
+    for(const acc of bankAccounts){
+      const opt = document.createElement('option');
+      opt.value = acc.id;
+      opt.textContent = `${acc.name} (${acc.category})`;
+      startingBalanceAccount.appendChild(opt);
+    }
+    
+    // If no bank accounts found, show all asset accounts
+    if(bankAccounts.length === 0){
+      const assetAccounts = b.accounts.filter(a => a.category === 'Asset');
+      for(const acc of assetAccounts){
+        const opt = document.createElement('option');
+        opt.value = acc.id;
+        opt.textContent = `${acc.name} (${acc.category})`;
+        startingBalanceAccount.appendChild(opt);
+      }
+    }
+  }
+  
+  function saveStartingBalance(){
+    if(!startingBalanceDate.value) return alert('Please enter date');
+    if(!startingBalanceAccount.value) return alert('Please select a bank account');
+    if(!startingBalanceAmount.value || Number(startingBalanceAmount.value) < 0) return alert('Please enter valid amount');
+    if(!startingBalanceDescription.value.trim()) return alert('Please enter description');
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.cashbook[key]) state.cashbook[key] = [];
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    const account = b.accounts.find(a => a.id === startingBalanceAccount.value);
+    if(!account) return alert('Account not found');
+    
+    const createLedger = startingBalanceCreateLedger ? startingBalanceCreateLedger.checked : true;
+    
+    // Create cashbook entry for starting balance
+    const entry = {
+      id: uid('cash'),
+      date: startingBalanceDate.value,
+      type: 'inflow',
+      accountId: account.id,
+      accountName: account.name,
+      accountCategory: account.category,
+      category: account.name,
+      amount: Number(startingBalanceAmount.value),
+      description: startingBalanceDescription.value.trim(),
+      ledgerLinked: createLedger,
+      isStartingBalance: true // Mark as starting balance entry
+    };
+    
+    state.cashbook[key].push(entry);
+    addAudit('cashbook.create', 'cashbook', entry.id, 'Starting balance set');
+    
+    // Create linked transaction in ledger if checkbox is checked
+    if(createLedger){
+      const txnId = createCashbookTransaction(entry);
+      entry.ledgerTxnId = txnId;
+    }
+    
+    saveState();
+    closeStartingBalanceModal();
+    renderCashbook();
+  }
+  
+  function closeStartingBalanceModal(){
+    modalOverlay.style.display = 'none';
+    startingBalanceModal.style.display = 'none';
+  }
+
+  /***********************************************************************
+   * BANK RECONCILIATION FUNCTIONS
+   ***********************************************************************/
+  
+  let currentReconciliation = null;
+  let currentReconciliationId = null;
+  let selectedBankItem = null;
+  
+  function renderBankReconciliations(){
+    if(!selectedUserId || !selectedBizId) {
+      reconciliationTableBody.innerHTML = '<tr><td colspan="8">Please select a business</td></tr>';
+      return;
+    }
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const reconciliations = state.bankReconciliations[key] || [];
+    const filterStatus = reconciliationStatusFilter.value;
+    
+    reconciliationTableBody.innerHTML = '';
+    
+    const filtered = reconciliations.filter(rec => {
+      if(filterStatus === 'all') return true;
+      return rec.status === filterStatus;
+    });
+    
+    if(filtered.length === 0){
+      reconciliationTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No reconciliations found</td></tr>';
+      return;
+    }
+    
+    for(const rec of filtered){
+      const tr = document.createElement('tr');
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = rec.date;
+      
+      const tdPeriod = document.createElement('td');
+      tdPeriod.textContent = `${rec.fromDate} to ${rec.toDate}`;
+      
+      const tdAccount = document.createElement('td');
+      const b = findBiz(selectedBizId);
+      const account = b ? b.accounts.find(a => a.id === rec.accountId) : null;
+      tdAccount.textContent = account ? account.name : 'Unknown';
+      
+      const tdStatement = document.createElement('td');
+      tdStatement.textContent = fmt(rec.statementBalance);
+      
+      const tdLedger = document.createElement('td');
+      tdLedger.textContent = fmt(rec.ledgerBalance);
+      
+      const tdDifference = document.createElement('td');
+      const diff = rec.statementBalance - rec.ledgerBalance;
+      tdDifference.textContent = fmt(diff);
+      tdDifference.style.color = Math.abs(diff) < 0.01 ? '#059669' : '#dc2626';
+      
+      const tdStatus = document.createElement('td');
+      const statusSpan = document.createElement('span');
+      statusSpan.textContent = rec.status === 'completed' ? 'Completed' : 'Pending';
+      statusSpan.style.padding = '4px 8px';
+      statusSpan.style.borderRadius = '4px';
+      statusSpan.style.fontSize = '0.85rem';
+      if(rec.status === 'completed'){
+        statusSpan.style.background = '#e6f4ea';
+        statusSpan.style.color = '#1e7e34';
+      } else {
+        statusSpan.style.background = '#fff3cd';
+        statusSpan.style.color = '#856404';
+      }
+      tdStatus.appendChild(statusSpan);
+      
+      const tdActions = document.createElement('td');
+      const btnView = document.createElement('button');
+      btnView.textContent = 'View';
+      btnView.className = 'small';
+      btnView.onclick = () => viewReconciliation(rec);
+      
+      tdActions.appendChild(btnView);
+      
+      if(rec.status !== 'completed'){
+        const btnDelete = document.createElement('button');
+        btnDelete.textContent = 'Delete';
+        btnDelete.className = 'small danger';
+        btnDelete.style.marginLeft = '4px';
+        btnDelete.onclick = () => deleteReconciliation(rec.id);
+        tdActions.appendChild(btnDelete);
+      }
+      
+      tr.appendChild(tdDate);
+      tr.appendChild(tdPeriod);
+      tr.appendChild(tdAccount);
+      tr.appendChild(tdStatement);
+      tr.appendChild(tdLedger);
+      tr.appendChild(tdDifference);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdActions);
+      
+      reconciliationTableBody.appendChild(tr);
+    }
+  }
+  
+  function openNewReconciliation(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    
+    bankReconciliationModalTitle.textContent = 'New Bank Reconciliation';
+    reconciliationDate.value = today();
+    reconciliationPeriod.value = 'monthly';
+    
+    // Set default dates to current month
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    reconciliationFromDate.value = firstDay.toISOString().slice(0,10);
+    reconciliationToDate.value = lastDay.toISOString().slice(0,10);
+    
+    reconciliationStatementBalance.value = '';
+    reconciliationNotes.value = '';
+    
+    // Populate account dropdown with bank/asset accounts only
+    populateReconciliationAccountSelect();
+    
+    modalOverlay.style.display = 'block';
+    bankReconciliationModal.style.display = 'block';
+  }
+  
+  function populateReconciliationAccountSelect(){
+    reconciliationAccount.innerHTML = '<option value="">-- Select Bank Account --</option>';
+    importBankAccount.innerHTML = '<option value="">-- Select Bank Account --</option>';
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Only show Asset category accounts (typically bank accounts)
+    const bankAccounts = b.accounts.filter(a => a.category === 'Asset');
+    for(const account of bankAccounts){
+      const opt = document.createElement('option');
+      opt.value = account.id;
+      opt.textContent = account.name;
+      reconciliationAccount.appendChild(opt);
+      
+      const opt2 = opt.cloneNode(true);
+      importBankAccount.appendChild(opt2);
+    }
+  }
+  
+  function saveReconciliation(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business');
+    
+    if(!reconciliationAccount.value) return alert('Please select a bank account');
+    if(!reconciliationFromDate.value || !reconciliationToDate.value) return alert('Please select date range');
+    if(!reconciliationStatementBalance.value) return alert('Please enter statement ending balance');
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.bankReconciliations[key]) state.bankReconciliations[key] = [];
+    
+    const reconciliation = {
+      id: uid('reconcil'),
+      date: reconciliationDate.value,
+      period: reconciliationPeriod.value,
+      fromDate: reconciliationFromDate.value,
+      toDate: reconciliationToDate.value,
+      accountId: reconciliationAccount.value,
+      statementBalance: parseFloat(reconciliationStatementBalance.value) || 0,
+      ledgerBalance: 0, // Will be calculated
+      bankItems: [],
+      ledgerItems: [],
+      matches: [],
+      discrepancies: [],
+      notes: reconciliationNotes.value,
+      status: 'pending',
+      createdAt: Date.now()
+    };
+    
+    // Calculate ledger balance
+    reconciliation.ledgerBalance = calculateLedgerBalance(reconciliation.accountId, reconciliation.toDate);
+    
+    // Get ledger items for the period
+    reconciliation.ledgerItems = getLedgerItemsForReconciliation(
+      reconciliation.accountId,
+      reconciliation.fromDate,
+      reconciliation.toDate
+    );
+    
+    state.bankReconciliations[key].push(reconciliation);
+    saveState();
+    addAudit('reconciliation.create', 'reconciliation', reconciliation.id, `Reconciliation created for account ${reconciliation.accountId}`);
+    
+    modalOverlay.style.display = 'none';
+    bankReconciliationModal.style.display = 'none';
+    
+    renderBankReconciliations();
+    
+    // Automatically open the reconciliation detail view
+    viewReconciliation(reconciliation);
+  }
+  
+  function calculateLedgerBalance(accountId, endDate){
+    if(!selectedUserId || !selectedBizId) return 0;
+    
+    const b = findBiz(selectedBizId);
+    if(!b) return 0;
+    
+    const account = b.accounts.find(a => a.id === accountId);
+    if(!account) return 0;
+    
+    // Start with opening balance
+    let balance = account.openingBalance || 0;
+    
+    // Add all transactions up to end date
+    const txns = state.transactions[selectedUserId]?.[selectedBizId] || [];
+    const relevantTxns = txns.filter(t => t.accountId === accountId && t.date <= endDate);
+    
+    for(const txn of relevantTxns){
+      if(account.category === 'Asset' || account.category === 'Expense'){
+        balance += Number(txn.amount) || 0;
+      } else if(account.category === 'Liability' || account.category === 'Revenue'){
+        balance -= Number(txn.amount) || 0;
+      }
+    }
+    
+    return balance;
+  }
+  
+  function getLedgerItemsForReconciliation(accountId, fromDate, toDate){
+    if(!selectedUserId || !selectedBizId) return [];
+    
+    const txns = state.transactions[selectedUserId]?.[selectedBizId] || [];
+    const relevantTxns = txns.filter(t => 
+      t.accountId === accountId && 
+      t.date >= fromDate && 
+      t.date <= toDate
+    );
+    
+    return relevantTxns.map(t => ({
+      id: t.id,
+      date: t.date,
+      description: t.desc || '',
+      debit: t.amount > 0 ? t.amount : 0,
+      credit: t.amount < 0 ? Math.abs(t.amount) : 0,
+      status: 'unmatched',
+      matchedWith: null
+    }));
+  }
+  
+  function viewReconciliation(rec){
+    currentReconciliation = rec;
+    currentReconciliationId = rec.id;
+    
+    // Hide list view, show detail view
+    reconciliationListView.style.display = 'none';
+    reconciliationDetailView.style.display = 'block';
+    
+    const b = findBiz(selectedBizId);
+    const account = b ? b.accounts.find(a => a.id === rec.accountId) : null;
+    reconciliationDetailTitle.textContent = `Reconciliation - ${account ? account.name : 'Unknown'} (${rec.fromDate} to ${rec.toDate})`;
+    
+    // Update summary
+    reconcilStatementBalance.textContent = fmt(rec.statementBalance);
+    reconcilLedgerBalance.textContent = fmt(rec.ledgerBalance);
+    
+    const matchedCount = rec.matches.length;
+    const unmatchedBankCount = rec.bankItems.filter(item => item.status === 'unmatched').length;
+    const unmatchedLedgerCount = rec.ledgerItems.filter(item => item.status === 'unmatched').length;
+    
+    reconcilMatchedCount.textContent = matchedCount;
+    reconcilUnmatchedCount.textContent = unmatchedBankCount + unmatchedLedgerCount;
+    
+    const difference = rec.statementBalance - rec.ledgerBalance;
+    reconcilDifference.textContent = fmt(difference);
+    reconcilDifference.style.color = Math.abs(difference) < 0.01 ? '#059669' : '#dc2626';
+    
+    // Render bank statement items
+    renderBankStatementItems();
+    
+    // Render unmatched ledger items
+    renderLedgerItemsForReconciliation();
+  }
+  
+  function renderBankStatementItems(){
+    if(!currentReconciliation) return;
+    
+    bankStatementItemsBody.innerHTML = '';
+    
+    if(currentReconciliation.bankItems.length === 0){
+      bankStatementItemsBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No bank statement items. Import a CSV file to add items.</td></tr>';
+      return;
+    }
+    
+    for(const item of currentReconciliation.bankItems){
+      const tr = document.createElement('tr');
+      
+      const tdCheck = document.createElement('td');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.itemId = item.id;
+      tdCheck.appendChild(checkbox);
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = item.date;
+      
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = item.description;
+      
+      const tdRef = document.createElement('td');
+      tdRef.textContent = item.reference || '';
+      
+      const tdDebit = document.createElement('td');
+      tdDebit.textContent = item.debit > 0 ? fmt(item.debit) : '';
+      
+      const tdCredit = document.createElement('td');
+      tdCredit.textContent = item.credit > 0 ? fmt(item.credit) : '';
+      
+      const tdBalance = document.createElement('td');
+      tdBalance.textContent = fmt(item.balance);
+      
+      const tdStatus = document.createElement('td');
+      const statusSpan = document.createElement('span');
+      statusSpan.textContent = item.status === 'matched' ? 'Matched' : item.status === 'discrepancy' ? 'Discrepancy' : 'Unmatched';
+      statusSpan.style.padding = '4px 8px';
+      statusSpan.style.borderRadius = '4px';
+      statusSpan.style.fontSize = '0.85rem';
+      if(item.status === 'matched'){
+        statusSpan.style.background = '#e6f4ea';
+        statusSpan.style.color = '#1e7e34';
+      } else if(item.status === 'discrepancy'){
+        statusSpan.style.background = '#fee';
+        statusSpan.style.color = '#c00';
+      } else {
+        statusSpan.style.background = '#fff3cd';
+        statusSpan.style.color = '#856404';
+      }
+      tdStatus.appendChild(statusSpan);
+      
+      const tdActions = document.createElement('td');
+      if(item.status === 'unmatched'){
+        const btnMatch = document.createElement('button');
+        btnMatch.textContent = 'Match';
+        btnMatch.className = 'small';
+        btnMatch.onclick = () => openMatchTransaction(item);
+        tdActions.appendChild(btnMatch);
+        
+        const btnDiscrepancy = document.createElement('button');
+        btnDiscrepancy.textContent = 'Mark Discrepancy';
+        btnDiscrepancy.className = 'small';
+        btnDiscrepancy.style.marginLeft = '4px';
+        btnDiscrepancy.onclick = () => openDiscrepancyModal(item, 'bank');
+        tdActions.appendChild(btnDiscrepancy);
+      } else if(item.status === 'matched'){
+        const btnUnmatch = document.createElement('button');
+        btnUnmatch.textContent = 'Unmatch';
+        btnUnmatch.className = 'small';
+        btnUnmatch.onclick = () => unmatchTransaction(item.id);
+        tdActions.appendChild(btnUnmatch);
+      }
+      
+      tr.appendChild(tdCheck);
+      tr.appendChild(tdDate);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdRef);
+      tr.appendChild(tdDebit);
+      tr.appendChild(tdCredit);
+      tr.appendChild(tdBalance);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdActions);
+      
+      bankStatementItemsBody.appendChild(tr);
+    }
+  }
+  
+  function renderLedgerItemsForReconciliation(){
+    if(!currentReconciliation) return;
+    
+    ledgerItemsBody.innerHTML = '';
+    
+    const unmatchedItems = currentReconciliation.ledgerItems.filter(item => item.status === 'unmatched');
+    
+    if(unmatchedItems.length === 0){
+      ledgerItemsBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">All ledger items are matched</td></tr>';
+      return;
+    }
+    
+    for(const item of unmatchedItems){
+      const tr = document.createElement('tr');
+      
+      const tdCheck = document.createElement('td');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.itemId = item.id;
+      tdCheck.appendChild(checkbox);
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = item.date;
+      
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = item.description;
+      
+      const tdAccount = document.createElement('td');
+      const b = findBiz(selectedBizId);
+      const txn = state.transactions[selectedUserId]?.[selectedBizId]?.find(t => t.id === item.id);
+      const account = b && txn ? b.accounts.find(a => a.id === txn.accountId) : null;
+      tdAccount.textContent = account ? account.name : 'Unknown';
+      
+      const tdDebit = document.createElement('td');
+      tdDebit.textContent = item.debit > 0 ? fmt(item.debit) : '';
+      
+      const tdCredit = document.createElement('td');
+      tdCredit.textContent = item.credit > 0 ? fmt(item.credit) : '';
+      
+      const tdStatus = document.createElement('td');
+      const statusSpan = document.createElement('span');
+      statusSpan.textContent = 'Unmatched';
+      statusSpan.style.padding = '4px 8px';
+      statusSpan.style.borderRadius = '4px';
+      statusSpan.style.fontSize = '0.85rem';
+      statusSpan.style.background = '#fff3cd';
+      statusSpan.style.color = '#856404';
+      tdStatus.appendChild(statusSpan);
+      
+      const tdActions = document.createElement('td');
+      const btnDiscrepancy = document.createElement('button');
+      btnDiscrepancy.textContent = 'Mark Discrepancy';
+      btnDiscrepancy.className = 'small';
+      btnDiscrepancy.onclick = () => openDiscrepancyModal(item, 'ledger');
+      tdActions.appendChild(btnDiscrepancy);
+      
+      tr.appendChild(tdCheck);
+      tr.appendChild(tdDate);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdAccount);
+      tr.appendChild(tdDebit);
+      tr.appendChild(tdCredit);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdActions);
+      
+      ledgerItemsBody.appendChild(tr);
+    }
+  }
+  
+  
+  function openMatchTransaction(bankItem){
+    selectedBankItem = bankItem;
+    
+    // Display bank item details
+    matchBankItemDisplay.innerHTML = `
+      <div style="padding:8px;">
+        <strong>Date:</strong> ${bankItem.date} | 
+        <strong>Description:</strong> ${bankItem.description} | 
+        <strong>Amount:</strong> ${bankItem.debit > 0 ? 'Debit ' + fmt(bankItem.debit) : 'Credit ' + fmt(bankItem.credit)}
+      </div>
+    `;
+    
+    // Populate ledger items
+    matchLedgerItemsBody.innerHTML = '';
+    const unmatchedLedgerItems = currentReconciliation.ledgerItems.filter(item => item.status === 'unmatched');
+    
+    for(const item of unmatchedLedgerItems){
+      const tr = document.createElement('tr');
+      
+      const tdCheck = document.createElement('td');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.itemId = item.id;
+      checkbox.className = 'match-ledger-checkbox';
+      tdCheck.appendChild(checkbox);
+      
+      const tdDate = document.createElement('td');
+      tdDate.textContent = item.date;
+      
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = item.description;
+      
+      const tdDebit = document.createElement('td');
+      tdDebit.textContent = item.debit > 0 ? fmt(item.debit) : '';
+      
+      const tdCredit = document.createElement('td');
+      tdCredit.textContent = item.credit > 0 ? fmt(item.credit) : '';
+      
+      tr.appendChild(tdCheck);
+      tr.appendChild(tdDate);
+      tr.appendChild(tdDesc);
+      tr.appendChild(tdDebit);
+      tr.appendChild(tdCredit);
+      
+      matchLedgerItemsBody.appendChild(tr);
+    }
+    
+    matchNotes.value = '';
+    
+    modalOverlay.style.display = 'block';
+    matchTransactionModal.style.display = 'block';
+  }
+  
+  function saveMatch(){
+    if(!currentReconciliation || !selectedBankItem) return;
+    
+    // Get selected ledger items
+    const checkboxes = document.querySelectorAll('.match-ledger-checkbox:checked');
+    if(checkboxes.length === 0) return alert('Please select at least one ledger item to match');
+    
+    const ledgerItemIds = Array.from(checkboxes).map(cb => cb.dataset.itemId);
+    
+    // Create match record
+    const match = {
+      id: uid('match'),
+      bankItemId: selectedBankItem.id,
+      ledgerItemIds: ledgerItemIds,
+      notes: matchNotes.value,
+      matchedAt: Date.now()
+    };
+    
+    currentReconciliation.matches.push(match);
+    
+    // Update status of bank item
+    const bankItem = currentReconciliation.bankItems.find(item => item.id === selectedBankItem.id);
+    if(bankItem) bankItem.status = 'matched';
+    
+    // Update status of ledger items
+    for(const itemId of ledgerItemIds){
+      const ledgerItem = currentReconciliation.ledgerItems.find(item => item.id === itemId);
+      if(ledgerItem){
+        ledgerItem.status = 'matched';
+        ledgerItem.matchedWith = selectedBankItem.id;
+      }
+    }
+    
+    // Update reconciliation in state
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const reconciliations = state.bankReconciliations[key] || [];
+    const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+    if(index >= 0){
+      reconciliations[index] = currentReconciliation;
+      saveState();
+      addAudit('reconciliation.match', 'match', match.id, `Matched bank item with ${ledgerItemIds.length} ledger item(s)`);
+    }
+    
+    modalOverlay.style.display = 'none';
+    matchTransactionModal.style.display = 'none';
+    
+    renderBankStatementItems();
+    renderLedgerItemsForReconciliation();
+    viewReconciliation(currentReconciliation); // Refresh summary
+  }
+  
+  function unmatchTransaction(bankItemId){
+    if(!currentReconciliation) return;
+    if(!confirm('Are you sure you want to unmatch this transaction?')) return;
+    
+    // Find and remove the match
+    const matchIndex = currentReconciliation.matches.findIndex(m => m.bankItemId === bankItemId);
+    if(matchIndex >= 0){
+      const match = currentReconciliation.matches[matchIndex];
+      currentReconciliation.matches.splice(matchIndex, 1);
+      
+      // Update bank item status
+      const bankItem = currentReconciliation.bankItems.find(item => item.id === bankItemId);
+      if(bankItem) bankItem.status = 'unmatched';
+      
+      // Update ledger items status
+      for(const itemId of match.ledgerItemIds){
+        const ledgerItem = currentReconciliation.ledgerItems.find(item => item.id === itemId);
+        if(ledgerItem){
+          ledgerItem.status = 'unmatched';
+          ledgerItem.matchedWith = null;
+        }
+      }
+      
+      // Update reconciliation in state
+      const key = `${selectedUserId}_${selectedBizId}`;
+      const reconciliations = state.bankReconciliations[key] || [];
+      const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+      if(index >= 0){
+        reconciliations[index] = currentReconciliation;
+        saveState();
+        addAudit('reconciliation.unmatch', 'match', match.id, `Unmatched bank item`);
+      }
+      
+      renderBankStatementItems();
+      renderLedgerItemsForReconciliation();
+      viewReconciliation(currentReconciliation); // Refresh summary
+    }
+  }
+  
+  function openDiscrepancyModal(item, type){
+    // Display item details
+    const itemDisplay = type === 'bank' 
+      ? `Date: ${item.date} | Description: ${item.description} | Amount: ${item.debit > 0 ? 'Debit ' + fmt(item.debit) : 'Credit ' + fmt(item.credit)}`
+      : `Date: ${item.date} | Description: ${item.description} | Amount: ${item.debit > 0 ? 'Debit ' + fmt(item.debit) : 'Credit ' + fmt(item.credit)}`;
+    
+    discrepancyItemDisplay.innerHTML = `<div style="padding:8px;">${itemDisplay}</div>`;
+    discrepancyItemDisplay.dataset.itemId = item.id;
+    discrepancyItemDisplay.dataset.itemType = type;
+    
+    discrepancyType.value = 'timing';
+    discrepancyNotes.value = '';
+    
+    modalOverlay.style.display = 'block';
+    discrepancyModal.style.display = 'block';
+  }
+  
+  function saveDiscrepancy(){
+    if(!currentReconciliation) return;
+    if(!discrepancyNotes.value.trim()) return alert('Please enter notes for the discrepancy');
+    
+    const itemId = discrepancyItemDisplay.dataset.itemId;
+    const itemType = discrepancyItemDisplay.dataset.itemType;
+    
+    // Create discrepancy record
+    const discrepancy = {
+      id: uid('discrepancy'),
+      itemId: itemId,
+      itemType: itemType,
+      type: discrepancyType.value,
+      notes: discrepancyNotes.value,
+      createdAt: Date.now()
+    };
+    
+    currentReconciliation.discrepancies.push(discrepancy);
+    
+    // Update item status
+    if(itemType === 'bank'){
+      const bankItem = currentReconciliation.bankItems.find(item => item.id === itemId);
+      if(bankItem) bankItem.status = 'discrepancy';
+    } else {
+      const ledgerItem = currentReconciliation.ledgerItems.find(item => item.id === itemId);
+      if(ledgerItem) ledgerItem.status = 'discrepancy';
+    }
+    
+    // Update reconciliation in state
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const reconciliations = state.bankReconciliations[key] || [];
+    const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+    if(index >= 0){
+      reconciliations[index] = currentReconciliation;
+      saveState();
+      addAudit('reconciliation.discrepancy', 'discrepancy', discrepancy.id, `Marked ${itemType} item as discrepancy`);
+    }
+    
+    modalOverlay.style.display = 'none';
+    discrepancyModal.style.display = 'none';
+    
+    renderBankStatementItems();
+    renderLedgerItemsForReconciliation();
+    viewReconciliation(currentReconciliation); // Refresh summary
+  }
+  
+  function autoMatch(){
+    if(!currentReconciliation) return;
+    if(!confirm('This will attempt to automatically match transactions based on date and amount. Continue?')) return;
+    
+    let matchCount = 0;
+    
+    // Get unmatched items
+    const unmatchedBankItems = currentReconciliation.bankItems.filter(item => item.status === 'unmatched');
+    const unmatchedLedgerItems = currentReconciliation.ledgerItems.filter(item => item.status === 'unmatched');
+    
+    for(const bankItem of unmatchedBankItems){
+      // Try to find a matching ledger item
+      // Match criteria: same date and same amount (within 0.01 tolerance)
+      const amount = bankItem.debit > 0 ? bankItem.debit : bankItem.credit;
+      
+      const matchingLedgerItem = unmatchedLedgerItems.find(ledgerItem => {
+        const ledgerAmount = ledgerItem.debit > 0 ? ledgerItem.debit : ledgerItem.credit;
+        return ledgerItem.date === bankItem.date && Math.abs(ledgerAmount - amount) < 0.01;
+      });
+      
+      if(matchingLedgerItem){
+        // Create match
+        const match = {
+          id: uid('match'),
+          bankItemId: bankItem.id,
+          ledgerItemIds: [matchingLedgerItem.id],
+          notes: 'Auto-matched',
+          matchedAt: Date.now()
+        };
+        
+        currentReconciliation.matches.push(match);
+        bankItem.status = 'matched';
+        matchingLedgerItem.status = 'matched';
+        matchingLedgerItem.matchedWith = bankItem.id;
+        
+        // Remove from unmatched list
+        const ledgerIndex = unmatchedLedgerItems.indexOf(matchingLedgerItem);
+        if(ledgerIndex >= 0) unmatchedLedgerItems.splice(ledgerIndex, 1);
+        
+        matchCount++;
+      }
+    }
+    
+    if(matchCount > 0){
+      // Update reconciliation in state
+      const key = `${selectedUserId}_${selectedBizId}`;
+      const reconciliations = state.bankReconciliations[key] || [];
+      const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+      if(index >= 0){
+        reconciliations[index] = currentReconciliation;
+        saveState();
+        addAudit('reconciliation.automatch', 'reconciliation', currentReconciliationId, `Auto-matched ${matchCount} transaction(s)`);
+      }
+      
+      alert(`Successfully auto-matched ${matchCount} transaction(s)`);
+      
+      renderBankStatementItems();
+      renderLedgerItemsForReconciliation();
+      viewReconciliation(currentReconciliation); // Refresh summary
+    } else {
+      alert('No matching transactions found');
+    }
+  }
+  
+  function completeReconciliation(){
+    if(!currentReconciliation) return;
+    
+    // Check if there are any unmatched items
+    const unmatchedBankCount = currentReconciliation.bankItems.filter(item => item.status === 'unmatched').length;
+    const unmatchedLedgerCount = currentReconciliation.ledgerItems.filter(item => item.status === 'unmatched').length;
+    
+    if(unmatchedBankCount > 0 || unmatchedLedgerCount > 0){
+      if(!confirm(`There are ${unmatchedBankCount + unmatchedLedgerCount} unmatched items. Do you want to complete the reconciliation anyway?`)){
+        return;
+      }
+    }
+    
+    // Mark as completed
+    currentReconciliation.status = 'completed';
+    currentReconciliation.completedAt = Date.now();
+    
+    // Update reconciliation in state
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const reconciliations = state.bankReconciliations[key] || [];
+    const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+    if(index >= 0){
+      reconciliations[index] = currentReconciliation;
+      saveState();
+      addAudit('reconciliation.complete', 'reconciliation', currentReconciliationId, `Reconciliation completed`);
+    }
+    
+    alert('Reconciliation completed successfully!');
+    backToReconciliationList();
+  }
+  
+  function backToReconciliationList(){
+    currentReconciliation = null;
+    currentReconciliationId = null;
+    selectedBankItem = null;
+    
+    reconciliationDetailView.style.display = 'none';
+    reconciliationListView.style.display = 'block';
+    
+    renderBankReconciliations();
+  }
+  
+  function deleteReconciliation(reconciliationId){
+    if(!confirm('Are you sure you want to delete this reconciliation?')) return;
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    const reconciliations = state.bankReconciliations[key] || [];
+    const index = reconciliations.findIndex(r => r.id === reconciliationId);
+    
+    if(index >= 0){
+      reconciliations.splice(index, 1);
+      saveState();
+      addAudit('reconciliation.delete', 'reconciliation', reconciliationId, `Reconciliation deleted`);
+      renderBankReconciliations();
+    }
+  }
+  
+  function openImportBankStatement(){
+    if(!selectedUserId || !selectedBizId) return alert('Please select a business first');
+    
+    bankStatementFile.value = '';
+    importBankAccount.value = '';
+    
+    populateReconciliationAccountSelect();
+    
+    modalOverlay.style.display = 'block';
+    bankStatementImportModal.style.display = 'block';
+  }
+  
+  function importBankStatement(){
+    if(!bankStatementFile.files || bankStatementFile.files.length === 0) return alert('Please select a CSV file');
+    if(!importBankAccount.value) return alert('Please select a bank account');
+    
+    const file = bankStatementFile.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e){
+      try {
+        const csv = e.target.result;
+        const lines = csv.split('\n');
+        
+        if(lines.length < 2) return alert('CSV file is empty or invalid');
+        
+        // Parse header
+        const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        // Check for required columns
+        const dateIndex = header.findIndex(h => h.includes('date'));
+        const descIndex = header.findIndex(h => h.includes('description') || h.includes('desc'));
+        const refIndex = header.findIndex(h => h.includes('reference') || h.includes('ref'));
+        const debitIndex = header.findIndex(h => h.includes('debit') || h.includes('withdrawal'));
+        const creditIndex = header.findIndex(h => h.includes('credit') || h.includes('deposit'));
+        const balanceIndex = header.findIndex(h => h.includes('balance'));
+        
+        if(dateIndex === -1 || descIndex === -1) {
+          return alert('CSV must have at least Date and Description columns');
+        }
+        
+        // Parse data rows
+        const bankItems = [];
+        for(let i = 1; i < lines.length; i++){
+          const line = lines[i].trim();
+          if(!line) continue;
+          
+          const values = line.split(',').map(v => v.trim());
+          
+          const item = {
+            id: uid('bankitem'),
+            date: values[dateIndex] || '',
+            description: values[descIndex] || '',
+            reference: refIndex >= 0 ? values[refIndex] : '',
+            debit: debitIndex >= 0 ? (parseFloat(values[debitIndex]) || 0) : 0,
+            credit: creditIndex >= 0 ? (parseFloat(values[creditIndex]) || 0) : 0,
+            balance: balanceIndex >= 0 ? (parseFloat(values[balanceIndex]) || 0) : 0,
+            status: 'unmatched'
+          };
+          
+          bankItems.push(item);
+        }
+        
+        if(bankItems.length === 0) return alert('No valid data found in CSV');
+        
+        // Check if there's an active reconciliation
+        if(currentReconciliation){
+          // Add to current reconciliation
+          currentReconciliation.bankItems.push(...bankItems);
+          
+          // Update reconciliation in state
+          const key = `${selectedUserId}_${selectedBizId}`;
+          const reconciliations = state.bankReconciliations[key] || [];
+          const index = reconciliations.findIndex(r => r.id === currentReconciliationId);
+          if(index >= 0){
+            reconciliations[index] = currentReconciliation;
+            saveState();
+            addAudit('reconciliation.import', 'reconciliation', currentReconciliationId, `Imported ${bankItems.length} bank statement items`);
+          }
+          
+          alert(`Successfully imported ${bankItems.length} bank statement items`);
+          
+          renderBankStatementItems();
+          viewReconciliation(currentReconciliation); // Refresh summary
+        } else {
+          // Create a new reconciliation with the imported items
+          const accountId = importBankAccount.value;
+          const b = findBiz(selectedBizId);
+          const account = b ? b.accounts.find(a => a.id === accountId) : null;
+          
+          if(!account) return alert('Selected account not found');
+          
+          // Determine date range from imported items
+          const dates = bankItems.map(item => item.date).filter(d => d).sort();
+          const fromDate = dates[0];
+          const toDate = dates[dates.length - 1];
+          
+          // Get statement ending balance from last item
+          const lastBalance = bankItems[bankItems.length - 1].balance;
+          
+          const key = `${selectedUserId}_${selectedBizId}`;
+          if(!state.bankReconciliations[key]) state.bankReconciliations[key] = [];
+          
+          const reconciliation = {
+            id: uid('reconcil'),
+            date: today(),
+            period: 'custom',
+            fromDate: fromDate,
+            toDate: toDate,
+            accountId: accountId,
+            statementBalance: lastBalance,
+            ledgerBalance: calculateLedgerBalance(accountId, toDate),
+            bankItems: bankItems,
+            ledgerItems: getLedgerItemsForReconciliation(accountId, fromDate, toDate),
+            matches: [],
+            discrepancies: [],
+            notes: `Imported from ${file.name}`,
+            status: 'pending',
+            createdAt: Date.now()
+          };
+          
+          state.bankReconciliations[key].push(reconciliation);
+          saveState();
+          addAudit('reconciliation.create', 'reconciliation', reconciliation.id, `Reconciliation created from CSV import`);
+          
+          alert(`Successfully imported ${bankItems.length} bank statement items and created a new reconciliation`);
+          
+          // Switch to reconciliation view
+          viewReconciliation(reconciliation);
+        }
+        
+        modalOverlay.style.display = 'none';
+        bankStatementImportModal.style.display = 'none';
+        
+      } catch(error){
+        console.error('CSV import error:', error);
+        alert('Error parsing CSV file: ' + error.message);
+      }
+    };
+    
+    reader.readAsText(file);
+  }
+
+  // Continue with more bank reconciliation functions in next edit...
+
+  // Function to update tax field visibility based on active tab
+  function updateTaxFieldsVisibility() {
+    const showTaxFields = (activeTab === 'ledger' || activeTab === 'invoicing');
+    
+    // Tax-related form elements
+    const vatLabel = document.getElementById('txnVatLabel');
+    const whtLabel = document.getElementById('txnWhtLabel');
+    const whtBasisLabel = document.getElementById('txnWhtBasisLabel');
+    const whtRateLabel = document.getElementById('txnWhtRateLabel');
+    const payeLabel = document.getElementById('txnPayeLabel');
+    const adjustmentLabel = document.getElementById('txnAdjustmentLabel');
+    const adjustmentAmountLabel = document.getElementById('txnAdjustmentAmountLabel');
+    
+    // Set display for tax fields
+    if (vatLabel) vatLabel.style.display = showTaxFields ? '' : 'none';
+    if (whtLabel) whtLabel.style.display = showTaxFields ? '' : 'none';
+    // WHT basis and rate are conditionally shown based on WHT checkbox, only hide if not showing tax fields
+    if (whtBasisLabel) {
+      if (!showTaxFields) {
+        whtBasisLabel.style.display = 'none';
+      }
+      // When showing tax fields, leave the display as-is (controlled by WHT checkbox logic)
+    }
+    if (whtRateLabel) {
+      if (!showTaxFields) {
+        whtRateLabel.style.display = 'none';
+      }
+      // When showing tax fields, leave the display as-is (controlled by WHT checkbox logic)
+    }
+    if (payeLabel) payeLabel.style.display = showTaxFields ? '' : 'none';
+    if (adjustmentLabel) adjustmentLabel.style.display = showTaxFields ? '' : 'none';
+    // Adjustment amount is conditionally shown based on adjustment type, only hide if not showing tax fields
+    if (adjustmentAmountLabel) {
+      if (!showTaxFields) {
+        adjustmentAmountLabel.style.display = 'none';
+      }
+      // When showing tax fields, leave the display as-is (controlled by adjustment type logic)
+    }
+    
+    // Filter Action dropdown options
+    const actionSelect = document.getElementById('txnAction');
+    if (actionSelect) {
+      const options = actionSelect.querySelectorAll('option');
+      options.forEach(opt => {
+        if (opt.value === 'Tax Income' || opt.value === 'Tax Payment') {
+          opt.style.display = showTaxFields ? '' : 'none';
+          if (!showTaxFields && opt.selected) {
+            actionSelect.value = '';
+          }
+        }
+      });
+    }
   }
 
   // Reports rendering
   function renderTab(){
     // Hide all sections first
+    if(dashboardSection) dashboardSection.style.display = 'none';
     ledgerSection.style.display = 'none';
     invoicingSection.style.display = 'none';
     cashbookSection.style.display = 'none';
+    bankReconciliationSection.style.display = 'none';
     reportsSection.style.display = 'none';
     if(ledgerListSection) ledgerListSection.style.display = 'none';
     
     // Remove active class from all tabs
+    if(btnDashboardTab) btnDashboardTab.classList.remove('active');
     btnLedgerTab.classList.remove('active');
     btnInvoicingTab.classList.remove('active');
     btnCashbookTab.classList.remove('active');
+    btnBankReconciliationTab.classList.remove('active');
     btnReportsTab.classList.remove('active');
     
-    if(activeTab === 'ledger'){
+    if(activeTab === 'dashboard'){
+      if(dashboardSection){
+        dashboardSection.style.display = 'block';
+        if(btnDashboardTab) btnDashboardTab.classList.add('active');
+        renderDashboard();
+      }
+    } else if(activeTab === 'ledger'){
       ledgerSection.style.display = 'block';
       if(ledgerListSection) ledgerListSection.style.display = 'block';
       btnLedgerTab.classList.add('active');
@@ -6576,6 +8548,13 @@
       cashbookSection.style.display = 'block';
       btnCashbookTab.classList.add('active');
       renderCashbook();
+    } else if(activeTab === 'bankReconciliation'){
+      bankReconciliationSection.style.display = 'block';
+      btnBankReconciliationTab.classList.add('active');
+      // Reset to list view
+      reconciliationDetailView.style.display = 'none';
+      reconciliationListView.style.display = 'block';
+      renderBankReconciliations();
     } else if(activeTab === 'reports'){
       reportsSection.style.display = 'block';
       btnReportsTab.classList.add('active');
@@ -6585,6 +8564,223 @@
       if(tb) tb.classList.add('active');
       renderReport('vatReport');
     }
+    
+    // Update tax field visibility based on active tab
+    updateTaxFieldsVisibility();
+  }
+
+  function renderDashboard(){
+    const b = findBiz(selectedBizId);
+    if(!b){
+      document.getElementById('dashboardBusinessInfo').innerHTML = '<div class="muted">Select a business to view dashboard</div>';
+      return;
+    }
+    
+    // Snapshot Summary - Revenue, Expenses, and Profit - Calculate first to get turnover
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    let revenue = 0, expenses = 0;
+    
+    for(const t of arr){
+      const acct = findAccount(b, t.accountId);
+      const accountName = acct?.name || t.accountName || '';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
+      
+      // Exclude tax payments from revenue/expenses
+      if (!isTaxPayment) {
+        if(t.accountCategory === 'Revenue') revenue += Number(t.amount || 0);
+        if(t.accountCategory === 'Expense') expenses += Number(t.amount || 0);
+      }
+    }
+    
+    // Business Info
+    // Calculate turnover for CIT determination
+    const turnover = revenue;
+    let businessInfo = `
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Business Name:</span>
+        <span class="dashboard-metric-value">${escapeHtml(b.name)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">VAT Rate:</span>
+        <span class="dashboard-metric-value">${b.vatRate}%</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">WHT Rate:</span>
+        <span class="dashboard-metric-value">${b.whtRate}%</span>
+      </div>
+    `;
+    
+    // Add CIT info for Company entity with turnover > 100M
+    if (b.entity === 'Company' && turnover > 100000000) {
+      businessInfo += `
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">CIT:</span>
+          <span class="dashboard-metric-value">30% (Turnover > ₦100M)</span>
+        </div>
+      `;
+    }
+    
+    // Add PIT/PAYE info for all entities
+    businessInfo += `
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">PIT/PAYE:</span>
+        <span class="dashboard-metric-value">0 to 25%</span>
+      </div>
+    `;
+    
+    document.getElementById('dashboardBusinessInfo').innerHTML = businessInfo;
+    
+    // Add depreciation to expenses
+    const depreciation = computeTotalDepreciation();
+    expenses += depreciation;
+    
+    const profit = revenue - expenses;
+    
+    let snapshotSummary = `
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Revenue:</span>
+        <span class="dashboard-metric-value" style="color:#059669;">${fmt(revenue)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Expenses:</span>
+        <span class="dashboard-metric-value" style="color:#dc2626;">${fmt(expenses)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Profit:</span>
+        <span class="dashboard-metric-value" style="color:${profit >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(profit)}</span>
+      </div>
+    `;
+    document.getElementById('dashboardSnapshotSummary').innerHTML = snapshotSummary;
+    
+    // Tax Summary - reuse arr from above
+    let totalVATCollected = 0;
+    let totalVATPaid = 0;
+    let totalWHT = 0;
+    let totalPAYE = 0;
+    
+    for(const t of arr){
+      if(t.vatType && t.vatType !== 'none'){
+        const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
+        if(t.accountCategory === 'Revenue'){
+          totalVATCollected += vat;
+        } else if(t.accountCategory === 'Expense'){
+          totalVATPaid += vat;
+        }
+      }
+      if(t.whtAmount) totalWHT += Number(t.whtAmount);
+      if(t.payeAmount) totalPAYE += Number(t.payeAmount);
+    }
+    
+    const vatNet = totalVATCollected - totalVATPaid;
+    
+    // Calculate PIT for Business entity and CIT for Company entity
+    let totalPIT = 0;
+    let totalCIT = 0;
+    
+    if (b.entity === 'Business' && profit > 0) {
+      // PIT calculation (simplified progressive tax up to 25%)
+      // This is a simplified estimate based on profit
+      const pitBase = profit - (b.lossBroughtForward || 0);
+      if (pitBase > 0) {
+        totalPIT = pitBase * 0.15; // Average estimate, actual is progressive 0-25%
+      }
+    } else if (b.entity === 'Company' && profit > 0) {
+      // CIT calculation at 30% for turnover > 100M, otherwise lower rate
+      const citBase = profit - (b.lossBroughtForward || 0) - (b.caCarryForward || 0);
+      if (citBase > 0) {
+        const citRate = turnover > 100000000 ? 0.30 : (b.citRate || 30) / 100;
+        totalCIT = citBase * citRate;
+      }
+    }
+    
+    let taxSummary = `
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">VAT Collected:</span>
+        <span class="dashboard-metric-value" style="color:#059669;">${fmt(totalVATCollected)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">VAT Paid:</span>
+        <span class="dashboard-metric-value" style="color:#dc2626;">${fmt(totalVATPaid)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">Net VAT:</span>
+        <span class="dashboard-metric-value" style="color:${vatNet >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(vatNet)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">WHT:</span>
+        <span class="dashboard-metric-value">${fmt(totalWHT)}</span>
+      </div>
+      <div class="dashboard-metric">
+        <span class="dashboard-metric-label">PAYE:</span>
+        <span class="dashboard-metric-value">${fmt(totalPAYE)}</span>
+      </div>
+    `;
+    
+    // Show PIT for Business entity
+    if (b.entity === 'Business') {
+      taxSummary += `
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">PIT (est.):</span>
+          <span class="dashboard-metric-value">${fmt(totalPIT)}</span>
+        </div>
+      `;
+    }
+    
+    // Show CIT for Company entity
+    if (b.entity === 'Company') {
+      taxSummary += `
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">CIT (est.):</span>
+          <span class="dashboard-metric-value">${fmt(totalCIT)}</span>
+        </div>
+      `;
+    }
+    document.getElementById('dashboardTaxSummary').innerHTML = taxSummary;
+    
+    // Recent Transactions
+    let recentTxns = '';
+    const recent = arr.slice(-10).reverse();
+    if(recent.length === 0){
+      recentTxns = '<div class="muted">No transactions yet</div>';
+    } else {
+      recentTxns = '<table class="ledger-table"><thead><tr><th>Date</th><th>Action</th><th>Account</th><th>Description</th><th>Amount</th></tr></thead><tbody>';
+      recent.forEach(t => {
+        recentTxns += `<tr>
+          <td>${t.date}</td>
+          <td>${t.action}</td>
+          <td>${t.accountName||'—'}</td>
+          <td>${t.description||'—'}</td>
+          <td>${fmt(t.amount)}</td>
+        </tr>`;
+      });
+      recentTxns += '</tbody></table>';
+    }
+    document.getElementById('dashboardRecentTransactions').innerHTML = recentTxns;
+    
+    // Bank Reconciliation Status
+    const key = selectedUserId + '_' + selectedBizId;
+    const reconciliations = state.bankReconciliations[key] || [];
+    let bankRecStatus = '';
+    if(reconciliations.length === 0){
+      bankRecStatus = '<div class="muted">No bank reconciliations yet</div>';
+    } else {
+      const latest = reconciliations[reconciliations.length - 1];
+      bankRecStatus = `
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">Total Reconciliations:</span>
+          <span class="dashboard-metric-value">${reconciliations.length}</span>
+        </div>
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">Latest Date:</span>
+          <span class="dashboard-metric-value">${latest.endDate || '—'}</span>
+        </div>
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">Latest Status:</span>
+          <span class="dashboard-metric-value">${latest.status || 'In Progress'}</span>
+        </div>
+      `;
+    }
+    document.getElementById('dashboardBankRecStatus').innerHTML = bankRecStatus;
   }
 
   function renderReportsTabState(){
@@ -7043,8 +9239,10 @@
     for(const c of b.contacts || []){
       const div = document.createElement('div'); div.className='account-row';
       const editBtn = document.createElement('button'); editBtn.className='small'; editBtn.textContent='Edit'; editBtn.addEventListener('click', ()=> editContact(c.id));
+      const deleteBtn = document.createElement('button'); deleteBtn.className='small danger'; deleteBtn.textContent='Delete'; deleteBtn.addEventListener('click', ()=> deleteContact(c.id));
       div.innerHTML = `<div><strong>${c.name}</strong> <span class="small-muted">(${c.type})</span></div>`;
       div.appendChild(editBtn);
+      div.appendChild(deleteBtn);
       bizContactsList.appendChild(div);
     }
   }
@@ -7059,6 +9257,12 @@
       return;
     }
     
+    // Show Annual Statutory Deductions section in business modal
+    const annualStatutoryDeductionsSection = document.getElementById('annualStatutoryDeductionsSection');
+    if(annualStatutoryDeductionsSection) {
+      annualStatutoryDeductionsSection.style.display = 'block';
+    }
+    
     // Populate modal fields
     const contactEditModal = document.getElementById('contactEditModal');
     const contactEditName = document.getElementById('contactEditName');
@@ -7069,6 +9273,7 @@
     const contactDedLife = document.getElementById('contactDedLife');
     const contactDedMortgage = document.getElementById('contactDedMortgage');
     const contactDedNHF = document.getElementById('contactDedNHF');
+    const contactDedNHIS = document.getElementById('contactDedNHIS');
     const contactDeductionsSection = document.getElementById('contactDeductionsSection');
     
     if(!contactEditModal) return;
@@ -7084,12 +9289,34 @@
     contactDedLife.value = ded.life || 0;
     contactDedMortgage.value = ded.mortgage || 0;
     contactDedNHF.value = ded.nhf || 0;
+    contactDedNHIS.value = ded.nhis || 0;
     
     // Show/hide deductions section based on contact type
     const showDeductions = (contact.type === 'Employee' || contact.type === 'SoleTrader');
     contactDeductionsSection.style.display = showDeductions ? 'block' : 'none';
     
     openModal(contactEditModal);
+  }
+
+  function deleteContact(id){
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    const contact = (b.contacts || []).find(c => c.id === id);
+    if(!contact) {
+      alert('Contact not found');
+      return;
+    }
+    
+    if(!confirm(`Delete contact "${contact.name}"? This cannot be undone.`)) return;
+    
+    // Remove the contact from the business
+    b.contacts = (b.contacts || []).filter(c => c.id !== id);
+    
+    saveState();
+    addAudit('contact.delete', 'contact', id, 'Deleted contact: ' + contact.name);
+    renderBizContacts(b);
+    alert('Contact deleted successfully');
   }
   
   /**
@@ -7165,19 +9392,45 @@
       delBtn.textContent='Delete'; 
       delBtn.addEventListener('click', ()=> deleteAccount(a.id));
       
-      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span></div>`;
+      // Add Save button for Assets, Liabilities, and Capital
+      const saveBtn = document.createElement('button');
+      saveBtn.className='small primary';
+      saveBtn.textContent='Save';
+      saveBtn.style.marginLeft = '6px';
+      saveBtn.addEventListener('click', ()=> {
+        saveState();
+        alert('Account saved successfully');
+      });
+      
+      // Determine which tabs use this account
+      const usedIn = [];
+      usedIn.push('Ledger'); // All accounts used in Ledger
+      if(a.category === 'Revenue' || a.category === 'Expense'){
+        usedIn.push('Cashbook');
+      }
+      if(a.name === 'Bank' || a.category === 'Bank'){
+        usedIn.push('Bank Rec');
+      }
+      const usageBadge = `<span class="account-usage-badge">Used in: ${usedIn.join(', ')}</span>`;
+      
+      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span> ${usageBadge}</div>`;
+      
+      // Add Save and Delete buttons for Asset, Liability, and Capital accounts
+      if(['Asset', 'Liability', 'Capital'].includes(a.category)) {
+        headerDiv.appendChild(saveBtn);
+      }
       headerDiv.appendChild(delBtn);
       div.appendChild(headerDiv);
       
-      // Show balance fields for eligible accounts (only closing balance, opening removed)
+      // Show balance fields for eligible accounts
       if(balanceAccounts.includes(a.name)){
         const balDiv = document.createElement('div');
         balDiv.style.display = 'flex';
         balDiv.style.gap = '8px';
         balDiv.innerHTML = `
-          <label class="small-note">Closing Balance: 
-            <input type="number" class="smallInput" value="${a.closingBalance||0}" 
-              onchange="updateAccountBalance('${a.id}', 'closing', this.value)" step="0.01" />
+          <label class="small-note">Opening Balance: 
+            <input type="number" class="smallInput" value="${a.openingBalance||0}" 
+              onchange="updateAccountBalance('${a.id}', 'opening', this.value)" step="0.01" />
           </label>
         `;
         div.appendChild(balDiv);
@@ -7193,7 +9446,9 @@
     const account = b.accounts.find(a => a.id === accountId);
     if(!account) return;
     
-    if(type === 'closing'){
+    if(type === 'opening'){
+      account.openingBalance = Number(value || 0);
+    } else if(type === 'closing'){
       account.closingBalance = Number(value || 0);
     }
     saveState();
@@ -7411,6 +9666,8 @@
         }
         
         updateAuthUI();
+        refreshSelectors();
+        ensureSelection();
         renderAll();
         
         // Check if user needs to see video tour
@@ -8043,7 +10300,8 @@
             rent: Number(document.getElementById('contactDedRent').value || 0),
             life: Number(document.getElementById('contactDedLife').value || 0),
             mortgage: Number(document.getElementById('contactDedMortgage').value || 0),
-            nhf: Number(document.getElementById('contactDedNHF').value || 0)
+            nhf: Number(document.getElementById('contactDedNHF').value || 0),
+            nhis: Number(document.getElementById('contactDedNHIS').value || 0)
           };
         } else {
           // Clear deductions for non-employee/non-soletrader contacts
@@ -8067,4 +10325,4 @@
 
   </script>
 </body>
-  </html>
+            </html>
