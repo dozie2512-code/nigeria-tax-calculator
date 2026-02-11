@@ -6252,6 +6252,9 @@
       
       state.invoices[key].push(invoice);
       addAudit('invoice.create', 'invoice', invoice.id, 'Invoice created: ' + invoice.invoiceNumber);
+      
+      // Automatically create an Invoicing ledger entry
+      createInvoicingLedgerEntry(invoice);
     }
     
     saveState();
@@ -6263,6 +6266,44 @@
     modalOverlay.style.display = 'none';
     invoiceModal.style.display = 'none';
     editingInvoice = null;
+  }
+
+  function createInvoicingLedgerEntry(inv){
+    // Create an Invoicing transaction when invoice is created
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    // Find or create Accounts Receivable account
+    let arAccount = b.accounts.find(a => a.name === 'Accounts Receivable');
+    if(!arAccount){
+      arAccount = { id: uid('acc'), name: 'Accounts Receivable', category: 'Asset' };
+      b.accounts.push(arAccount);
+    }
+    
+    const txn = {
+      id: uid('txn'),
+      date: inv.date,
+      action: 'Invoicing',
+      accountId: arAccount.id,
+      accountName: 'Accounts Receivable',
+      accountCategory: 'Asset',
+      description: `Invoice ${inv.invoiceNumber} - ${inv.customerName}`,
+      amount: inv.subtotal,
+      vatType: inv.vatType,
+      whtApplied: false,
+      paye: false,
+      contact: inv.customerName,
+      adjustmentType: '',
+      adjustmentAmount: 0,
+      invoiceId: inv.id
+    };
+    
+    const key = `${selectedUserId}_${selectedBizId}`;
+    if(!state.transactions[selectedUserId]) state.transactions[selectedUserId] = {};
+    if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
+    
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    addAudit('txn.add', 'txn', txn.id, `Invoicing transaction created for invoice ${inv.invoiceNumber}`);
   }
 
   function viewInvoice(inv){
@@ -6362,24 +6403,32 @@
     // Find or create Sales Revenue account
     let salesAccount = b.accounts.find(a => a.name === 'Sales Revenue');
     if(!salesAccount){
-      salesAccount = { name: 'Sales Revenue', category: 'Revenue' };
+      salesAccount = { id: uid('acc'), name: 'Sales Revenue', category: 'Revenue' };
       b.accounts.push(salesAccount);
     }
     
+    // Check if invoice has WHT applied (can be configured on invoice or business level)
+    const whtApplied = inv.whtApplied || false;
+    const whtRate = inv.whtRate || b.whtRate || 0;
+    
     const txn = {
       id: uid('txn'),
-      date: inv.date,
+      date: new Date().toISOString().slice(0, 10), // Payment date is today
       action: 'Revenue',
+      accountId: salesAccount.id,
       accountName: 'Sales Revenue',
       accountCategory: 'Revenue',
-      description: `Invoice ${inv.invoiceNumber} - ${inv.customerName}`,
+      description: `Payment for Invoice ${inv.invoiceNumber} - ${inv.customerName}`,
       amount: inv.subtotal,
-      vatType: inv.vatType,
-      whtApplied: false,
+      vatType: inv.vatType || 'none',
+      whtApplied: whtApplied,
+      whtRate: whtRate,
+      whtBasis: inv.whtBasis || 'gross',
       paye: false,
       contact: inv.customerName,
       adjustmentType: '',
-      adjustmentAmount: 0
+      adjustmentAmount: 0,
+      invoiceId: inv.id
     };
     
     const key = `${selectedUserId}_${selectedBizId}`;
@@ -6387,7 +6436,7 @@
     if(!state.transactions[selectedUserId][selectedBizId]) state.transactions[selectedUserId][selectedBizId] = [];
     
     state.transactions[selectedUserId][selectedBizId].push(txn);
-    addAudit('txn.add', 'txn', txn.id, `Transaction created from invoice ${inv.invoiceNumber}`);
+    addAudit('txn.add', 'txn', txn.id, `Revenue transaction created from invoice ${inv.invoiceNumber} payment`);
   }
 
   function deleteInvoice(id){
