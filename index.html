@@ -974,13 +974,16 @@
       <h2 style="margin:0 0 8px 0;">Report</h2>
 
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-        <button class="small tab active" data-report="payeReport">PAYE Report</button>
-        <button class="small tab" data-report="inventoryReport">Inventory Report</button>
-        <button class="small tab" data-report="assetsReport">Assets Report</button>
-        <button class="small tab" data-report="pitBusiness">PIT (Business)</button>
+        <button class="small tab active" data-report="vatReport">VAT Report</button>
+        <button class="small tab" data-report="whtReport">WHT Report</button>
+        <button class="small tab" data-report="payeReport">PAYE Report</button>
+        <button class="small tab" data-report="pitBusiness">PIT Report</button>
+        <button class="small tab" data-report="citReport">CIT Report</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
+        <button class="small tab" data-report="inventoryReport">Inventory Schedule</button>
+        <button class="small tab" data-report="assetsReport">Asset Schedule</button>
         <button class="small tab" data-report="auditTrail">Audit Trail</button>
-        <button class="small tab" data-report="receiptsFolder">Receipts Folder</button>
+        <button class="small tab" data-report="receiptsFolder">Receipts</button>
       </div>
 
       <div style="display:flex; gap:8px; margin-bottom:8px;">
@@ -6947,6 +6950,90 @@
       }
       html += `</tbody><tfoot><tr><th colspan="5">Total WHT Receivable</th><th>${fmt(totalWHT)}</th></tr></tfoot></table>`;
       reportContent.innerHTML = html;
+      
+    } else if(name === 'whtReport'){
+      // Unified WHT Report combining payable and receivable
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let html = `<h3>WHT Report (Withholding Tax)</h3>`;
+      
+      // Calculate totals first
+      let totalWHTCollected = 0; // WHT deducted from customers (payable to tax authority)
+      let totalWHTSuffered = 0;  // WHT paid to suppliers (recoverable/credit)
+      
+      const whtCollectedByRate = {};
+      const whtSufferedByRate = {};
+      
+      for(const t of arr){
+        if(t.whtApplied){
+          const rate = Number(t.whtRate || b.whtRate);
+          const basis = t.whtBasis || 'gross';
+          const wht = computeWHT(Number(t.amount||0), basis, rate);
+          
+          if(t.accountCategory === 'Revenue'){
+            totalWHTCollected += wht;
+            whtCollectedByRate[rate] = (whtCollectedByRate[rate] || 0) + wht;
+          } else if(t.accountCategory === 'Expense'){
+            totalWHTSuffered += wht;
+            whtSufferedByRate[rate] = (whtSufferedByRate[rate] || 0) + wht;
+          }
+        }
+      }
+      
+      const whtNet = totalWHTCollected - totalWHTSuffered;
+      
+      // Summary section
+      html += `<div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-bottom:16px;">`;
+      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">`;
+      html += `<div><strong>WHT Collected:</strong><br/><span style="font-size:1.2rem;color:#059669;">${fmt(totalWHTCollected)}</span><br/><span class="small-muted">Deducted from customers</span></div>`;
+      html += `<div><strong>WHT Suffered:</strong><br/><span style="font-size:1.2rem;color:#dc2626;">${fmt(totalWHTSuffered)}</span><br/><span class="small-muted">Paid to suppliers</span></div>`;
+      html += `<div><strong>Net WHT Position:</strong><br/><span style="font-size:1.2rem;font-weight:700;color:${whtNet >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(whtNet)}</span><br/><span class="small-muted">${whtNet >= 0 ? 'Payable to tax authority' : 'Credit available'}</span></div>`;
+      html += `</div>`;
+      html += `</div>`;
+      
+      // WHT Collected (from revenue) - breakdown by rate
+      html += `<h4>WHT Collected (Deducted from Customers)</h4>`;
+      if(Object.keys(whtCollectedByRate).length > 0){
+        html += `<div style="margin-bottom:8px;">`;
+        for(const rate in whtCollectedByRate){
+          html += `<span style="display:inline-block;margin-right:16px;"><strong>${rate}%:</strong> ${fmt(whtCollectedByRate[rate])}</span>`;
+        }
+        html += `</div>`;
+      }
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Contact</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT</th></tr></thead><tbody>`;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Revenue'){
+          const rate = Number(t.whtRate || b.whtRate);
+          const basis = t.whtBasis || 'gross';
+          const wht = computeWHT(Number(t.amount||0), basis, rate);
+          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
+        }
+      }
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Collected</th><th>${fmt(totalWHTCollected)}</th></tr></tfoot></table>`;
+      
+      // WHT Suffered (from expenses) - breakdown by rate
+      html += `<h4 style="margin-top:16px;">WHT Suffered (Paid to Suppliers)</h4>`;
+      if(Object.keys(whtSufferedByRate).length > 0){
+        html += `<div style="margin-bottom:8px;">`;
+        for(const rate in whtSufferedByRate){
+          html += `<span style="display:inline-block;margin-right:16px;"><strong>${rate}%:</strong> ${fmt(whtSufferedByRate[rate])}</span>`;
+        }
+        html += `</div>`;
+      }
+      html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT</th></tr></thead><tbody>`;
+      for(const t of arr){
+        if(t.whtApplied && t.accountCategory === 'Expense'){
+          const rate = Number(t.whtRate || b.whtRate);
+          const basis = t.whtBasis || 'gross';
+          const wht = computeWHT(Number(t.amount||0), basis, rate);
+          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
+        }
+      }
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Suffered</th><th>${fmt(totalWHTSuffered)}</th></tr></tfoot></table>`;
+      reportContent.innerHTML = html;
+      
+    } else if(name === 'citReport'){
+      // Company Income Tax Report - standalone
+      reportContent.innerHTML = generateCITReport(selectedBizId);
       
     } else if(name === 'payeReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
