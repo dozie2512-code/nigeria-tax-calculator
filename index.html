@@ -646,9 +646,9 @@
         <button class="tab" id="btnLedgerTab">Ledger</button>
         <button class="tab" id="btnInvoicingTab">Invoicing</button>
         <button class="tab" id="btnReportsTab">Reports</button>
-        <button class="tab" id="btnBankReconciliationTab" style="display:none;">Bank Reconciliation</button>
-        <button class="tab" id="btnJournalEntryTab" style="display:none;">Journal Entry</button>
-        <button class="tab" id="btnPayablesTab" style="display:none;">Payables</button>
+        <button class="tab" id="btnBankReconciliationTab">Bank Reconciliation</button>
+        <button class="tab" id="btnJournalEntryTab">Journal Entry</button>
+        <button class="tab" id="btnPayablesTab">Payables</button>
       </div>
 
       <div style="width:8px;"></div>
@@ -1433,7 +1433,8 @@
   const CGT_RATE = 0.10; // 10% Capital Gains Tax rate
   
   // Tax payment account names - used to exclude from P&L and track tax payments
-  const TAX_PAYMENT_ACCOUNTS = [];
+  // These match the account names created by the payTax() function
+  const TAX_PAYMENT_ACCOUNTS = ['VAT Paid', 'VAT Refunded', 'WHT Remitted', 'PAYE Paid', 'PIT Paid', 'CIT Paid', 'CGT Paid'];
   
   // Common account names constants (no longer used for filtering)
   const COMMON_ACCOUNTS = ['Salary', 'Dividend', 'Interest', 'Royalty', 'Share of profit'];
@@ -3017,6 +3018,13 @@
     invoiceItems.addEventListener('click', (e) => {
       if(e.target.classList.contains('invoice-item-remove')){
         e.target.parentElement.remove();
+        updateInvoiceTotal();
+      }
+    });
+    
+    // Add event delegation for invoice item quantity and price changes
+    invoiceItems.addEventListener('input', (e) => {
+      if(e.target.classList.contains('invoice-item-qty') || e.target.classList.contains('invoice-item-price')){
         updateInvoiceTotal();
       }
     });
@@ -5175,34 +5183,37 @@
     const b = findBiz(selectedBizId);
     if(!b) return;
     
-    // Map tax type to liability account name
-    const taxLiabilityMap = {
-      'VAT': 'VAT Liability',
-      'WHT': 'WHT Liability',
-      'PAYE': 'PAYE Liability',
-      'CIT': 'CIT Liability',
-      'PIT': 'PIT Liability',
-      'CGT': 'CGT Liability'
+    // Map tax type to payment account name (these match what renderTaxSummary expects)
+    const taxPaymentAccountMap = {
+      'VAT': 'VAT Paid',
+      'WHT': 'WHT Remitted',  // Use 'WHT Remitted' to match existing code expectations
+      'PAYE': 'PAYE Paid',
+      'CIT': 'CIT Paid',
+      'PIT': 'PIT Paid',
+      'CGT': 'CGT Paid'
     };
     
-    const liabilityAccountName = taxLiabilityMap[taxType];
-    if(!liabilityAccountName) {
+    const paymentAccountName = taxPaymentAccountMap[taxType];
+    if(!paymentAccountName) {
       return alert('Invalid tax type');
     }
     
-    // Find or create the tax liability account
-    let liabilityAccount = b.accounts.find(a => a.name === liabilityAccountName);
-    if(!liabilityAccount) {
-      // Create the tax liability account if it doesn't exist
-      liabilityAccount = {
+    // Find or create the tax payment account
+    // Note: Tax payment accounts are categorized as 'Expense' for tracking purposes
+    // They are marked as disallowable (non-deductible) and excluded from P&L calculations
+    // The renderTaxSummary() function tracks these separately to reduce tax liabilities
+    let paymentAccount = b.accounts.find(a => a.name === paymentAccountName);
+    if(!paymentAccount) {
+      // Create the tax payment account if it doesn't exist
+      paymentAccount = {
         id: uid('acct'),
-        name: liabilityAccountName,
-        category: 'Liability',
-        disallowableDefault: false,
+        name: paymentAccountName,
+        category: 'Expense',
+        disallowableDefault: true,
         nonTaxableDefault: true,
         openingBalance: 0
       };
-      b.accounts.push(liabilityAccount);
+      b.accounts.push(paymentAccount);
     }
     
     // Prompt for payment amount (allow partial payment)
@@ -5213,15 +5224,16 @@
     
     const finalAmount = Number(paymentAmount);
     
-    // Create transaction for tax payment that REDUCES liability (negative amount)
+    // Create transaction for tax payment
+    // Note: Uses 'Tax Payment' action which matches the dropdown option in txnAction (line 727)
     const txn = {
       id: uid('txn'),
       date: new Date().toISOString().split('T')[0],
-      action: 'TaxPayment',  // Special action type for tax payments
-      accountId: liabilityAccount.id,
-      accountName: liabilityAccount.name,
-      accountCategory: 'Liability',
-      amount: -finalAmount,  // NEGATIVE amount to reduce liability
+      action: 'Tax Payment',  // Matches dropdown option in ledger form
+      accountId: paymentAccount.id,
+      accountName: paymentAccount.name,
+      accountCategory: 'Expense',
+      amount: finalAmount,  // Positive amount for payment
       description: `${taxType} Payment to Tax Authority`,
       vatType: 'none',
       whtApplied: false,
@@ -5239,7 +5251,7 @@
     addAudit('tax.payment', 'transaction', txn.id, `Paid ${taxType}: ${fmt(finalAmount)}`);
     saveState();
     renderAll();
-    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!\nThis payment reduces ${liabilityAccountName}.`);
+    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!\nThis payment reduces your ${taxType} liability.`);
   }
   
   // Make payTax available globally for inline onclick handlers
@@ -5418,22 +5430,22 @@
   
   /**
    * Update visibility of enterprise feature tabs based on access
+   * Note: All tabs are now visible to all users by default
    */
   function updateEnterpriseFeatureVisibility() {
-    const hasAccess = canAccessEnterpriseFeatures();
-    
+    // All tabs are now visible to all users
     const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
     const btnJournalEntryTab = document.getElementById('btnJournalEntryTab');
     const btnPayablesTab = document.getElementById('btnPayablesTab');
     
     if (btnBankReconciliationTab) {
-      btnBankReconciliationTab.style.display = hasAccess ? 'inline-block' : 'none';
+      btnBankReconciliationTab.style.display = 'inline-block';
     }
     if (btnJournalEntryTab) {
-      btnJournalEntryTab.style.display = hasAccess ? 'inline-block' : 'none';
+      btnJournalEntryTab.style.display = 'inline-block';
     }
     if (btnPayablesTab) {
-      btnPayablesTab.style.display = hasAccess ? 'inline-block' : 'none';
+      btnPayablesTab.style.display = 'inline-block';
     }
   }
 
