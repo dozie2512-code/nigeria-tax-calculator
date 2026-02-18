@@ -1121,6 +1121,7 @@
         <option value="Asset">Asset</option>
         <option value="Liability">Liability</option>
         <option value="Capital">Capital</option>
+        <option value="Revenue">Revenue</option>
       </select>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountDisallowable" /> Disallowable</label>
       <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newAccountNonTax" /> Non-taxable</label>
@@ -7402,6 +7403,35 @@
   // Make showPayeContactDeductions available globally for onclick handler
   window.showPayeContactDeductions = showPayeContactDeductions;
 
+  /**
+   * Calculate closing balance for an account based on transactions
+   * @param {object} account - The account object
+   * @param {string} bizId - The business ID
+   * @returns {number} - The calculated closing balance
+   */
+  function calculateAccountClosingBalance(account, bizId) {
+    const txns = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+    let balance = account.openingBalance || 0;
+    
+    // Calculate balance based on account category
+    // Asset & Expense: Debit increases, Credit decreases
+    // Liability, Capital & Revenue: Credit increases, Debit decreases
+    
+    for (const txn of txns) {
+      if (txn.accountId !== account.id) continue;
+      
+      if (account.category === 'Asset' || account.category === 'Expense') {
+        // For Asset and Expense accounts, amounts add to balance
+        balance += (txn.amount || 0);
+      } else if (account.category === 'Liability' || account.category === 'Capital' || account.category === 'Revenue') {
+        // For Liability, Capital and Revenue accounts, amounts add to balance
+        balance += (txn.amount || 0);
+      }
+    }
+    
+    return balance;
+  }
+
   function renderAccounts(){
     accountsList.innerHTML = '';
     const b = findBiz(selectedBizId);
@@ -7436,18 +7466,10 @@
         alert('Account saved successfully');
       });
       
-      // Determine which tabs use this account
-      const usedIn = [];
-      usedIn.push('Ledger'); // All accounts used in Ledger
-      if(a.category === 'Revenue' || a.category === 'Expense'){
-        usedIn.push('Cashbook');
-      }
-      if(a.name === 'Bank' || a.category === 'Bank'){
-        usedIn.push('Bank Rec');
-      }
-      const usageBadge = `<span class="account-usage-badge">Used in: ${usedIn.join(', ')}</span>`;
+      // Determine which tabs use this account - REMOVED per requirements
+      // No longer showing "used in ledger" and "used in cashbook" indicators
       
-      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span> ${usageBadge}</div>`;
+      headerDiv.innerHTML = `<div><strong>${a.name}</strong> <span class="small-muted">${a.category}</span></div>`;
       
       // Add Save and Delete buttons for Asset, Liability, and Capital accounts
       if(['Asset', 'Liability', 'Capital'].includes(a.category)) {
@@ -7468,6 +7490,18 @@
           </label>
         `;
         div.appendChild(balDiv);
+      }
+      
+      // Show closing balance for Asset, Liability, and Capital accounts
+      if(['Asset', 'Liability', 'Capital'].includes(a.category)) {
+        const closingBalance = calculateAccountClosingBalance(a, selectedBizId);
+        const closingDiv = document.createElement('div');
+        closingDiv.style.display = 'flex';
+        closingDiv.style.gap = '8px';
+        closingDiv.innerHTML = `
+          <span class="small-note"><strong>Closing Balance: ₦${closingBalance.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
+        `;
+        div.appendChild(closingDiv);
       }
       
       accountsList.appendChild(div);
