@@ -1826,6 +1826,22 @@
     }
     return 0;
   }
+  
+  // WHT calculation utility
+  function computeWHT(amount, basis, rate){
+    const amt = Number(amount || 0);
+    const rateDecimal = Number(rate || 0) / 100;
+    
+    if(basis === 'net'){
+      // Net basis: Gross up the net amount
+      // WHT = Net × (Rate / (1 - Rate))
+      // Gross = Net / (1 - Rate)
+      return amt * (rateDecimal / (1 - rateDecimal));
+    } else {
+      // Gross basis: WHT = Gross × Rate
+      return amt * rateDecimal;
+    }
+  }
 
   // load/save
   function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -3593,6 +3609,15 @@
       contact: txnContact.value || '',
       receiptId: null
     };
+    
+    // WHT Net Basis Gross-Up: If WHT is applied on net basis for Revenue, gross up the amount
+    if(t.whtApplied && t.whtBasis === 'net' && t.accountCategory === 'Revenue'){
+      const rateDecimal = Number(t.whtRate || 0) / 100;
+      const netAmount = t.amount;
+      const grossAmount = netAmount / (1 - rateDecimal);
+      t.amount = grossAmount; // Record the grossed-up amount in revenue
+      t.netAmount = netAmount; // Store original net amount for reference
+    }
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
       const reader = new FileReader();
@@ -5675,7 +5700,7 @@
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT remitted</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
@@ -6796,12 +6821,20 @@
       </div>
     `;
     
-    // Add CIT info for Company entity with turnover > 100M
+    // Add CIT info based on entity type
     if (b.entity === 'Company' && turnover > 100000000) {
       businessInfo += `
         <div class="dashboard-metric">
           <span class="dashboard-metric-label">CIT:</span>
           <span class="dashboard-metric-value">30% (Turnover > ₦100M)</span>
+        </div>
+      `;
+    } else if (b.entity === 'Business') {
+      // Show CIT Rate as "0/30%" for Business entity
+      businessInfo += `
+        <div class="dashboard-metric">
+          <span class="dashboard-metric-label">CIT Rate:</span>
+          <span class="dashboard-metric-value">0/30%</span>
         </div>
       `;
     }
