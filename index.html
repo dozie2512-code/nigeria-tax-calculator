@@ -5094,7 +5094,7 @@
   }
 
   /**
-   * Pay Tax Function - Records tax payment transaction
+   * Pay Tax Function - Records tax payment transaction that reduces tax liability
    * @param {string} taxType - Type of tax (VAT, WHT, PAYE, CIT, PIT, CGT)
    * @param {number} amount - Amount to pay
    */
@@ -5106,33 +5106,34 @@
     const b = findBiz(selectedBizId);
     if(!b) return;
     
-    // Map tax type to account name
-    const taxAccountMap = {
-      'VAT': 'VAT Paid',
-      'WHT': 'WHT Remitted',
-      'PAYE': 'PAYE Paid',
-      'CIT': 'CIT Paid',
-      'PIT': 'PIT Paid',
-      'CGT': 'CGT Paid'
+    // Map tax type to liability account name
+    const taxLiabilityMap = {
+      'VAT': 'VAT Liability',
+      'WHT': 'WHT Liability',
+      'PAYE': 'PAYE Liability',
+      'CIT': 'CIT Liability',
+      'PIT': 'PIT Liability',
+      'CGT': 'CGT Liability'
     };
     
-    const accountName = taxAccountMap[taxType];
-    if(!accountName) {
+    const liabilityAccountName = taxLiabilityMap[taxType];
+    if(!liabilityAccountName) {
       return alert('Invalid tax type');
     }
     
-    // Find or create the tax payment account
-    let account = b.accounts.find(a => a.name === accountName);
-    if(!account) {
-      // Create the tax payment account if it doesn't exist
-      account = {
+    // Find or create the tax liability account
+    let liabilityAccount = b.accounts.find(a => a.name === liabilityAccountName);
+    if(!liabilityAccount) {
+      // Create the tax liability account if it doesn't exist
+      liabilityAccount = {
         id: uid('acct'),
-        name: accountName,
-        category: 'Expense',
+        name: liabilityAccountName,
+        category: 'Liability',
         disallowableDefault: false,
-        nonTaxableDefault: true // Tax payments are non-taxable
+        nonTaxableDefault: true,
+        openingBalance: 0
       };
-      b.accounts.push(account);
+      b.accounts.push(liabilityAccount);
     }
     
     // Prompt for payment amount (allow partial payment)
@@ -5143,21 +5144,22 @@
     
     const finalAmount = Number(paymentAmount);
     
-    // Create transaction for tax payment
+    // Create transaction for tax payment that REDUCES liability (negative amount)
     const txn = {
       id: uid('txn'),
       date: new Date().toISOString().split('T')[0],
-      action: 'Expense',
-      accountId: account.id,
-      accountName: account.name,
-      accountCategory: 'Expense',
-      amount: finalAmount,
+      action: 'TaxPayment',  // Special action type for tax payments
+      accountId: liabilityAccount.id,
+      accountName: liabilityAccount.name,
+      accountCategory: 'Liability',
+      amount: -finalAmount,  // NEGATIVE amount to reduce liability
       description: `${taxType} Payment to Tax Authority`,
       vatType: 'none',
       whtApplied: false,
       paye: false,
       contact: 'Tax Authority',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      isTaxPayment: true  // Flag to identify tax payment transactions
     };
     
     // Add transaction
@@ -5168,7 +5170,7 @@
     addAudit('tax.payment', 'transaction', txn.id, `Paid ${taxType}: ${fmt(finalAmount)}`);
     saveState();
     renderAll();
-    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!`);
+    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!\nThis payment reduces ${liabilityAccountName}.`);
   }
   
   // Make payTax available globally for inline onclick handlers
