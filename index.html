@@ -1313,9 +1313,16 @@
       <span>VAT:</span>
       <span id="invoiceVatAmount">₦0.00</span>
     </div>
-    <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem;">
+    <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem; margin-bottom:8px;">
       <span>Total:</span>
       <span id="invoiceTotal">₦0.00</span>
+    </div>
+    <div style="border-top:1px solid #ddd; padding-top:8px; margin-top:8px;">
+      <label style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Payment Amount (₦):</span>
+        <input type="number" id="invoicePaymentAmount" placeholder="0.00" min="0" step="0.01" style="width:150px;" />
+      </label>
+      <small class="note" style="display:block; margin-top:4px;">Enter partial or full payment amount. Leave blank for unpaid invoice.</small>
     </div>
   </div>
   
@@ -5858,20 +5865,27 @@
     for(const inv of invoices) {
       if(inv.status === 'paid') continue; // Skip paid invoices
       
+      // Calculate remaining amount (total - payments)
       const total = Number(inv.total || 0);
-      totalReceivables += total;
+      const paymentAmount = Number(inv.paymentAmount || 0);
+      const remainingAmount = total - paymentAmount;
+      
+      // Only count unpaid/partially paid invoices
+      if(remainingAmount <= 0) continue;
+      
+      totalReceivables += remainingAmount;
       
       const dueDate = new Date(inv.dueDate);
       const daysPastDue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
       
       if(daysPastDue <= 30) {
-        current += total;
+        current += remainingAmount;
       } else if(daysPastDue <= 60) {
-        aged30 += total;
+        aged30 += remainingAmount;
       } else if(daysPastDue <= 90) {
-        aged60 += total;
+        aged60 += remainingAmount;
       } else {
-        aged90Plus += total;
+        aged90Plus += remainingAmount;
       }
     }
     
@@ -6198,12 +6212,29 @@
     
     const total = subtotal + vatAmount;
     
-    // Determine status
+    // Get payment amount if provided
+    const invoicePaymentAmount = document.getElementById('invoicePaymentAmount');
+    const paymentAmount = Number(invoicePaymentAmount?.value || 0);
+    
+    // Validate payment amount
+    if(paymentAmount < 0) return alert('Payment amount cannot be negative');
+    if(paymentAmount > total) return alert('Payment amount cannot exceed invoice total');
+    
+    // Determine status based on payment
     let status = 'unpaid';
-    const dueDate = new Date(invoiceDueDate.value);
-    const now = new Date();
-    if(dueDate < now){
-      status = 'overdue';
+    if(paymentAmount > 0){
+      if(paymentAmount >= total){
+        status = 'paid';
+      } else {
+        status = 'partial'; // Partially paid
+      }
+    } else {
+      // No payment - check if overdue
+      const dueDate = new Date(invoiceDueDate.value);
+      const now = new Date();
+      if(dueDate < now){
+        status = 'overdue';
+      }
     }
     
     const key = `${selectedUserId}_${selectedBizId}`;
@@ -6227,8 +6258,20 @@
           subtotal,
           vatAmount,
           total,
+          paymentAmount: paymentAmount,
+          paymentHistory: state.invoices[key][idx].paymentHistory || [],
           status: editingInvoice.status === 'paid' ? 'paid' : status
         };
+        
+        // Track payment if amount changed
+        if(paymentAmount > 0 && paymentAmount !== editingInvoice.paymentAmount) {
+          state.invoices[key][idx].paymentHistory.push({
+            date: new Date().toISOString().split('T')[0],
+            amount: paymentAmount,
+            previousAmount: editingInvoice.paymentAmount || 0
+          });
+        }
+        
         addAudit('invoice.edit', 'invoice', editingInvoice.id, 'Invoice updated');
       }
     } else {
@@ -6248,6 +6291,12 @@
         subtotal,
         vatAmount,
         total,
+        paymentAmount: paymentAmount,
+        paymentHistory: paymentAmount > 0 ? [{
+          date: new Date().toISOString().split('T')[0],
+          amount: paymentAmount,
+          previousAmount: 0
+        }] : [],
         status
       };
       
@@ -7426,6 +7475,24 @@
       } else if (account.category === 'Liability' || account.category === 'Capital' || account.category === 'Revenue') {
         // For Liability, Capital and Revenue accounts, amounts add to balance
         balance += (txn.amount || 0);
+      }
+    }
+    
+    // Special handling for Receivable account - add unpaid invoice balances
+    if (account.name === 'Receivable' || account.name === 'Accounts Receivable') {
+      const key = `${selectedUserId}_${bizId}`;
+      const invoices = (state.invoices && state.invoices[key]) || [];
+      
+      for (const inv of invoices) {
+        if (inv.status === 'paid') continue;
+        
+        const total = Number(inv.total || 0);
+        const paymentAmount = Number(inv.paymentAmount || 0);
+        const remainingAmount = total - paymentAmount;
+        
+        if (remainingAmount > 0) {
+          balance += remainingAmount;
+        }
       }
     }
     
