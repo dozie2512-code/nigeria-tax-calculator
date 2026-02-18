@@ -980,6 +980,7 @@
         <button class="small tab" data-report="pitBusiness">PIT Report</button>
         <button class="small tab" data-report="citReport">CIT Report</button>
         <button class="small tab" data-report="cgtReport">CGT Report</button>
+        <button class="small tab" data-report="financialReport">Financial</button>
         <button class="small tab" data-report="inventoryReport">Inventory Schedule</button>
         <button class="small tab" data-report="assetsReport">Asset Schedule</button>
         <button class="small tab" data-report="auditTrail">Audit Trail</button>
@@ -5200,6 +5201,154 @@
   
   // Make payTax available globally for inline onclick handlers
   window.payTax = payTax;
+  
+  /**
+   * Show Financial Sub-Report (P&L or Balance Sheet)
+   * @param {string} type - 'pl' for Profit & Loss, 'bs' for Balance Sheet
+   */
+  function showFinancialSubReport(type) {
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+    const subReportDiv = document.getElementById('financialSubReport');
+    if(!subReportDiv) return;
+    
+    // Update active tab
+    document.querySelectorAll('#reportContent .tab').forEach(t => t.classList.remove('active'));
+    event?.target?.classList.add('active');
+    
+    let html = '';
+    
+    if(type === 'pl') {
+      // Profit & Loss Statement
+      html += `<h4>Profit & Loss Statement</h4>`;
+      
+      let revenue = 0, expenses = 0;
+      const revenueItems = [];
+      const expenseItems = [];
+      
+      // Collect revenue and expenses
+      for(const t of arr){
+        if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income'){
+          revenue += Number(t.amount || 0);
+          revenueItems.push(t);
+        }
+        if(t.accountCategory === 'Expense'){
+          expenses += Number(t.amount || 0);
+          expenseItems.push(t);
+        }
+      }
+      
+      // Add depreciation
+      const depreciation = computeTotalDepreciation();
+      expenses += depreciation;
+      
+      const profit = revenue - expenses;
+      
+      html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;">`;
+      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead>`;
+      html += `<tbody>`;
+      
+      html += `<tr style="background:#f2f6fa;"><td><strong>Revenue</strong></td><td></td></tr>`;
+      // Group by account
+      const revenueByAccount = {};
+      for(const t of revenueItems){
+        const acctName = t.accountName || 'Other Revenue';
+        revenueByAccount[acctName] = (revenueByAccount[acctName] || 0) + Number(t.amount || 0);
+      }
+      for(const [acctName, amt] of Object.entries(revenueByAccount)){
+        html += `<tr><td style="padding-left:20px;">${acctName}</td><td style="text-align:right;">${fmt(amt)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Revenue</strong></td><td style="text-align:right;"><strong>${fmt(revenue)}</strong></td></tr>`;
+      
+      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
+      
+      html += `<tr style="background:#f2f6fa;"><td><strong>Expenses</strong></td><td></td></tr>`;
+      // Group by account
+      const expenseByAccount = {};
+      for(const t of expenseItems){
+        const acctName = t.accountName || 'Other Expenses';
+        expenseByAccount[acctName] = (expenseByAccount[acctName] || 0) + Number(t.amount || 0);
+      }
+      for(const [acctName, amt] of Object.entries(expenseByAccount)){
+        html += `<tr><td style="padding-left:20px;">${acctName}</td><td style="text-align:right;">${fmt(amt)}</td></tr>`;
+      }
+      if(depreciation > 0){
+        html += `<tr><td style="padding-left:20px;">Depreciation</td><td style="text-align:right;">${fmt(depreciation)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Expenses</strong></td><td style="text-align:right;"><strong>${fmt(expenses)}</strong></td></tr>`;
+      
+      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
+      
+      html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit/(Loss)</strong></td><td style="text-align:right;"><strong>${fmt(profit)}</strong></td></tr>`;
+      
+      html += `</tbody></table>`;
+      
+    } else if(type === 'bs') {
+      // Balance Sheet
+      html += `<h4>Balance Sheet</h4>`;
+      
+      const assets = {};
+      const liabilities = {};
+      const capital = {};
+      
+      // Calculate balances for each account
+      for(const acct of b.accounts || []){
+        const balance = calculateAccountClosingBalance(acct, selectedBizId);
+        
+        if(acct.category === 'Asset'){
+          assets[acct.name] = balance;
+        } else if(acct.category === 'Liability'){
+          liabilities[acct.name] = balance;
+        } else if(acct.category === 'Capital'){
+          capital[acct.name] = balance;
+        }
+      }
+      
+      const totalAssets = Object.values(assets).reduce((sum, val) => sum + val, 0);
+      const totalLiabilities = Object.values(liabilities).reduce((sum, val) => sum + val, 0);
+      const totalCapital = Object.values(capital).reduce((sum, val) => sum + val, 0);
+      
+      html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;">`;
+      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead>`;
+      html += `<tbody>`;
+      
+      html += `<tr style="background:#f2f6fa;"><td><strong>Assets</strong></td><td></td></tr>`;
+      for(const [name, balance] of Object.entries(assets)){
+        html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssets)}</strong></td></tr>`;
+      
+      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
+      
+      html += `<tr style="background:#f2f6fa;"><td><strong>Liabilities</strong></td><td></td></tr>`;
+      for(const [name, balance] of Object.entries(liabilities)){
+        html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities)}</strong></td></tr>`;
+      
+      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
+      
+      html += `<tr style="background:#f2f6fa;"><td><strong>Capital</strong></td><td></td></tr>`;
+      for(const [name, balance] of Object.entries(capital)){
+        html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalCapital)}</strong></td></tr>`;
+      
+      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
+      
+      html += `<tr style="background:#e6f3ff;"><td><strong>Total Liabilities + Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital)}</strong></td></tr>`;
+      
+      html += `</tbody></table>`;
+    }
+    
+    subReportDiv.innerHTML = html;
+  }
+  
+  // Make showFinancialSubReport available globally
+  window.showFinancialSubReport = showFinancialSubReport;
+
 
   /**
    * Computes accounting profit from transactions.
@@ -5260,7 +5409,7 @@
     // Define visibility per entity
     const visibilityRules = {
       'Business': {
-        'vatReport': false,
+        'vatReport': true,  // Changed from false - VAT Report now available for Business entity
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
@@ -5269,6 +5418,7 @@
         'pitBusiness': true,
         'cgtReport': true,
         'companyAccounts': false,
+        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
         'auditTrail': true,
         'receiptsFolder': true
       },
@@ -5282,6 +5432,7 @@
         'pitBusiness': true,
         'cgtReport': true,
         'companyAccounts': false,
+        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
         'auditTrail': true,
         'receiptsFolder': true
       },
@@ -5295,6 +5446,7 @@
         'pitBusiness': false,
         'cgtReport': true,
         'companyAccounts': true,
+        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
         'auditTrail': true,
         'receiptsFolder': true
       }
@@ -7261,6 +7413,23 @@
     } else if(name === 'cgtReport'){
       // Use the new generateCgtReport function
       reportContent.innerHTML = generateCgtReport(selectedBizId);
+      
+    } else if(name === 'financialReport'){
+      // Financial Report - P&L and Balance Sheet
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let html = `<h3>Financial Reports</h3>`;
+      
+      // Sub-tabs for P&L and Balance Sheet
+      html += `<div style="display:flex; gap:8px; margin-bottom:16px;">`;
+      html += `<button class="small tab active" onclick="showFinancialSubReport('pl')">Profit & Loss Statement</button>`;
+      html += `<button class="small tab" onclick="showFinancialSubReport('bs')">Balance Sheet</button>`;
+      html += `</div>`;
+      
+      html += `<div id="financialSubReport"></div>`;
+      reportContent.innerHTML = html;
+      
+      // Render P&L by default
+      showFinancialSubReport('pl');
       
     } else if(name === 'auditTrail'){
       // Audit Trail report
