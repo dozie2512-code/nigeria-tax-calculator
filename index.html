@@ -560,6 +560,42 @@
           </div>
         </details>
 
+        <!-- Enterprise Plus Plan – includes Payables, Journal Entry, Bank Reconciliation -->
+        <details class="plan-card highlight">
+          <summary>
+            <div class="plan-header-left">
+              <h3>Enterprise Plus <span class="plan-badge">7-day trial</span></h3>
+            </div>
+            <div class="plan-header-right">
+              <span class="plan-offer-price">₦150,000/year</span>
+              <span class="plan-arrow">▼</span>
+            </div>
+          </summary>
+          <div class="plan-pricing">
+            <div class="plan-full-price">₦200,000/year</div>
+            <div class="plan-offer-price">₦150,000/year</div>
+          </div>
+          <ul class="plan-features">
+            <li>All Enterprise features</li>
+            <li>Payables management</li>
+            <li>Journal Entry module</li>
+            <li>Bank Reconciliation module</li>
+            <li>Priority Tax Support</li>
+          </ul>
+          <div class="plan-checkbox-row">
+            <input type="checkbox" id="enterprisePlusApplyOffer" checked />
+            <label for="enterprisePlusApplyOffer">Apply Buy Now Offer</label>
+          </div>
+
+          <div class="plan-total">
+            <div class="plan-total-label">Total</div>
+            <div class="plan-total-value" id="enterprisePlusTotal">₦150,000</div>
+          </div>
+          <div class="plan-buttons-container">
+            <a href="https://buy.stripe.com/enterprise-plus-plan" target="_blank" rel="noopener noreferrer" class="plan-buy-btn" id="enterprisePlusBuyLink">Buy Now</a>
+          </div>
+        </details>
+
 
       </div>
 
@@ -1102,6 +1138,7 @@
       <div class="row">
         <label>Loss brought forward (₦): <input type="number" id="bizLossBF" class="smallInput" min="0" step="0.01" /></label>
         <label>CA broughtforward (₦): <input type="number" id="bizCACF" class="smallInput" min="0" step="0.01" /></label>
+        <label>Retained Profit b/f (₦): <input type="number" id="bizRetainedProfitBF" class="smallInput" step="0.01" placeholder="0" /></label>
       </div>
 
       <div class="row" style="margin-top:6px;">
@@ -1396,9 +1433,17 @@
   const MAX_USERS_PER_BUSINESS = Infinity; // Changed from 3 to Infinity to allow unlimited users
 
   /**
-   * SHA-256 hashing function removed - Firebase Authentication handles password security
-   * Firebase uses industry-standard security practices for password storage and authentication
+   * SHA-256 hashing utility using the Web Crypto API.
+   * Used for admin-created local user passwords (not Firebase-authenticated users).
+   * @param {string} message - Plain-text string to hash
+   * @returns {Promise<string>} Hex-encoded SHA-256 digest
    */
+  async function sha256Hex(message) {
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 
   // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
@@ -2994,14 +3039,23 @@
     btnInvoicingTab.addEventListener('click', ()=> { activeTab='invoicing'; renderTab(); });
     btnReportsTab.addEventListener('click', ()=> { activeTab='reports'; renderTab(); });
     
-    // Enterprise feature tabs
+    // Enterprise Plus feature tabs – only accessible on Enterprise Plus plan (UI + logic gate)
     const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
     const btnJournalEntryTab = document.getElementById('btnJournalEntryTab');
     const btnPayablesTab = document.getElementById('btnPayablesTab');
     
-    if(btnBankReconciliationTab) btnBankReconciliationTab.addEventListener('click', ()=> { activeTab='bankReconciliation'; renderTab(); });
-    if(btnJournalEntryTab) btnJournalEntryTab.addEventListener('click', ()=> { activeTab='journalEntry'; renderTab(); });
-    if(btnPayablesTab) btnPayablesTab.addEventListener('click', ()=> { activeTab='payables'; renderTab(); });
+    if(btnBankReconciliationTab) btnBankReconciliationTab.addEventListener('click', ()=> {
+      if(!isEnterprisePlus()) { alert('Bank Reconciliation is available on the Enterprise Plus plan only.'); return; }
+      activeTab='bankReconciliation'; renderTab();
+    });
+    if(btnJournalEntryTab) btnJournalEntryTab.addEventListener('click', ()=> {
+      if(!isEnterprisePlus()) { alert('Journal Entry is available on the Enterprise Plus plan only.'); return; }
+      activeTab='journalEntry'; renderTab();
+    });
+    if(btnPayablesTab) btnPayablesTab.addEventListener('click', ()=> {
+      if(!isEnterprisePlus()) { alert('Payables is available on the Enterprise Plus plan only.'); return; }
+      activeTab='payables'; renderTab();
+    });
     
     // Invoicing event listeners
     btnCreateInvoice.addEventListener('click', openCreateInvoice);
@@ -3070,13 +3124,7 @@
     const userPassword = document.getElementById('userPassword');
     if (userPassword) userPassword.value = '';
     
-    // Check 3-user limit per business when adding new users
-    if(!editId && selectedBizId) {
-      if(!canAddUserToBusiness(selectedBizId)) {
-        alert('User limit reached! This business already has the maximum of ' + MAX_USERS_PER_BUSINESS + ' users. Cannot add more users.');
-        return;
-      }
-    }
+    // No arbitrary limit on user count; canAddUserToBusiness checks MAX_USERS_PER_BUSINESS (Infinity)
     
     if(editId){
       const u = state.users.find(x=>x.id===editId);
@@ -3215,6 +3263,8 @@
     
     bizVatEnabled.checked = !!b.vatEnabled; bizPitEnabled.checked = !!b.pitEnabled; bizPayeEnabled.checked = !!b.payeEnabled; bizShowLines.checked = !!b.showLines; bizCitEnabled.checked = !!b.citEnabled;
     bizLossBF.value = b.lossBroughtForward || 0; bizCACF.value = b.caCarryForward || 0;
+    const bizRetainedProfitBF = document.getElementById('bizRetainedProfitBF');
+    if(bizRetainedProfitBF) bizRetainedProfitBF.value = b.retainedProfitBF || 0;
     bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
     bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
     bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0; bizDedNHIS.value = b.statutoryDeductions?.nhis || 0;
@@ -3254,6 +3304,8 @@
       b.turnoverThreshold = turnoverThresholdValue;
       b.vatEnabled = !!bizVatEnabled.checked; b.pitEnabled = !!bizPitEnabled.checked; b.payeEnabled = !!bizPayeEnabled.checked; b.showLines = !!bizShowLines.checked; b.citEnabled = !!bizCitEnabled.checked;
       b.lossBroughtForward = Number(bizLossBF.value || 0); b.caCarryForward = Number(bizCACF.value || 0);
+      const bizRetainedProfitBF = document.getElementById('bizRetainedProfitBF');
+      if(bizRetainedProfitBF) b.retainedProfitBF = Number(bizRetainedProfitBF.value || 0);
       b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
       b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0), nhis:Number(bizDedNHIS.value||0) };
       addAudit('business.edit','business', b.id, 'Edited business');
@@ -3661,13 +3713,19 @@
       receiptId: null
     };
     
-    // WHT Net Basis Gross-Up: If WHT is applied on net basis for Revenue, gross up the amount
-    if(t.whtApplied && t.whtBasis === 'net' && t.accountCategory === 'Revenue'){
+    // WHT Net Basis Gross-Up:
+    // When WHT is applied on net basis the amount entered by the user is the NET amount.
+    // We derive the GROSS amount (= net / (1 − rate)) and store it as t.amount so the ledger
+    // always shows the gross value on the main line, while WHT is computed on the net.
+    // Works for both Revenue and Expense transaction types.
+    if(t.whtApplied && t.whtBasis === 'net'){
       const rateDecimal = Number(t.whtRate || 0) / 100;
-      const netAmount = t.amount;
-      const grossAmount = netAmount / (1 - rateDecimal);
-      t.amount = grossAmount; // Record the grossed-up amount in revenue
-      t.netAmount = netAmount; // Store original net amount for reference
+      if(rateDecimal > 0 && rateDecimal < 1) {
+        const netAmount = t.amount;
+        const grossAmount = netAmount / (1 - rateDecimal);
+        t.amount = grossAmount;   // Gross recorded on the ledger main line
+        t.netAmount = netAmount;  // Net stored for WHT computation reference
+      }
     }
     if(txnReceipt.files && txnReceipt.files[0]){
       const r = txnReceipt.files[0];
@@ -3775,6 +3833,41 @@
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
     addAudit('txn.inv','txn',t.id, `Inventory txn ${t.action} ${t.amount}`, { amount: t.amount, qty: t.qty, unitPrice: t.unitPrice });
+
+    // Auto-record COGS when an Inventory Sale is saved (weighted average cost basis).
+    // COGS = qty sold × weighted average cost at time of sale (stored in inventoryPrevState.prevAvgCost).
+    if(t.action === 'InventorySale') {
+      const b = findBiz(selectedBizId);
+      const cogsAcct = (b && b.accounts || []).find(a => a.name === 'COGS' && a.category === 'Expense');
+      if(cogsAcct) {
+        const avgCost = (t.inventoryPrevState && !t.inventoryPrevState.isNewItem)
+          ? Number(t.inventoryPrevState.prevAvgCost || 0)
+          : 0;
+        const cogsAmount = Number(t.qty || 0) * avgCost;
+        if(cogsAmount > 0) {
+          const cogsTxn = {
+            id: uid('txn'),
+            date: t.date,
+            action: 'Expense',
+            accountId: cogsAcct.id,
+            accountName: cogsAcct.name,
+            accountCategory: 'Expense',
+            description: 'COGS – auto (sale: ' + (t.description || t.id) + ')',
+            amount: cogsAmount,
+            vatType: 'none',
+            whtApplied: false,
+            paye: false,
+            contact: t.contact || '',
+            receiptId: null,
+            linkedInventoryTxnId: t.id, // link back to the sale transaction
+            isCOGS: true
+          };
+          state.transactions[selectedUserId][selectedBizId].push(cogsTxn);
+          addAudit('txn.cogs','txn',cogsTxn.id,`Auto COGS for sale ${t.id}: ${cogsAmount}`,{ amount: cogsAmount, qty: t.qty, avgCost: avgCost });
+        }
+      }
+    }
+
     saveState();
     txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -4201,9 +4294,23 @@
       tdAction.textContent = t.action + (isViewOnly ? ' (view)' : '');
       const tdAccount = document.createElement('td'); tdAccount.textContent = t.accountName || '';
       const tdDesc = document.createElement('td'); tdDesc.textContent = t.description || '';
-      const tdAmount = document.createElement('td'); tdAmount.textContent = fmt(t.amount||0);
+      const tdAmount = document.createElement('td');
+      // For net-basis WHT transactions, show gross with a note so it's clear
+      if(t.whtApplied && t.whtBasis === 'net' && t.netAmount != null) {
+        tdAmount.innerHTML = fmt(t.amount||0) + '<br><small style="color:#64748b">Net: ' + fmt(t.netAmount) + '</small>';
+      } else {
+        tdAmount.textContent = fmt(t.amount||0);
+      }
       const tdVat = document.createElement('td'); tdVat.textContent = t.vatType || '';
-      const tdWht = document.createElement('td'); tdWht.textContent = t.whtApplied ? ((t.whtRate || findBiz(selectedBizId)?.whtRate||DEFAULTS.whtRate) + '%') : '';
+      const tdWht = document.createElement('td');
+      if(t.whtApplied) {
+        const rate = t.whtRate || findBiz(selectedBizId)?.whtRate || DEFAULTS.whtRate;
+        const whtAmt = t.whtBasis === 'net' && t.netAmount != null
+          ? t.netAmount * (rate / 100)  // WHT on net amount
+          : (t.amount || 0) * (rate / 100); // WHT on gross
+        const netLabel = t.whtBasis === 'net' ? ' (net)' : '';
+        tdWht.innerHTML = `${rate}%<br><small style="color:#64748b">₦${whtAmt.toFixed(2)}${netLabel}</small>`;
+      }
       const tdPaye = document.createElement('td'); tdPaye.textContent = t.paye ? 'Yes' : '';
       const tdContact = document.createElement('td'); tdContact.textContent = t.contact || '';
       const tdReceipt = document.createElement('td');
@@ -5256,6 +5363,94 @@
   
   // Make payTax available globally for inline onclick handlers
   window.payTax = payTax;
+
+  /**
+   * Returns true when the account should be treated as an "appropriation" account for P&L.
+   * Matches accounts whose name contains 'dividend' (exact Expense category) or 'general reserve'
+   * (exact Expense category), while excluding Revenue-category accounts with similar names.
+   * @param {string} acctName - Account name (lowercase-compared internally)
+   * @param {string} acctCategory - Account category ('Expense', 'Revenue', etc.)
+   */
+  function isDividendAccount(acctName, acctCategory) {
+    if(acctCategory !== 'Expense') return false;
+    const lower = (acctName || '').toLowerCase();
+    // Only match pure "dividend" accounts (not "dividend received" which is Revenue)
+    return lower === 'dividend' || lower === 'dividends';
+  }
+  function isGeneralReserveAccount(acctName, acctCategory) {
+    if(acctCategory !== 'Expense') return false;
+    const lower = (acctName || '').toLowerCase();
+    return lower.includes('general reserve');
+  }
+
+  /**
+   * Computes P&L figures shared between the P&L Statement and Balance Sheet.
+   * @param {string} bizId
+   * @param {string} userId
+   * @returns {{ totalRevenue, totalCOGS, totalExpense, totalTax, totalDividend, totalGeneralReserve,
+   *             retainedProfitForYear, retainedProfitBF, retainedProfitCF,
+   *             revenueByAcct, cogsAmt, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct }}
+   */
+  function computePLFigures(bizId, userId) {
+    const b = findBiz(bizId);
+    const arr = (state.transactions[userId] && state.transactions[userId][bizId]) || [];
+
+    let totalRevenue = 0, totalCOGS = 0, totalOtherIncome = 0;
+    let totalExpense = 0, totalTax = 0, totalDividend = 0, totalGeneralReserve = 0;
+    const revenueByAcct = {}, cogsAmt = {}, otherIncomeByAcct = {};
+    const expenseByAcct = {}, taxByAcct = {}, dividendByAcct = {}, generalReserveByAcct = {};
+
+    for(const t of arr) {
+      const acctName = t.accountName || 'Other';
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(acctName);
+      const isCOGS = (acctName === 'COGS' || t.isCOGS) && t.accountCategory === 'Expense';
+      const isDividend = isDividendAccount(acctName, t.accountCategory);
+      const isGenReserve = isGeneralReserveAccount(acctName, t.accountCategory);
+      const amt = Number(t.amount || 0);
+
+      if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income') {
+        revenueByAcct[acctName] = (revenueByAcct[acctName] || 0) + amt;
+        totalRevenue += amt;
+      } else if(isTaxPayment) {
+        taxByAcct[acctName] = (taxByAcct[acctName] || 0) + amt;
+        totalTax += amt;
+      } else if(isCOGS) {
+        cogsAmt[acctName] = (cogsAmt[acctName] || 0) + amt;
+        totalCOGS += amt;
+      } else if(isDividend) {
+        dividendByAcct[acctName] = (dividendByAcct[acctName] || 0) + amt;
+        totalDividend += amt;
+      } else if(isGenReserve) {
+        generalReserveByAcct[acctName] = (generalReserveByAcct[acctName] || 0) + amt;
+        totalGeneralReserve += amt;
+      } else if(t.accountCategory === 'Expense') {
+        expenseByAcct[acctName] = (expenseByAcct[acctName] || 0) + amt;
+        totalExpense += amt;
+      }
+    }
+
+    // Add depreciation to Expenses
+    const depreciation = computeTotalDepreciation();
+    if(depreciation > 0) {
+      expenseByAcct['Depreciation'] = (expenseByAcct['Depreciation'] || 0) + depreciation;
+      totalExpense += depreciation;
+    }
+
+    const grossProfit = totalRevenue - totalCOGS;
+    const netProfitBeforeTax = grossProfit + totalOtherIncome - totalExpense;
+    const netProfitAfterTax = netProfitBeforeTax - totalTax;
+    const totalAppropriation = totalDividend + totalGeneralReserve;
+    const retainedProfitForYear = netProfitAfterTax - totalAppropriation;
+    const retainedProfitBF = Number((b && b.retainedProfitBF) || 0);
+    const retainedProfitCF = retainedProfitForYear + retainedProfitBF;
+
+    return {
+      totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve,
+      grossProfit, netProfitBeforeTax, netProfitAfterTax, totalAppropriation,
+      retainedProfitForYear, retainedProfitBF, retainedProfitCF,
+      revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct
+    };
+  }
   
   /**
    * Show Financial Sub-Report (P&L or Balance Sheet)
@@ -5265,81 +5460,107 @@
     const b = findBiz(selectedBizId);
     if(!b) return;
     
-    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
     const subReportDiv = document.getElementById('financialSubReport');
     if(!subReportDiv) return;
-    
-    // Update active tab - handled by caller
     
     let html = '';
     
     if(type === 'pl') {
+      // ------------------------------------------------------------------
       // Profit & Loss Statement
-      html += `<h4>Profit & Loss Statement</h4>`;
-      
-      let revenue = 0, expenses = 0;
-      const revenueItems = [];
-      const expenseItems = [];
-      
-      // Collect revenue and expenses
-      for(const t of arr){
-        if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income'){
-          revenue += Number(t.amount || 0);
-          revenueItems.push(t);
-        }
-        if(t.accountCategory === 'Expense'){
-          expenses += Number(t.amount || 0);
-          expenseItems.push(t);
-        }
-      }
-      
-      // Add depreciation
-      const depreciation = computeTotalDepreciation();
-      expenses += depreciation;
-      
-      const profit = revenue - expenses;
-      
+      // Format:
+      //   Revenue
+      //   less COGS                        => Gross Profit
+      //   add Other Income
+      //   less Expense (excl. COGS & tax)  => Net Profit Before Tax
+      //   less Tax                         => Net Profit After Tax
+      //   less Appropriations (Dividend, General Reserve)
+      //   = Retained Profit for the Year
+      //   + Retained Profit b/f
+      //   = Retained Profit c/f
+      // ------------------------------------------------------------------
+      html += `<h4>Profit &amp; Loss Statement</h4>`;
+
+      const pl = computePLFigures(selectedBizId, selectedUserId);
+
       html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;">`;
-      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead>`;
+      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:160px;">Amount (₦)</th></tr></thead>`;
       html += `<tbody>`;
-      
+
+      // Revenue
       html += `<tr style="background:#f2f6fa;"><td><strong>Revenue</strong></td><td></td></tr>`;
-      // Group by account
-      const revenueByAccount = {};
-      for(const t of revenueItems){
-        const acctName = t.accountName || 'Other Revenue';
-        revenueByAccount[acctName] = (revenueByAccount[acctName] || 0) + Number(t.amount || 0);
+      for(const [n,v] of Object.entries(pl.revenueByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">${fmt(v)}</td></tr>`;
       }
-      for(const [acctName, amt] of Object.entries(revenueByAccount)){
-        html += `<tr><td style="padding-left:20px;">${acctName}</td><td style="text-align:right;">${fmt(amt)}</td></tr>`;
+      html += `<tr><td style="font-weight:600;">Total Revenue</td><td style="text-align:right;font-weight:600;">${fmt(pl.totalRevenue)}</td></tr>`;
+
+      // COGS
+      html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: Cost of Goods Sold (COGS)</strong></td><td></td></tr>`;
+      for(const [n,v] of Object.entries(pl.cogsAmt)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Revenue</strong></td><td style="text-align:right;"><strong>${fmt(revenue)}</strong></td></tr>`;
-      
-      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
-      
-      html += `<tr style="background:#f2f6fa;"><td><strong>Expenses</strong></td><td></td></tr>`;
-      // Group by account
-      const expenseByAccount = {};
-      for(const t of expenseItems){
-        const acctName = t.accountName || 'Other Expenses';
-        expenseByAccount[acctName] = (expenseByAccount[acctName] || 0) + Number(t.amount || 0);
+      html += `<tr style="background:#e6f3ff;"><td><strong>= Gross Profit</strong></td><td style="text-align:right;"><strong>${fmt(pl.grossProfit)}</strong></td></tr>`;
+
+      // Other Income
+      if(pl.totalOtherIncome > 0) {
+        html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+        html += `<tr style="background:#f2f6fa;"><td><strong>add: Other Income</strong></td><td></td></tr>`;
+        for(const [n,v] of Object.entries(pl.otherIncomeByAcct)){
+          html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">${fmt(v)}</td></tr>`;
+        }
       }
-      for(const [acctName, amt] of Object.entries(expenseByAccount)){
-        html += `<tr><td style="padding-left:20px;">${acctName}</td><td style="text-align:right;">${fmt(amt)}</td></tr>`;
+
+      // Expenses
+      html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: Expenses</strong></td><td></td></tr>`;
+      for(const [n,v] of Object.entries(pl.expenseByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      if(depreciation > 0){
-        html += `<tr><td style="padding-left:20px;">Depreciation</td><td style="text-align:right;">${fmt(depreciation)}</td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
+
+      // Tax
+      html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: Tax</strong></td><td></td></tr>`;
+      for(const [n,v] of Object.entries(pl.taxByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Expenses</strong></td><td style="text-align:right;"><strong>${fmt(expenses)}</strong></td></tr>`;
-      
-      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
-      
-      html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit/(Loss)</strong></td><td style="text-align:right;"><strong>${fmt(profit)}</strong></td></tr>`;
-      
+      if(pl.totalTax === 0) {
+        html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
+      }
+      html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
+
+      // Appropriations
+      html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: Appropriation Items</strong></td><td></td></tr>`;
+      for(const [n,v] of Object.entries(pl.dividendByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
+      }
+      for(const [n,v] of Object.entries(pl.generalReserveByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
+      }
+      if(pl.totalAppropriation === 0) {
+        html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
+      }
+
+      // Retained Profit
+      html += `<tr style="background:#e6f3ff;"><td><strong>Retained Profit for the Year</strong></td><td style="text-align:right;"><strong>${fmt(pl.retainedProfitForYear)}</strong></td></tr>`;
+
+      // Roll-forward
+      html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
+      html += `<tr><td style="padding-left:10px;">Retained Profit b/f</td><td style="text-align:right;">${fmt(pl.retainedProfitBF)}</td></tr>`;
+      html += `<tr style="background:#e6f3ff;border-top:2px solid #0b76d1;"><td><strong>Retained Profit c/f</strong></td><td style="text-align:right;"><strong>${fmt(pl.retainedProfitCF)}</strong></td></tr>`;
+
       html += `</tbody></table>`;
-      
+
     } else if(type === 'bs') {
+      // ------------------------------------------------------------------
       // Balance Sheet
+      // Includes retained earnings roll-forward in Equity section:
+      //   Retained Profit for Year  (computed from P&L via computePLFigures)
+      //   + Retained Profit b/f     (b.retainedProfitBF)
+      //   = Retained Profit c/f     (used as equity component)
+      // ------------------------------------------------------------------
       html += `<h4>Balance Sheet</h4>`;
       
       const assets = {};
@@ -5349,7 +5570,6 @@
       // Calculate balances for each account
       for(const acct of b.accounts || []){
         const balance = calculateAccountClosingBalance(acct, selectedBizId);
-        
         if(acct.category === 'Asset'){
           assets[acct.name] = balance;
         } else if(acct.category === 'Liability'){
@@ -5358,41 +5578,51 @@
           capital[acct.name] = balance;
         }
       }
-      
-      const totalAssets = Object.values(assets).reduce((sum, val) => sum + val, 0);
-      const totalLiabilities = Object.values(liabilities).reduce((sum, val) => sum + val, 0);
-      const totalCapital = Object.values(capital).reduce((sum, val) => sum + val, 0);
-      
+
+      const totalAssets = Object.values(assets).reduce((s,v)=>s+v,0);
+      const totalLiabilities = Object.values(liabilities).reduce((s,v)=>s+v,0);
+      const totalCapital = Object.values(capital).reduce((s,v)=>s+v,0);
+
+      // Use shared P&L figures for retained earnings roll-forward
+      const { retainedProfitForYear, retainedProfitBF, retainedProfitCF } =
+        computePLFigures(selectedBizId, selectedUserId);
+
       html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;">`;
-      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead>`;
+      html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:160px;">Amount (₦)</th></tr></thead>`;
       html += `<tbody>`;
-      
+
       html += `<tr style="background:#f2f6fa;"><td><strong>Assets</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(assets)){
         html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssets)}</strong></td></tr>`;
-      
-      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
-      
+
+      html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
+
       html += `<tr style="background:#f2f6fa;"><td><strong>Liabilities</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(liabilities)){
         html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities)}</strong></td></tr>`;
-      
-      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
-      
-      html += `<tr style="background:#f2f6fa;"><td><strong>Capital</strong></td><td></td></tr>`;
+
+      html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
+
+      html += `<tr style="background:#f2f6fa;"><td><strong>Capital &amp; Equity</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(capital)){
         html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalCapital)}</strong></td></tr>`;
-      
-      html += `<tr><td colspan="2" style="padding-top:12px;"></td></tr>`;
-      
-      html += `<tr style="background:#e6f3ff;"><td><strong>Total Liabilities + Capital</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalCapital)}</strong></td></tr>`;
-      
+      // Retained Earnings roll-forward as part of equity (consistent with P&L above)
+      html += `<tr><td style="padding-left:20px;font-style:italic;">Retained Profit for the Year</td><td style="text-align:right;">${fmt(retainedProfitForYear)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;font-style:italic;">Retained Profit b/f</td><td style="text-align:right;">${fmt(retainedProfitBF)}</td></tr>`;
+      html += `<tr><td style="padding-left:20px;font-weight:600;">Retained Profit c/f</td><td style="text-align:right;font-weight:600;">${fmt(retainedProfitCF)}</td></tr>`;
+
+      const totalEquity = totalCapital + retainedProfitCF;
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Capital &amp; Equity</strong></td><td style="text-align:right;"><strong>${fmt(totalEquity)}</strong></td></tr>`;
+
+      html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
+
+      html += `<tr style="background:#e6f3ff;"><td><strong>Total Liabilities + Capital &amp; Equity</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalEquity)}</strong></td></tr>`;
+
       html += `</tbody></table>`;
     }
     
@@ -5403,50 +5633,38 @@
   window.showFinancialSubReport = showFinancialSubReport;
   
   /**
+   * Check if the current business is on the Enterprise Plus plan.
+   * Payables, Journal Entry, and Bank Reconciliation are gated to this plan.
+   * @returns {boolean}
+   */
+  function isEnterprisePlus() {
+    const b = findBiz(selectedBizId);
+    if (!b) return false;
+    return b.entity === 'Enterprise Plus' || b.plan === 'Enterprise Plus';
+  }
+
+  /**
    * Check if current user can access enterprise features
-   * - Enterprise plan: All users can access
-   * - Business/Company plans: Only salesrepng@gmail.com can access
+   * - Enterprise Plus plan: All users can access Payables / Journal / Bank Reconciliation
    * @returns {boolean}
    */
   function canAccessEnterpriseFeatures() {
-    const b = findBiz(selectedBizId);
-    if (!b) return false;
-    
-    // Check if business has Enterprise plan (assuming a plan field exists)
-    // For now, we'll check based on entity type
-    // If entity is 'Enterprise', allow access
-    if (b.entity === 'Enterprise' || b.plan === 'Enterprise') {
-      return true;
-    }
-    
-    // For Business and Company plans, only salesrepng@gmail.com can access
-    const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
-    if (currentUser && (currentUser.email === 'salesrepng@gmail.com' || currentUser.username === 'salesrepng@gmail.com')) {
-      return true;
-    }
-    
-    return false;
+    return isEnterprisePlus();
   }
   
   /**
-   * Update visibility of enterprise feature tabs based on access
-   * Note: All tabs are now visible to all users by default
+   * Update visibility of Enterprise Plus feature tabs.
+   * Payables, Journal Entry, and Bank Reconciliation are only shown for Enterprise Plus businesses.
    */
   function updateEnterpriseFeatureVisibility() {
-    // All tabs are now visible to all users
     const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
     const btnJournalEntryTab = document.getElementById('btnJournalEntryTab');
     const btnPayablesTab = document.getElementById('btnPayablesTab');
-    
-    if (btnBankReconciliationTab) {
-      btnBankReconciliationTab.style.display = 'inline-block';
-    }
-    if (btnJournalEntryTab) {
-      btnJournalEntryTab.style.display = 'inline-block';
-    }
-    if (btnPayablesTab) {
-      btnPayablesTab.style.display = 'inline-block';
-    }
+    const visible = isEnterprisePlus() ? 'inline-block' : 'none';
+
+    if (btnBankReconciliationTab) btnBankReconciliationTab.style.display = visible;
+    if (btnJournalEntryTab) btnJournalEntryTab.style.display = visible;
+    if (btnPayablesTab) btnPayablesTab.style.display = visible;
   }
 
 
@@ -6357,11 +6575,12 @@
     const b = findBiz(selectedBizId);
     const inventory = (b && b.inventory) ? b.inventory : [];
     
-    // Build inventory options
+    // Build inventory options – show name, available qty, and avg cost
     let inventoryOptions = '<option value="">-- Select from Inventory or Enter Custom --</option>';
     for(const invItem of inventory) {
       const selected = item && item.inventoryId === invItem.id ? 'selected' : '';
-      inventoryOptions += `<option value="${invItem.id}" ${selected}>${invItem.name} (₦${invItem.averageCost?.toFixed(2) || '0.00'})</option>`;
+      const avgCost = Number(invItem.avgCost ?? invItem.averageCost ?? 0);
+      inventoryOptions += `<option value="${invItem.id}" ${selected}>${invItem.name} (Qty: ${invItem.qty ?? 0} | ₦${avgCost.toFixed(2)})</option>`;
     }
     
     return `
@@ -6390,7 +6609,8 @@
     
     if(inventoryItem) {
       descInput.value = inventoryItem.name;
-      priceInput.value = inventoryItem.averageCost || 0;
+      // Use avgCost (primary) or averageCost (legacy) – whichever is populated
+      priceInput.value = inventoryItem.avgCost || inventoryItem.averageCost || 0;
       // Store inventory ID on the row for reference
       itemRow.dataset.inventoryId = inventoryId;
     }
@@ -8212,6 +8432,11 @@
         buyLink: 'https://buy.stripe.com/enterprise-plan',
         addonBusinessLink: 'https://buy.stripe.com/hire-tax-accountant-business',
         addonCompanyLink: 'https://buy.stripe.com/hire-tax-accountant-company'
+      },
+      enterprisePlus: {
+        fullPrice: 200000,
+        offerPrice: 150000,
+        buyLink: 'https://buy.stripe.com/enterprise-plus-plan'
       }
     };
     
@@ -8246,7 +8471,7 @@
       }
       
       // Re-enable all offer checkboxes
-      ['business', 'company', 'enterprise'].forEach(function(plan) {
+      ['business', 'company', 'enterprise', 'enterprisePlus'].forEach(function(plan) {
         const checkbox = document.getElementById(plan + 'ApplyOffer');
         if (checkbox) {
           checkbox.checked = true;
@@ -8384,12 +8609,12 @@
     
     // Update all plan totals
     function updateAllTotals() {
-      ['business', 'company', 'enterprise'].forEach(updatePlanTotal);
+      ['business', 'company', 'enterprise', 'enterprisePlus'].forEach(updatePlanTotal);
     }
     
     // Wire up event listeners for checkboxes
     function initCheckboxListeners() {
-      ['business', 'company', 'enterprise'].forEach(function(plan) {
+      ['business', 'company', 'enterprise', 'enterprisePlus'].forEach(function(plan) {
         const applyOfferCheckbox = document.getElementById(plan + 'ApplyOffer');
         
         if (applyOfferCheckbox) {
