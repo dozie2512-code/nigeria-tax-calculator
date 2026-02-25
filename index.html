@@ -942,6 +942,11 @@
     <!-- Cashbook Section -->
     <section id="cashbookSection" class="panel section" style="display:none;">
       <h2 style="margin:0 0 8px 0;">Cashbook</h2>
+      <div class="tabbar" style="margin-bottom:10px;">
+        <button class="tab active" id="cashbookTabAll" onclick="switchCashbookTab('all')">All</button>
+        <button class="tab" id="cashbookTabReceipts" onclick="switchCashbookTab('receipts')">Receipts</button>
+        <button class="tab" id="cashbookTabPayments" onclick="switchCashbookTab('payments')">Payments</button>
+      </div>
       <div class="table-scroll">
         <table class="ledger-table" id="cashbookTable">
           <thead>
@@ -1043,7 +1048,7 @@
   </div>
 
   <!-- Business modal -->
-  <div id="businessModal" class="modal">
+   <div id="businessModal" class="modal">
     <h3 id="businessModalTitle">Add Business</h3>
     <div class="row">
       <label>Name: <input type="text" id="bizName" /></label>
@@ -1067,6 +1072,16 @@
       <!-- CIT fields hidden but preserved in data via hidden inputs -->
       <input type="hidden" id="bizCit" />
       <input type="hidden" id="bizTurnoverThreshold" />
+    </div>
+
+    <div class="row" style="margin-top:6px;">
+      <label>Accounting Period Start:
+        <input type="date" id="bizPeriodStart" class="smallInput" />
+      </label>
+      <label>Accounting Period End:
+        <input type="date" id="bizPeriodEnd" class="smallInput" />
+      </label>
+      <small class="note" style="align-self:center;">Opening balances apply at period start.</small>
     </div>
 
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
@@ -1864,11 +1879,12 @@
         }
       }
       
-      // Ensure balance accounts have balance fields
+      // Ensure ALL Asset, Liability, and Capital accounts have opening balance fields
+      // Opening balances are static fields stored on accounts (not journal entries)
       b.accounts.forEach(a => {
-        if (['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'].includes(a.name)) {
-          a.openingBalance = a.openingBalance || 0;
-          a.closingBalance = a.closingBalance || 0;
+        if (['Asset', 'Liability', 'Capital'].includes(a.category)) {
+          if (typeof a.openingBalance === 'undefined') a.openingBalance = 0;
+          if (typeof a.closingBalance === 'undefined') a.closingBalance = 0;
         }
       });
       
@@ -3088,6 +3104,12 @@
     bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
     bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
     bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0; bizDedNHIS.value = b.statutoryDeductions?.nhis || 0;
+
+    // Accounting period dates
+    const bizPeriodStartEl = document.getElementById('bizPeriodStart');
+    const bizPeriodEndEl = document.getElementById('bizPeriodEnd');
+    if(bizPeriodStartEl) bizPeriodStartEl.value = b.periodStart || '';
+    if(bizPeriodEndEl) bizPeriodEndEl.value = b.periodEnd || '';
     
     // Hide Annual Statutory Deductions section by default (shown when editing contact)
     const annualStatutoryDeductionsSection = document.getElementById('annualStatutoryDeductionsSection');
@@ -3128,6 +3150,11 @@
       if(bizRetainedProfitBF) b.retainedProfitBF = Number(bizRetainedProfitBF.value || 0);
       b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
       b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0), nhis:Number(bizDedNHIS.value||0) };
+      // Accounting period
+      const bizPeriodStartEl = document.getElementById('bizPeriodStart');
+      const bizPeriodEndEl = document.getElementById('bizPeriodEnd');
+      if(bizPeriodStartEl) b.periodStart = bizPeriodStartEl.value || '';
+      if(bizPeriodEndEl) b.periodEnd = bizPeriodEndEl.value || '';
       addAudit('business.edit','business', b.id, 'Edited business');
     } else {
       const newBiz = {
@@ -5345,7 +5372,10 @@
       //   + Retained Profit b/f
       //   = Retained Profit c/f
       // ------------------------------------------------------------------
-      html += `<h4>Profit &amp; Loss Statement</h4>`;
+      const periodSubtitle = (b.periodStart || b.periodEnd)
+        ? `<small style="font-weight:normal;color:#64748b;">${b.periodStart || ''} to ${b.periodEnd || ''}</small>`
+        : '';
+      html += `<h4>Profit &amp; Loss Statement ${periodSubtitle}</h4>`;
 
       const pl = computePLFigures(selectedBizId, selectedUserId);
 
@@ -5421,32 +5451,161 @@
 
     } else if(type === 'bs') {
       // ------------------------------------------------------------------
-      // Balance Sheet
-      // Includes retained earnings roll-forward in Equity section:
-      //   Retained Profit for Year  (computed from P&L via computePLFigures)
-      //   + Retained Profit b/f     (b.retainedProfitBF)
-      //   = Retained Profit c/f     (used as equity component)
+      // Balance Sheet (Accrual Basis)
+      // Assets  = Account balances + Inventory (closing) + PPE at NBV + WHT Receivable
+      // Liabilities = Account balances + Accrued Tax Liabilities (computed, not yet paid)
+      // Equity  = Capital accounts + Retained Profit c/f
+      //
+      // Opening balances are stored as static fields on each account (not journal entries).
+      // PPE at NBV = Cost − Accumulated Depreciation (book).
+      // Inventory closing value computed from the inventory schedule.
+      // Tax liabilities computed from the tax engine (outstanding = computed − paid).
       // ------------------------------------------------------------------
-      html += `<h4>Balance Sheet</h4>`;
+      html += `<h4>Balance Sheet <small style="font-weight:normal;color:#64748b;">(Accrual Basis)</small></h4>`;
       
       const assets = {};
       const liabilities = {};
       const capital = {};
       
-      // Calculate balances for each account
+      // Tax-payable account names (shown separately via computed accruals; excluded here to avoid double-count)
+      const taxPayableAcctNames = ['VAT Payable', 'WHT Payable', 'PAYE Payable', 'PIT Payable', 'CIT Payable', 'CGT Payable'];
+
+      // Calculate balances for each account, excluding tax payable accounts (handled via accruals)
       for(const acct of b.accounts || []){
         const balance = calculateAccountClosingBalance(acct, selectedBizId);
         if(acct.category === 'Asset'){
+          // WHT Receivable is shown separately below; skip duplicate
+          if(acct.name === 'WHT Receivable') continue;
           assets[acct.name] = balance;
         } else if(acct.category === 'Liability'){
+          // Tax payable accounts handled by computed accruals section
+          if(taxPayableAcctNames.includes(acct.name)) continue;
           liabilities[acct.name] = balance;
         } else if(acct.category === 'Capital'){
           capital[acct.name] = balance;
         }
       }
 
-      const totalAssets = Object.values(assets).reduce((s,v)=>s+v,0);
-      const totalLiabilities = Object.values(liabilities).reduce((s,v)=>s+v,0);
+      // --- Inventory Schedule closing balance ---
+      let inventoryTotal = 0;
+      for(const item of (b.inventory || [])){
+        inventoryTotal += (item.qty || 0) * (item.avgCost || 0);
+      }
+
+      // --- PPE at NBV from Fixed Asset Schedule ---
+      // Compute: NBV = Cost − Accumulated Depreciation (book value)
+      // Updates asset.accumulatedDep via computeTotalDepreciation()
+      computeTotalDepreciation(); // ensure accumulatedDep is up-to-date
+      let totalPPECost = 0, totalAccDep = 0;
+      for(const a of (b.assets || [])){
+        if(a.disposed) continue; // exclude disposed assets from balance sheet
+        const cost = Number(a.cost || 0);
+        const accDep = Number(a.accumulatedDep || 0);
+        totalPPECost += cost;
+        totalAccDep += accDep;
+      }
+      const ppeNBV = totalPPECost - totalAccDep;
+
+      // --- WHT Receivable (computed, not from account balance) ---
+      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      let whtReceivable = 0, whtPaidToAuthority = 0;
+      for(const t of arr){
+        const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+        if(acctName === 'WHT Remitted' || acctName === 'WHT Paid') {
+          whtPaidToAuthority += Number(t.amount || 0);
+        } else if(t.whtApplied && t.accountCategory === 'Revenue'){
+          const rate = (t.whtRate || b.whtRate) / 100;
+          if(t.whtBasis === 'net'){
+            whtReceivable += Number(t.amount || 0) * (rate / (1 - rate));
+          } else {
+            whtReceivable += Number(t.amount || 0) * rate;
+          }
+        }
+      }
+      const whtReceivableNet = Math.max(0, whtReceivable - whtPaidToAuthority);
+
+      // --- Compute accrued tax liabilities (outstanding = computed − paid) ---
+      // VAT
+      let vatCollected = 0, vatExpensePaid = 0, vatPaidToGovt = 0, vatRefunded = 0;
+      // WHT payable
+      let whtPayable = 0;
+      // PAYE
+      const payeByContact = {};
+      let payePaid = 0;
+      // PIT / CIT
+      let pitPaid = 0, citPaid = 0, cgtPaid = 0;
+
+      for(const t of arr){
+        const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+        const amt = Number(t.amount || 0);
+        if(acctName === 'VAT Paid') vatPaidToGovt += amt;
+        else if(acctName === 'VAT Refunded') vatRefunded += amt;
+        else if(acctName === 'PAYE Paid') payePaid += amt;
+        else if(acctName === 'PIT Paid') pitPaid += amt;
+        else if(acctName === 'CIT Paid') citPaid += amt;
+        else if(acctName === 'CGT Paid') cgtPaid += amt;
+        // WHT paid already tracked above
+        
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Revenue') vatCollected += amt * (b.vatRate/100);
+        else if(t.vatType === 'inclusive' && t.accountCategory === 'Revenue') vatCollected += amt * (b.vatRate / (100 + b.vatRate));
+        if(t.vatType === 'exclusive' && t.accountCategory === 'Expense') vatExpensePaid += amt * (b.vatRate/100);
+        else if(t.vatType === 'inclusive' && t.accountCategory === 'Expense') vatExpensePaid += amt * (b.vatRate / (100 + b.vatRate));
+
+        if(t.whtApplied && t.accountCategory === 'Expense'){
+          const rate = (t.whtRate || b.whtRate) / 100;
+          if(t.whtBasis === 'net') whtPayable += amt * (rate / (1 - rate));
+          else whtPayable += amt * rate;
+        }
+        if(t.paye && t.contact){
+          payeByContact[t.contact] = (payeByContact[t.contact] || 0) + amt;
+        }
+      }
+      const vatNetOutstanding = Math.max(0, (vatCollected - vatExpensePaid) - vatPaidToGovt + vatRefunded);
+      const whtPayableOutstanding = Math.max(0, whtPayable - whtPaidToAuthority);
+      let payeAnnualTotal = 0;
+      for(const cName in payeByContact){
+        payeAnnualTotal += computePAYEOnAnnualIncome(payeByContact[cName] || 0);
+      }
+      const payeOutstanding = Math.max(0, payeAnnualTotal - payePaid);
+
+      // PIT / CIT — reuse tax summary computation
+      const plSnap = computePLSnapshot();
+      const taxableProfit = Math.max(0, plSnap.accountingProfit);
+      let pitOutstanding = 0, citOutstanding = 0, cgtOutstanding = 0;
+      if(b.entity !== 'Company' && b.pitEnabled){
+        const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
+        pitOutstanding = Math.max(0, pitLiability - whtReceivable - pitPaid);
+      }
+      if(b.entity === 'Company' && b.citEnabled){
+        // Use the CIT from chargeableGains
+        const gains = computeChargeableGainsForBiz();
+        let cgtCharge = 0;
+        for(const g of gains) cgtCharge += g.cgtCharge || 0;
+        cgtOutstanding = Math.max(0, cgtCharge - cgtPaid);
+
+        const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+        let citCharge = 0;
+        let computedTurnover = 0;
+        for(const t of arr){ if(t.action === 'Revenue') computedTurnover += Number(t.amount||0); }
+        if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) {
+          citCharge = 0.25 * taxableProfit;
+        } else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) {
+          citCharge = 0.30 * taxableProfit;
+        }
+        citOutstanding = Math.max(0, citCharge - whtReceivable - citPaid);
+      }
+
+      // Build totals
+      const totalAccountAssets = Object.values(assets).reduce((s,v)=>s+v,0);
+      const totalAssetsAll = totalAccountAssets
+        + (inventoryTotal > 0 ? inventoryTotal : 0)
+        + (ppeNBV > 0 ? ppeNBV : 0)
+        + (whtReceivableNet > 0 ? whtReceivableNet : 0);
+
+      const totalAccountLiabilities = Object.values(liabilities).reduce((s,v)=>s+v,0);
+      const totalTaxLiabilities = vatNetOutstanding + whtPayableOutstanding + payeOutstanding + pitOutstanding + citOutstanding + cgtOutstanding;
+      const totalLiabilitiesAll = totalAccountLiabilities + totalTaxLiabilities;
+
       const totalCapital = Object.values(capital).reduce((s,v)=>s+v,0);
 
       // Use shared P&L figures for retained earnings roll-forward
@@ -5457,27 +5616,52 @@
       html += `<thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:160px;">Amount (₦)</th></tr></thead>`;
       html += `<tbody>`;
 
+      // ---- ASSETS ----
       html += `<tr style="background:#f2f6fa;"><td><strong>Assets</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(assets)){
-        html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
+        if(balance !== 0)
+          html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssets)}</strong></td></tr>`;
+      // Inventory closing balance from schedule
+      if(inventoryTotal > 0)
+        html += `<tr><td style="padding-left:20px;">Inventory (closing)</td><td style="text-align:right;">${fmt(inventoryTotal)}</td></tr>`;
+      // PPE at Net Book Value from fixed asset schedule
+      if(totalPPECost > 0){
+        html += `<tr><td style="padding-left:20px;">Property, Plant &amp; Equipment — at NBV</td><td style="text-align:right;">${fmt(ppeNBV)}</td></tr>`;
+        html += `<tr><td style="padding-left:36px;color:#64748b;font-size:0.9rem;">Cost: ${fmt(totalPPECost)} | Acc. Dep: (${fmt(totalAccDep)})</td><td></td></tr>`;
+      }
+      // WHT Receivable (credit against CIT/PIT)
+      if(whtReceivableNet > 0)
+        html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(whtReceivableNet)}</td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssetsAll)}</strong></td></tr>`;
 
       html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
 
+      // ---- LIABILITIES ----
       html += `<tr style="background:#f2f6fa;"><td><strong>Liabilities</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(liabilities)){
-        html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
+        if(balance !== 0)
+          html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
-      html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities)}</strong></td></tr>`;
+      // Accrued tax liabilities (computed, accrual basis)
+      if(totalTaxLiabilities > 0){
+        html += `<tr><td style="padding-left:20px;font-style:italic;">Tax Liabilities (accrued):</td><td></td></tr>`;
+        if(vatNetOutstanding > 0) html += `<tr><td style="padding-left:36px;">VAT Payable</td><td style="text-align:right;">${fmt(vatNetOutstanding)}</td></tr>`;
+        if(whtPayableOutstanding > 0) html += `<tr><td style="padding-left:36px;">WHT Payable</td><td style="text-align:right;">${fmt(whtPayableOutstanding)}</td></tr>`;
+        if(payeOutstanding > 0) html += `<tr><td style="padding-left:36px;">PAYE Payable</td><td style="text-align:right;">${fmt(payeOutstanding)}</td></tr>`;
+        if(pitOutstanding > 0) html += `<tr><td style="padding-left:36px;">PIT Payable</td><td style="text-align:right;">${fmt(pitOutstanding)}</td></tr>`;
+        if(citOutstanding > 0) html += `<tr><td style="padding-left:36px;">CIT Payable</td><td style="text-align:right;">${fmt(citOutstanding)}</td></tr>`;
+        if(cgtOutstanding > 0) html += `<tr><td style="padding-left:36px;">CGT Payable</td><td style="text-align:right;">${fmt(cgtOutstanding)}</td></tr>`;
+      }
+      html += `<tr style="background:#f2f6fa;"><td><strong>Total Liabilities</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilitiesAll)}</strong></td></tr>`;
 
       html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
 
+      // ---- EQUITY ----
       html += `<tr style="background:#f2f6fa;"><td><strong>Capital &amp; Equity</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(capital)){
         html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
       }
-      // Retained Earnings roll-forward as part of equity (consistent with P&L above)
       html += `<tr><td style="padding-left:20px;font-style:italic;">Retained Profit for the Year</td><td style="text-align:right;">${fmt(retainedProfitForYear)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;font-style:italic;">Retained Profit b/f</td><td style="text-align:right;">${fmt(retainedProfitBF)}</td></tr>`;
       html += `<tr><td style="padding-left:20px;font-weight:600;">Retained Profit c/f</td><td style="text-align:right;font-weight:600;">${fmt(retainedProfitCF)}</td></tr>`;
@@ -5487,7 +5671,7 @@
 
       html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
 
-      html += `<tr style="background:#e6f3ff;"><td><strong>Total Liabilities + Capital &amp; Equity</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilities + totalEquity)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Total Liabilities + Capital &amp; Equity</strong></td><td style="text-align:right;"><strong>${fmt(totalLiabilitiesAll + totalEquity)}</strong></td></tr>`;
 
       html += `</tbody></table>`;
     }
@@ -5591,46 +5775,51 @@
     const entity = b.entity || 'Company';
     const reportTabs = document.querySelectorAll('#reportsSection .tab[data-report]');
     
-    // Define visibility per entity
+    // Define visibility per entity (plan gating):
+    // Business: PIT summary + all other reports (no CIT)
+    // Company: CIT summary + all other reports (no PIT)
+    // Enterprise: full PIT + full CIT + all other reports
     const visibilityRules = {
       'Business': {
-        'vatReport': true,  // Changed from false - VAT Report now available for Business entity
+        'vatReport': true,
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitBusiness': true,
+        'pitBusiness': true,   // Business: show PIT
         'cgtReport': true,
-        'citReport': false,
+        'citReport': false,    // Business: hide CIT
         'companyAccounts': false,
-        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
+        'financialReport': true,
         'auditTrail': true,
         'receiptsFolder': true
       },
       'Enterprise Plus': {
-        'vatReport': false,
+        'vatReport': true,
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitBusiness': true,
+        'pitBusiness': true,   // Enterprise Plus: show PIT
         'cgtReport': true,
+        'citReport': true,     // Enterprise Plus: show CIT too (full access)
         'companyAccounts': false,
-        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
+        'financialReport': true,
         'auditTrail': true,
         'receiptsFolder': true
       },
       'Enterprise': {
-        'vatReport': false,
+        'vatReport': true,
         'whtPayable': true,
         'whtReceivable': true,
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitBusiness': true,
+        'pitBusiness': true,   // Enterprise: show full PIT
         'cgtReport': true,
+        'citReport': true,     // Enterprise: show full CIT too
         'companyAccounts': false,
         'financialReport': true,
         'auditTrail': true,
@@ -5643,10 +5832,11 @@
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitBusiness': false,
+        'pitBusiness': false,  // Company: hide PIT
         'cgtReport': true,
+        'citReport': true,     // Company: show CIT
         'companyAccounts': true,
-        'financialReport': true,  // Financial report (P&L and Balance Sheet) for all entities
+        'financialReport': true,
         'auditTrail': true,
         'receiptsFolder': true
       }
@@ -6300,6 +6490,20 @@
     summaryDiv.innerHTML = html;
   }
 
+  /** Current cashbook view tab: 'all' | 'receipts' | 'payments' */
+  let cashbookView = 'all';
+
+  /** Switches the cashbook tab view and re-renders. */
+  function switchCashbookTab(view) {
+    cashbookView = view;
+    ['all', 'receipts', 'payments'].forEach(v => {
+      const btn = document.getElementById('cashbookTab' + v.charAt(0).toUpperCase() + v.slice(1));
+      if (btn) btn.classList.toggle('active', v === view);
+    });
+    renderCashbook();
+  }
+  window.switchCashbookTab = switchCashbookTab;
+
   function renderCashbook(){
     const tbody = document.getElementById('cashbookTableBody');
     if(!tbody) return;
@@ -6341,8 +6545,27 @@
       rows.push({ date: t.date||'', desc: t.description||t.action||'', receipts, payments, balance });
     }
     
+    // Filter rows based on cashbook view
+    const view = cashbookView || 'all';
+    const filtered = rows.filter(row => {
+      if (row.isOpening) return true; // always show opening balance
+      if (view === 'receipts') return row.receipts > 0;
+      if (view === 'payments') return row.payments > 0;
+      return true;
+    });
+
+    // For receipts/payments views, recalculate running balance
+    if (view !== 'all') {
+      let runBal = Number((bankAcct && bankAcct.openingBalance) || 0);
+      for (const row of filtered) {
+        if (row.isOpening) { row.balance = runBal; continue; }
+        runBal += row.receipts - row.payments;
+        row.balance = runBal;
+      }
+    }
+    
     tbody.innerHTML = '';
-    for(const row of rows){
+    for(const row of filtered){
       const tr = document.createElement('tr');
       if(row.isOpening) tr.style.fontWeight='bold';
       tr.innerHTML = `<td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.desc)}</td>` +
@@ -7658,14 +7881,17 @@
       reportContent.innerHTML = html;
       
     } else if(name === 'inventoryReport'){
-      let html = `<h3>Inventory Report</h3>`;
+      let html = `<h3>Inventory Schedule</h3>`;
       if(b.inventory && b.inventory.length){
-        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Item</th><th>Quantity</th><th>Avg Cost</th><th>Total Value</th></tr></thead><tbody>`;
+        let scheduleTotal = 0;
+        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Item</th><th>Quantity</th><th>Avg Cost (₦)</th><th>Total Value (₦)</th></tr></thead><tbody>`;
         for(const item of b.inventory){
           const value = (item.qty || 0) * (item.avgCost || 0);
-          html += `<tr><td>${item.name}</td><td>${item.qty||0}</td><td>${fmt(item.avgCost||0)}</td><td>${fmt(value)}</td></tr>`;
+          scheduleTotal += value;
+          html += `<tr><td>${escapeHtml(item.name)}</td><td>${item.qty||0}</td><td style="text-align:right;">${fmt(item.avgCost||0)}</td><td style="text-align:right;">${fmt(value)}</td></tr>`;
         }
-        html += `</tbody></table>`;
+        html += `</tbody><tfoot><tr style="background:#e6f3ff;font-weight:700;"><td colspan="3">Total Closing Inventory</td><td style="text-align:right;">${fmt(scheduleTotal)}</td></tr></tfoot></table>`;
+        html += `<p class="small-note">Closing inventory total feeds into the Balance Sheet under Assets.</p>`;
       } else {
         html += '<div>No inventory items</div>';
       }
@@ -7673,20 +7899,47 @@
       
     } else if(name === 'assetsReport'){
       const gains = computeChargeableGainsForBiz();
+      // Ensure depreciation is up-to-date
+      computeTotalDepreciation();
       let html = `<h3>Fixed Assets Schedule</h3>`;
       if(b.assets && b.assets.length){
-        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Name</th><th>Qty</th><th>Unit Price</th><th>Cost</th><th>Acc Dep</th><th>NBV</th><th>Life (yrs)</th><th>Purchase Date</th><th>Classification</th><th>Disposed</th></tr></thead><tbody>`;
+        let totalCost = 0, totalAccDep = 0, totalNBV = 0;
+        html += `<table style="width:100%;border-collapse:collapse;"><thead><tr>` +
+          `<th>Name</th><th>Qty</th><th>Cost (₦)</th><th>Opening Acc Dep (₦)</th><th>Dep This Period (₦)</th><th>Total Acc Dep (₦)</th><th>NBV (₦)</th>` +
+          `<th>Life (yrs)</th><th>Purchase Date</th><th>Classification</th><th>Disposed</th>` +
+          `</tr></thead><tbody>`;
         for(const a of b.assets){
-          const nbv = (a.cost || 0) - (a.accumulatedDep || 0);
-          html += `<tr><td>${a.name}</td><td>${a.qty||1}</td><td>${fmt(a.unitPrice||0)}</td><td>${fmt(a.cost||0)}</td><td>${fmt(a.accumulatedDep||0)}</td><td>${fmt(nbv)}</td><td>${a.lifeYears||0}</td><td>${a.purchaseDate||''}</td><td>${a.classification}</td><td>${a.disposed ? 'Yes' : 'No'}</td></tr>`;
+          const cost = Number(a.cost || 0);
+          const openingAccDep = Number(a.openingAccDep || 0);
+          const computedDep = Number(a.accumulatedDepreciation || 0); // from this period
+          const totalAccDepAmt = Number(a.accumulatedDep || 0); // openingAccDep + computed
+          const nbv = cost - totalAccDepAmt;
+          if(!a.disposed) { totalCost += cost; totalAccDep += totalAccDepAmt; totalNBV += nbv; }
+          html += `<tr${a.disposed ? ' style="color:#64748b;"' : ''}>` +
+            `<td>${escapeHtml(a.name)}</td><td>${a.qty||1}</td>` +
+            `<td style="text-align:right;">${fmt(cost)}</td>` +
+            `<td style="text-align:right;">${fmt(openingAccDep)}</td>` +
+            `<td style="text-align:right;">${fmt(computedDep)}</td>` +
+            `<td style="text-align:right;">${fmt(totalAccDepAmt)}</td>` +
+            `<td style="text-align:right;font-weight:${a.disposed?'normal':'600'};">${fmt(nbv)}</td>` +
+            `<td>${a.lifeYears||0}</td><td>${a.purchaseDate||''}</td>` +
+            `<td>${a.classification||''}</td><td>${a.disposed ? 'Yes' : 'No'}</td>` +
+            `</tr>`;
         }
-        html += `</tbody></table>`;
+        html += `</tbody><tfoot><tr style="background:#e6f3ff;font-weight:700;">` +
+          `<td colspan="2">Total (active assets)</td>` +
+          `<td style="text-align:right;">${fmt(totalCost)}</td>` +
+          `<td></td><td></td>` +
+          `<td style="text-align:right;">${fmt(totalAccDep)}</td>` +
+          `<td style="text-align:right;">${fmt(totalNBV)}</td>` +
+          `<td colspan="4"></td>` +
+          `</tr></tfoot></table>`;
+        html += `<p class="small-note">NBV = Cost − Accumulated Depreciation (book). PPE at NBV feeds into the Balance Sheet.</p>`;
       } else html += '<div>No assets</div>';
       if(gains.length){
-        html += `<h4 style="margin-top:16px;">Disposal & Chargeable Gains</h4><table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Proceeds</th><th>Gain/Loss</th><th>CGT@30%</th></tr></thead><tbody>`;
+        html += `<h4 style="margin-top:16px;">Disposal &amp; Chargeable Gains</h4><table style="width:100%;border-collapse:collapse;"><thead><tr><th>Asset</th><th>Proceeds</th><th>Gain/Loss</th><th>CGT</th></tr></thead><tbody>`;
         for(const g of gains){
-          const cgt = (g.gain > 0) ? g.gain * 0.30 : 0;
-          html += `<tr><td>${g.name}</td><td>${fmt(g.proceeds)}</td><td>${fmt(g.gain)}</td><td>${fmt(cgt)}</td></tr>`;
+          html += `<tr><td>${escapeHtml(g.name)}</td><td>${fmt(g.proceeds)}</td><td>${fmt(g.gain)}</td><td>${fmt(g.cgtCharge)}</td></tr>`;
         }
         html += `</tbody></table>`;
       }
@@ -7702,13 +7955,16 @@
       
     } else if(name === 'financialReport'){
       // Financial Report - P&L and Balance Sheet
-      const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+      const periodLabel = (b.periodStart && b.periodEnd)
+        ? `Period: ${b.periodStart} to ${b.periodEnd}`
+        : (b.periodStart ? `From: ${b.periodStart}` : '');
       let html = `<h3>Financial Reports</h3>`;
+      if(periodLabel) html += `<p class="small-note" style="margin:0 0 8px 0;">${escapeHtml(periodLabel)}</p>`;
       
       // Sub-tabs for P&L and Balance Sheet
       html += `<div style="display:flex; gap:8px; margin-bottom:16px;">`;
-      html += `<button class="small tab active" onclick="showFinancialSubReport('pl')">Profit & Loss Statement</button>`;
-      html += `<button class="small tab" onclick="showFinancialSubReport('bs')">Balance Sheet</button>`;
+      html += `<button class="small tab active" onclick="showFinancialSubReport('pl')">Profit &amp; Loss Statement</button>`;
+      html += `<button class="small tab" onclick="showFinancialSubReport('bs')">Balance Sheet (Accrual)</button>`;
       html += `</div>`;
       
       html += `<div id="financialSubReport"></div>`;
@@ -7994,8 +8250,6 @@
     const b = findBiz(selectedBizId);
     if(!b) return;
     
-    const balanceAccounts = ['Receivable', 'Bank', 'Payable', 'Capital', 'Accruals', 'Prepayment'];
-    
     for(const a of b.accounts){
       const div = document.createElement('div'); 
       div.className='account-row';
@@ -8035,8 +8289,8 @@
       headerDiv.appendChild(delBtn);
       div.appendChild(headerDiv);
       
-      // Show balance fields for eligible accounts
-      if(balanceAccounts.includes(a.name)){
+      // Show opening balance field for ALL Asset, Liability, and Capital accounts
+      if(['Asset', 'Liability', 'Capital'].includes(a.category)){
         const balDiv = document.createElement('div');
         balDiv.style.display = 'flex';
         balDiv.style.gap = '8px';
@@ -8116,8 +8370,71 @@
   function computePLAndTaxesForReports(){
     // placeholder if needed
   }
+
+  /**
+   * Self-check / deterministic test function for core accounting logic.
+   * Developers can run `ntcSelfCheck()` in the browser console to verify calculations.
+   * Returns an object with { passed, failed, results }.
+   */
+  function ntcSelfCheck() {
+    const results = [];
+    let passed = 0, failed = 0;
+
+    function assert(name, actual, expected, tolerance) {
+      const tol = tolerance || 0.01;
+      const ok = Math.abs(actual - expected) <= tol;
+      results.push({ name, actual, expected, ok });
+      if (ok) passed++; else failed++;
+    }
+
+    // ------ WHT Computations ------
+    // Gross basis: WHT = amount × rate
+    assert('WHT gross basis 5%', computeWHT(100000, 'gross', 5), 5000);
+    assert('WHT gross basis 10%', computeWHT(200000, 'gross', 10), 20000);
+    // Net basis: gross = net / (1 - rate); WHT = gross - net
+    // net=95000, rate=5% → gross=100000, WHT=5000
+    assert('WHT net basis 5%', computeWHT(95000, 'net', 5), 5000);
+    // net=90000, rate=10% → gross=100000, WHT=10000
+    assert('WHT net basis 10%', computeWHT(90000, 'net', 10), 10000);
+
+    // ------ VAT Computations ------
+    // Exclusive: VAT = amount × rate / 100
+    assert('VAT exclusive 7.5%', computeVAT(100000, 'exclusive', 7.5), 7500);
+    // Inclusive: VAT = amount × rate / (100 + rate)
+    assert('VAT inclusive 7.5%', computeVAT(107500, 'inclusive', 7.5), 7500);
+    assert('VAT none', computeVAT(100000, 'none', 7.5), 0);
+
+    // ------ PAYE / PIT Bands ------
+    // ₦800,000 is in first band (0%) → 0
+    assert('PAYE 800k (0%)', computePAYEOnAnnualIncome(800000), 0);
+    // ₦1,800,000: 0% on 800k, 15% on 1M = 150,000
+    assert('PAYE 1.8M', computePAYEOnAnnualIncome(1800000), 150000);
+    // ₦4,000,000: 0% on 800k, 15% on 2.2M = 330000, 18% on 1M = 180000 → 510000
+    assert('PAYE 4M', computePAYEOnAnnualIncome(4000000), 510000);
+
+    // ------ Inventory closing value ------
+    const demoItems = [
+      { qty: 10, avgCost: 5000 },
+      { qty: 5, avgCost: 12000 }
+    ];
+    const inventoryTotal = demoItems.reduce((s, i) => s + i.qty * i.avgCost, 0);
+    assert('Inventory closing value', inventoryTotal, 110000);
+
+    // Output to console
+    console.group('ntcSelfCheck Results');
+    for (const r of results) {
+      const icon = r.ok ? '✅' : '❌';
+      console.log(`${icon} ${r.name}: got ${r.actual}, expected ${r.expected}`);
+    }
+    console.groupEnd();
+    console.log(`Self-check complete: ${passed} passed, ${failed} failed`);
+    return { passed, failed, results };
+  }
+
+  // Expose self-check globally for browser console use
+  window.ntcSelfCheck = ntcSelfCheck;
+
   
-  // Contact dropdown functionality
   (function initContactDropdown() {
     const btnSelectContact = document.getElementById('btnSelectContact');
     const contactDropdown = document.getElementById('contactDropdown');
