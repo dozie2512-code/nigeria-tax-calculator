@@ -719,8 +719,6 @@
             <option value="Expense">Expense</option>
             <option value="Revenue">Revenue</option>
             <option value="Investment Income">Investment Income</option>
-            <option value="Tax Income">Tax Income</option>
-            <option value="Tax Payment">Tax Payment</option>
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
@@ -749,7 +747,6 @@
         <label id="txnWhtBasisLabel" style="display:none;">Basis:
           <select id="txnWhtBasis">
             <option value="gross">Gross</option>
-            <option value="net">Net</option>
           </select>
         </label>
         <label id="txnWhtRateLabel" style="display:none;">Rate (%) <input type="number" id="txnWhtRate" class="smallInput" min="0" step="0.01" /></label>
@@ -832,6 +829,15 @@
 
           <label>Contact: <input type="text" id="invContact" placeholder="Contact name" /></label>
 
+          <label id="invPaymentStatusLabel">Payment Status:
+            <select id="invPaymentStatus">
+              <option value="Paid">Paid</option>
+              <option value="Part">Part</option>
+              <option value="Unpaid">Unpaid</option>
+            </select>
+          </label>
+          <label id="invPartAmountLabel" style="display:none;">Part Amt Paid (₦): <input type="number" id="invPartAmount" min="0" step="0.01" /></label>
+
           <label>Receipt: <input type="file" id="invReceipt" /></label>
 
           <button id="btnAddInv" class="small primary">Apply Inventory Action</button>
@@ -883,6 +889,15 @@
           <label>Depreciation rate % (annual): <input type="number" id="assetDepRate" class="smallInput" min="0" step="0.01" /></label>
 
           <label>Contact: <input type="text" id="assetContact" placeholder="Contact name" /></label>
+
+          <label id="assetPaymentStatusLabel">Payment Status:
+            <select id="assetPaymentStatus">
+              <option value="Paid">Paid</option>
+              <option value="Part">Part</option>
+              <option value="Unpaid">Unpaid</option>
+            </select>
+          </label>
+          <label id="assetPartAmountLabel" style="display:none;">Part Amt Paid (₦): <input type="number" id="assetPartAmount" min="0" step="0.01" /></label>
 
           <label>Receipt: <input type="file" id="assetReceipt" /></label>
 
@@ -946,6 +961,13 @@
         <button class="tab active" id="cashbookTabAll" onclick="switchCashbookTab('all')">All</button>
         <button class="tab" id="cashbookTabReceipts" onclick="switchCashbookTab('receipts')">Receipts</button>
         <button class="tab" id="cashbookTabPayments" onclick="switchCashbookTab('payments')">Payments</button>
+      </div>
+      <div class="form-inline" style="margin-bottom:10px;">
+        <label>Date: <input type="date" id="cashbookDate" /></label>
+        <label>Description: <input type="text" id="cashbookDesc" placeholder="Description" /></label>
+        <label>Receipts amount (₦): <input type="number" id="cashbookReceiptsAmt" min="0" step="0.01" placeholder="0.00" /></label>
+        <label>Payments amount (₦): <input type="number" id="cashbookPaymentsAmt" min="0" step="0.01" placeholder="0.00" /></label>
+        <button class="small primary" id="btnAddCashbookEntry">Add Entry</button>
       </div>
       <div class="table-scroll">
         <table class="ledger-table" id="cashbookTable">
@@ -1069,7 +1091,8 @@
           <option value="100000000">₦100,000,000</option>
         </select>
       </label>
-      <!-- CIT fields hidden but preserved in data via hidden inputs -->
+      <!-- WHT/CIT fields hidden but preserved in data via hidden inputs -->
+      <input type="hidden" id="bizWht" />
       <input type="hidden" id="bizCit" />
       <input type="hidden" id="bizTurnoverThreshold" />
     </div>
@@ -1862,7 +1885,8 @@
         { name: 'CGT Payable', category: 'Liability' },
         { name: 'CIT Payable', category: 'Liability' },
         { name: 'WHT Receivable', category: 'Asset' },
-        { name: 'Tax Provision', category: 'Expense' }
+        { name: 'Tax Provision', category: 'Expense' },
+        { name: 'VAT Recoverable', category: 'Asset' }
       ];
       
       for (const acct of accountsToAdd) {
@@ -2175,7 +2199,10 @@
       
       setTimeout(() => {
         updateAuthUI();
+        refreshSelectors();
+        ensureSelection();
         renderAll();
+        renderTab(); // render active tab (dashboard) after login
         
         // Check if user needs to see video tour (first time after signup)
         if(user.tourSeen !== true) {
@@ -2350,6 +2377,7 @@
   populateAccountSelect();
   resetForms();
   renderAll();
+  renderTab(); // ensure the active tab (dashboard) renders properly on load
 
   function initUI(){
     btnAddUser.addEventListener('click', ()=> openUserModal());
@@ -2381,6 +2409,15 @@
     btnAddInv.addEventListener('click', handleInventoryAction);
     btnInvCancel.addEventListener('click', ()=>{ txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnInvUndo.addEventListener('click', handleUndoInventory);
+    
+    // Inventory payment status toggle
+    const invPaymentStatus = document.getElementById('invPaymentStatus');
+    const invPartAmountLabel = document.getElementById('invPartAmountLabel');
+    if(invPaymentStatus && invPartAmountLabel){
+      invPaymentStatus.addEventListener('change', ()=>{
+        invPartAmountLabel.style.display = invPaymentStatus.value === 'Part' ? 'inline-flex' : 'none';
+      });
+    }
 
     btnAddAsset.addEventListener('click', handleAddAsset);
     btnDisposeAsset.addEventListener('click', handleDisposeAsset);
@@ -2388,6 +2425,19 @@
     btnAssetUndo.addEventListener('click', handleUndoAsset);
     btnAssetDisposalCancel.addEventListener('click', ()=>{ txnAction.value=''; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnAssetDisposalUndo.addEventListener('click', handleUndoAsset);
+    
+    // Asset payment status toggle
+    const assetPaymentStatus = document.getElementById('assetPaymentStatus');
+    const assetPartAmountLabel = document.getElementById('assetPartAmountLabel');
+    if(assetPaymentStatus && assetPartAmountLabel){
+      assetPaymentStatus.addEventListener('change', ()=>{
+        assetPartAmountLabel.style.display = assetPaymentStatus.value === 'Part' ? 'inline-flex' : 'none';
+      });
+    }
+    
+    // Cashbook manual entry
+    const btnAddCashbookEntry = document.getElementById('btnAddCashbookEntry');
+    if(btnAddCashbookEntry) btnAddCashbookEntry.addEventListener('click', handleAddCashbookEntry);
 
     // Login/Logout handlers
     btnLogin.addEventListener('click', ()=> openModal(loginModal));
@@ -3175,6 +3225,10 @@
       newBiz.accounts.push({ id: uid('acct'), name:'Purchases', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Salaries', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       newBiz.accounts.push({ id: uid('acct'), name:'Bank', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'VAT Recoverable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'VAT Payable', category:'Liability', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'WHT Receivable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'Sales Revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -3525,9 +3579,21 @@
     if(txnAmortPeriodLabelEl) txnAmortPeriodLabelEl.style.display = 'none';
 
     invItemSelect.value=''; invNewName.value=''; invAccountSelect.selectedIndex=0; invQty.value=''; invUnitPrice.value=''; invVatType.value='none'; invContact.value=''; invReceipt.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
+    const invPayStatus = document.getElementById('invPaymentStatus');
+    const invPartAmtLabel = document.getElementById('invPartAmountLabel');
+    const invPartAmtEl = document.getElementById('invPartAmount');
+    if(invPayStatus) invPayStatus.value = 'Paid';
+    if(invPartAmtLabel) invPartAmtLabel.style.display = 'none';
+    if(invPartAmtEl) invPartAmtEl.value = '';
 
     assetName.value=''; assetQty.value=1; assetUnitPrice.value=''; assetCost.value=''; assetOpeningCost.value=''; assetOpeningAccDep.value=''; assetPurchaseDate.value=''; assetLife.value=''; assetCA.value=''; assetPurchaseAccount.selectedIndex=0; assetClassification.value='Fixed'; assetDepRate.value=''; assetContact.value=''; assetReceipt.value='';
     assetDisposalDate.value=''; assetDisposalProceeds.value=''; assetDisposalAccount.selectedIndex=0; assetDisposalContact.value=''; assetDisposalReceipt.value='';
+    const assetPayStatus = document.getElementById('assetPaymentStatus');
+    const assetPartAmtLabel = document.getElementById('assetPartAmountLabel');
+    const assetPartAmtEl = document.getElementById('assetPartAmount');
+    if(assetPayStatus) assetPayStatus.value = 'Paid';
+    if(assetPartAmtLabel) assetPartAmtLabel.style.display = 'none';
+    if(assetPartAmtEl) assetPartAmtEl.value = '';
 
     // ensure add button text resets
     btnAddTxn.textContent = 'Add';
@@ -3621,6 +3687,37 @@
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(txn);
     addAudit('txn.add','txn',txn.id, `Added txn ${txn.action} ${txn.amount}`);
+    
+    // For Part/Unpaid transactions, record outstanding amount to Accounts Receivable
+    const b = findBiz(selectedBizId);
+    if(b && (txn.paymentStatus === 'Part' || txn.paymentStatus === 'Unpaid')){
+      const receivableAcct = b.accounts.find(a => a.name === 'Receivable' && a.category === 'Asset');
+      if(receivableAcct){
+        const totalAmt = Number(txn.amount || 0);
+        const paidAmt = txn.paymentStatus === 'Part' ? Number(txn.partAmount || 0) : 0;
+        const outstanding = totalAmt - paidAmt;
+        if(outstanding > 0){
+          const arTxn = {
+            id: uid('txn'),
+            date: txn.date,
+            action: txn.action,
+            accountId: receivableAcct.id,
+            accountName: receivableAcct.name,
+            accountCategory: 'Asset',
+            description: `Outstanding: ${txn.description || ''}`,
+            amount: outstanding,
+            vatType: 'none',
+            whtApplied: false,
+            paye: false,
+            contact: txn.contact || '',
+            linkedTxnId: txn.id,
+            isReceivable: true
+          };
+          state.transactions[selectedUserId][selectedBizId].push(arTxn);
+        }
+      }
+    }
+    
     saveState();
     resetForms();
     txnAction.value=''; inventorySubform.style.display='none'; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
@@ -3672,6 +3769,8 @@
       }
       addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`, { amount: qty * unit, qty: qty, prevQty: prevState.prevQty, prevAvgCost: prevState.prevAvgCost });
     }
+    const invPayStatus = document.getElementById('invPaymentStatus');
+    const invPartAmt = document.getElementById('invPartAmount');
     const t = { 
       id: uid('txn'), 
       date: today(), 
@@ -3686,7 +3785,9 @@
       vatType: invVatType.value || 'none', 
       whtApplied: false, 
       paye: false, 
-      contact: invContact.value || '', 
+      contact: invContact.value || '',
+      paymentStatus: invPayStatus ? invPayStatus.value : 'Paid',
+      partAmount: (invPayStatus && invPayStatus.value === 'Part') ? Number(invPartAmt && invPartAmt.value || 0) : undefined,
       receiptId: null, 
       inventoryItemId: inventoryItemId, 
       inventoryPrevState: prevState 
@@ -3831,6 +3932,8 @@
     
     const actionType = isOpeningBalance ? 'OpeningAssetBal' : 'AssetPurchase';
     const txnAmount = isOpeningBalance ? computedOpeningCost : computedCost;
+    const assetPayStatus = document.getElementById('assetPaymentStatus');
+    const assetPartAmt = document.getElementById('assetPartAmount');
     const t = { 
       id: uid('txn'), 
       date: item.purchaseDate, 
@@ -3845,10 +3948,12 @@
       vatType:'none', 
       whtApplied:false, 
       paye:false, 
-      contact: assetContact.value || '', 
+      contact: assetContact.value || '',
+      paymentStatus: assetPayStatus ? assetPayStatus.value : 'Paid',
+      partAmount: (assetPayStatus && assetPayStatus.value === 'Part') ? Number(assetPartAmt && assetPartAmt.value || 0) : undefined,
       receiptId:null,
-      assetId: item.id, // Store asset ID for undo/delete reversal
-      assetPrevState: { isNewAsset: true, assetId: item.id } // Store that this was a new asset creation
+      assetId: item.id,
+      assetPrevState: { isNewAsset: true, assetId: item.id }
     };
     if(assetReceipt.files && assetReceipt.files[0]){
       const r = assetReceipt.files[0];
@@ -4368,6 +4473,7 @@
     renderTaxSummary();
     renderReportsTabState();
     updateEnterpriseFeatureVisibility(); // Update enterprise feature tab visibility
+    if(activeTab === 'dashboard') renderDashboard(); // always re-render dashboard when it's active
     
     // Check if current user is view-only and hide Add Transaction button
     const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
@@ -5030,6 +5136,11 @@
     // Adjust VAT net by payments
     const vatNetAfterPayments = vatNet - vatPaidToAuthority + vatRefunded;
     
+    // D12: Negative VAT (more VAT paid than collected) → reclassify to VAT Recoverable (asset)
+    // VAT Payable should never be negative; negative balance = VAT Recoverable on balance sheet
+    const vatPayable = Math.max(0, vatNetAfterPayments);
+    const vatRecoverable = vatNetAfterPayments < 0 ? Math.abs(vatNetAfterPayments) : 0;
+    
     // Adjust WHT by remitted amounts
     const whtPayableNet = Math.max(0, whtPayable - whtPaidToAuthority);
     const whtReceivableNet = Math.max(0, whtReceivable - whtPaidToAuthority);
@@ -5046,15 +5157,18 @@
     html += `<h4 style="margin:12px 0 8px 0;">Tax Liabilities & Payments</h4>`;
     
     // VAT Section
-    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${vatNetAfterPayments > 0 ? '#dc2626' : '#059669'};">`;
+    html += `<div style="background:#f8f9fb; padding:10px; margin:8px 0; border-radius:6px; border-left:4px solid ${vatPayable > 0 ? '#dc2626' : '#059669'};">`;
     html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
     html += `<div><strong>VAT:</strong></div>`;
-    html += `<div><strong>Outstanding: ${fmt(vatNetAfterPayments)}</strong></div>`;
+    html += `<div><strong>${vatRecoverable > 0 ? 'VAT Recoverable (Asset): ' + fmt(vatRecoverable) : 'Outstanding: ' + fmt(vatPayable)}</strong></div>`;
     html += `</div>`;
     html += `<div class="small-muted">Collected: ${fmt(vatCollected)} | Paid: ${fmt(vatPaid)} | Net: ${fmt(vatNet)}</div>`;
     html += `<div class="small-muted">Remitted to Authority: ${fmt(vatPaidToAuthority)}${vatRefunded > 0 ? ` | Refunded: ${fmt(vatRefunded)}` : ''}</div>`;
-    if(vatNetAfterPayments > 0) {
-      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('VAT', ${vatNetAfterPayments})">Pay VAT (${fmt(vatNetAfterPayments)})</button>`;
+    if(vatRecoverable > 0){
+      html += `<div class="small-note" style="color:#059669;">VAT Recoverable: ${fmt(vatRecoverable)} has been reclassified as a current asset (VAT Recoverable) in the balance sheet.</div>`;
+    }
+    if(vatPayable > 0) {
+      html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('VAT', ${vatPayable})">Pay VAT (${fmt(vatPayable)})</button>`;
     }
     html += `</div>`;
     
@@ -5171,7 +5285,8 @@
   }
 
   /**
-   * Pay Tax Function - Records tax payment transaction that reduces tax liability
+   * Pay Tax Function - Balance-sheet only: Dr tax liability, Cr bank/cashbook.
+   * No P&L recognition. Records a tax payment transaction tracked in tax summary.
    * @param {string} taxType - Type of tax (VAT, WHT, PAYE, CIT, PIT, CGT)
    * @param {number} amount - Amount to pay
    */
@@ -5186,7 +5301,7 @@
     // Map tax type to payment account name (these match what renderTaxSummary expects)
     const taxPaymentAccountMap = {
       'VAT': 'VAT Paid',
-      'WHT': 'WHT Remitted',  // Use 'WHT Remitted' to match existing code expectations
+      'WHT': 'WHT Remitted',
       'PAYE': 'PAYE Paid',
       'CIT': 'CIT Paid',
       'PIT': 'PIT Paid',
@@ -5198,17 +5313,14 @@
       return alert('Invalid tax type');
     }
     
-    // Find or create the tax payment account
-    // Note: Tax payment accounts are categorized as 'Expense' for tracking purposes
-    // They are marked as disallowable (non-deductible) and excluded from P&L calculations
-    // The renderTaxSummary() function tracks these separately to reduce tax liabilities
+    // Find or create the tax payment tracking account
+    // Category 'Expense' with isTaxPayment flag ensures it is excluded from P&L
     let paymentAccount = b.accounts.find(a => a.name === paymentAccountName);
     if(!paymentAccount) {
-      // Create the tax payment account if it doesn't exist
       paymentAccount = {
         id: uid('acct'),
         name: paymentAccountName,
-        category: 'Expense',
+        category: 'Expense', // Excluded from P&L via isTaxPayment flag and TAX_PAYMENT_ACCOUNTS list
         disallowableDefault: true,
         nonTaxableDefault: true,
         openingBalance: 0
@@ -5224,23 +5336,24 @@
     
     const finalAmount = Number(paymentAmount);
     
-    // Create transaction for tax payment
-    // Note: Uses 'Tax Payment' action which matches the dropdown option in txnAction (line 727)
+    // Create balance-sheet-only transaction:
+    // Dr respective tax liability (reduces liability) | Cr Bank (reduces cash)
+    // This does NOT affect P&L - it is a balance sheet movement only.
     const txn = {
       id: uid('txn'),
       date: new Date().toISOString().split('T')[0],
-      action: 'Tax Payment',  // Matches dropdown option in ledger form
+      action: 'Tax Payment',  // Kept for backward compat; excluded from P&L
       accountId: paymentAccount.id,
       accountName: paymentAccount.name,
-      accountCategory: 'Expense',
-      amount: finalAmount,  // Positive amount for payment
+      accountCategory: 'Expense',  // isTaxPayment flag ensures P&L exclusion
+      amount: finalAmount,
       description: `${taxType} Payment to Tax Authority`,
       vatType: 'none',
       whtApplied: false,
       paye: false,
       contact: 'Tax Authority',
       timestamp: Date.now(),
-      isTaxPayment: true  // Flag to identify tax payment transactions
+      isTaxPayment: true  // Flag: balance-sheet only, excluded from P&L
     };
     
     // Add transaction
@@ -5251,11 +5364,55 @@
     addAudit('tax.payment', 'transaction', txn.id, `Paid ${taxType}: ${fmt(finalAmount)}`);
     saveState();
     renderAll();
-    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!\nThis payment reduces your ${taxType} liability.`);
+    alert(`${taxType} payment of ${fmt(finalAmount)} recorded successfully!\nThis payment reduces your ${taxType} liability (balance sheet only).`);
   }
   
   // Make payTax available globally for inline onclick handlers
   window.payTax = payTax;
+  
+  /**
+   * Handle manual cashbook entry (Receipts/Payments amount input)
+   */
+  function handleAddCashbookEntry() {
+    if(!selectedUserId || !selectedBizId) return alert('Select user & business');
+    const b = findBiz(selectedBizId);
+    if(!b) return alert('Business not found');
+    const dateEl = document.getElementById('cashbookDate');
+    const descEl = document.getElementById('cashbookDesc');
+    const receiptsEl = document.getElementById('cashbookReceiptsAmt');
+    const paymentsEl = document.getElementById('cashbookPaymentsAmt');
+    const receiptsAmt = Number(receiptsEl && receiptsEl.value || 0);
+    const paymentsAmt = Number(paymentsEl && paymentsEl.value || 0);
+    if(receiptsAmt <= 0 && paymentsAmt <= 0) return alert('Enter a receipts or payments amount');
+    const bankAcct = b.accounts.find(a => a.name === 'Bank');
+    const txn = {
+      id: uid('txn'),
+      date: (dateEl && dateEl.value) || today(),
+      action: receiptsAmt > 0 ? 'Revenue' : 'Expense',
+      accountId: bankAcct ? bankAcct.id : '',
+      accountName: 'Bank',
+      accountCategory: receiptsAmt > 0 ? 'Revenue' : 'Expense',
+      description: (descEl && descEl.value) || (receiptsAmt > 0 ? 'Receipt' : 'Payment'),
+      amount: receiptsAmt > 0 ? receiptsAmt : paymentsAmt,
+      vatType: 'none',
+      whtApplied: false,
+      paye: false,
+      contact: '',
+      cashbookReceipts: receiptsAmt,
+      cashbookPayments: paymentsAmt,
+      isCashbookEntry: true
+    };
+    state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
+    state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
+    state.transactions[selectedUserId][selectedBizId].push(txn);
+    addAudit('cashbook.add', 'txn', txn.id, `Manual cashbook entry: receipts=${receiptsAmt} payments=${paymentsAmt}`);
+    saveState();
+    if(dateEl) dateEl.value = today();
+    if(descEl) descEl.value = '';
+    if(receiptsEl) receiptsEl.value = '';
+    if(paymentsEl) paymentsEl.value = '';
+    renderCashbook();
+  }
 
   /**
    * Returns true when the account should be treated as an "appropriation" account for P&L.
@@ -6526,18 +6683,36 @@
       const amount = Number(t.amount || 0);
       let receipts = 0, payments = 0;
       
-      if(action === 'Revenue' || action === 'Investment Income' || action === 'Tax Income'){
-        receipts = amount;
-      } else if(action === 'Expense' || action === 'Tax Payment'){
-        payments = amount;
+      // Exclude COGS auto-generated transactions from cashbook (P&L only)
+      if(t.isCOGS) continue;
+      
+      // Compute gross amount including VAT for exclusive transactions
+      const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
+      const grossAmt = amount + vatAmt;
+      
+      if(action === 'Revenue' || action === 'Investment Income'){
+        receipts = grossAmt;
+      } else if(action === 'Expense'){
+        // Only record cash payments - unpaid/part transactions reduce payment by outstanding
+        if(t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
       } else if(action === 'InventoryPurchase'){
-        payments = amount;
+        if(t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
       } else if(action === 'InventorySale'){
-        receipts = amount;
-      } else if(action === 'AssetPurchase'){
-        payments = amount;
+        receipts = grossAmt;
+      } else if(action === 'AssetPurchase' || action === 'OpeningAssetBal'){
+        if(t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : amount;
       } else if(action === 'AssetDisposal'){
         receipts = amount;
+      } else if(action === 'Tax Payment' || t.isTaxPayment){
+        // Tax payments: Dr tax liability, Cr bank (cash outflow)
+        payments = amount;
+      } else if(t.cashbookReceipts || t.cashbookPayments){
+        // Manual cashbook entries
+        receipts = Number(t.cashbookReceipts || 0);
+        payments = Number(t.cashbookPayments || 0);
       } else {
         continue;
       }
@@ -7352,19 +7527,8 @@
       // When showing tax fields, leave the display as-is (controlled by adjustment type logic)
     }
     
-    // Filter Action dropdown options
-    const actionSelect = document.getElementById('txnAction');
-    if (actionSelect) {
-      const options = actionSelect.querySelectorAll('option');
-      options.forEach(opt => {
-        if (opt.value === 'Tax Income' || opt.value === 'Tax Payment') {
-          opt.style.display = showTaxFields ? '' : 'none';
-          if (!showTaxFields && opt.selected) {
-            actionSelect.value = '';
-          }
-        }
-      });
-    }
+    // Tax Income/Tax Payment options have been removed from the action dropdown
+    // No further filtering needed here.
   }
 
   // Reports rendering
@@ -7779,14 +7943,14 @@
       // Summary section
       html += `<div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-bottom:16px;">`;
       html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">`;
-      html += `<div><strong>WHT Collected:</strong><br/><span style="font-size:1.2rem;color:#059669;">${fmt(totalWHTCollected)}</span><br/><span class="small-muted">Deducted from customers</span></div>`;
-      html += `<div><strong>WHT Suffered:</strong><br/><span style="font-size:1.2rem;color:#dc2626;">${fmt(totalWHTSuffered)}</span><br/><span class="small-muted">Paid to suppliers</span></div>`;
+      html += `<div><strong>WHT Collected:</strong><br/><span style="font-size:1.2rem;color:#059669;">${fmt(totalWHTCollected)}</span><br/><span class="small-muted">Deducted by customer</span></div>`;
+      html += `<div><strong>WHT Suffered:</strong><br/><span style="font-size:1.2rem;color:#dc2626;">${fmt(totalWHTSuffered)}</span><br/><span class="small-muted">Paid for supplier</span></div>`;
       html += `<div><strong>Net WHT Position:</strong><br/><span style="font-size:1.2rem;font-weight:700;color:${whtNet >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(whtNet)}</span><br/><span class="small-muted">${whtNet >= 0 ? 'Payable to tax authority' : 'Credit available'}</span></div>`;
       html += `</div>`;
       html += `</div>`;
       
       // WHT Collected (from revenue) - breakdown by rate
-      html += `<h4>WHT Collected (Deducted from Customers)</h4>`;
+      html += `<h4>WHT Collected (Deducted by Customer)</h4>`;
       if(Object.keys(whtCollectedByRate).length > 0){
         html += `<div style="margin-bottom:8px;">`;
         for(const rate in whtCollectedByRate){
@@ -7806,7 +7970,7 @@
       html += `</tbody><tfoot><tr><th colspan="5">Total WHT Collected</th><th>${fmt(totalWHTCollected)}</th></tr></tfoot></table>`;
       
       // WHT Suffered (from expenses) - breakdown by rate
-      html += `<h4 style="margin-top:16px;">WHT Suffered (Paid to Suppliers)</h4>`;
+      html += `<h4 style="margin-top:16px;">WHT Suffered (Paid for Supplier)</h4>`;
       if(Object.keys(whtSufferedByRate).length > 0){
         html += `<div style="margin-bottom:8px;">`;
         for(const rate in whtSufferedByRate){
@@ -8310,7 +8474,7 @@
         closingDiv.style.display = 'flex';
         closingDiv.style.gap = '8px';
         closingDiv.innerHTML = `
-          <span class="small-note"><strong>Closing Balance: ₦${closingBalance.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
+          <span class="small-note"><strong>Closing Starting Balance: ₦${closingBalance.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
         `;
         div.appendChild(closingDiv);
       }
@@ -8611,8 +8775,7 @@
         refreshSelectors();
         ensureSelection();
         renderAll();
-        
-        // Check if user needs to see video tour
+        renderTab(); // render the active tab (dashboard) after demo access
         const currentUser = state.users.find(function(u) { return u.id === state.auth.currentUserId; });
         if (currentUser && currentUser.tourSeen !== true) {
           showTourModal(currentUser.id);
