@@ -965,6 +965,8 @@
       <div class="form-inline" style="margin-bottom:10px;">
         <label>Date: <input type="date" id="cashbookDate" /></label>
         <label>Description: <input type="text" id="cashbookDesc" placeholder="Description" /></label>
+        <label>Bank/Cash Account: <select id="cashbookBankAccount"></select></label>
+        <label>Counterparty Account: <select id="cashbookCounterparty"></select></label>
         <label>Receipts amount (₦): <input type="number" id="cashbookReceiptsAmt" min="0" step="0.01" placeholder="0.00" /></label>
         <label>Payments amount (₦): <input type="number" id="cashbookPaymentsAmt" min="0" step="0.01" placeholder="0.00" /></label>
         <button class="small primary" id="btnAddCashbookEntry">Add Entry</button>
@@ -3531,6 +3533,27 @@
     }
     renderInventorySelect();
     renderAssetDisposeSelect();
+    populateCashbookDropdowns(b);
+  }
+
+  function populateCashbookDropdowns(b){
+    const bankSel = document.getElementById('cashbookBankAccount');
+    const cpSel = document.getElementById('cashbookCounterparty');
+    if(!bankSel || !cpSel || !b) return;
+    bankSel.innerHTML = '';
+    cpSel.innerHTML = '';
+    // Add blank option for counterparty
+    const blank = document.createElement('option'); blank.value = ''; blank.textContent = '-- None --';
+    cpSel.appendChild(blank);
+    for(const a of b.accounts){
+      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
+      bankSel.appendChild(opt);
+      const opt2 = opt.cloneNode(true);
+      cpSel.appendChild(opt2);
+    }
+    // Default bank account to "Bank"
+    const bankAcct = b.accounts.find(a => a.name === 'Bank');
+    if(bankAcct) bankSel.value = bankAcct.id;
   }
 
   function renderInventorySelect(){
@@ -3688,33 +3711,39 @@
     state.transactions[selectedUserId][selectedBizId].push(txn);
     addAudit('txn.add','txn',txn.id, `Added txn ${txn.action} ${txn.amount}`);
     
-    // For Part/Unpaid transactions, record outstanding amount to Accounts Receivable
+    // For Part/Unpaid transactions, record outstanding to Accounts Receivable (revenue) or Accounts Payable (expense)
     const b = findBiz(selectedBizId);
     if(b && (txn.paymentStatus === 'Part' || txn.paymentStatus === 'Unpaid')){
-      const receivableAcct = b.accounts.find(a => a.name === 'Receivable' && a.category === 'Asset');
-      if(receivableAcct){
-        const totalAmt = Number(txn.amount || 0);
-        const paidAmt = txn.paymentStatus === 'Part' ? Number(txn.partAmount || 0) : 0;
-        const outstanding = totalAmt - paidAmt;
-        if(outstanding > 0){
-          const arTxn = {
-            id: uid('txn'),
-            date: txn.date,
-            action: txn.action,
-            accountId: receivableAcct.id,
-            accountName: receivableAcct.name,
-            accountCategory: 'Asset',
-            description: `Outstanding: ${txn.description || ''}`,
-            amount: outstanding,
-            vatType: 'none',
-            whtApplied: false,
-            paye: false,
-            contact: txn.contact || '',
-            linkedTxnId: txn.id,
-            isReceivable: true
-          };
-          state.transactions[selectedUserId][selectedBizId].push(arTxn);
+      const isRevenue = txn.accountCategory === 'Revenue';
+      const isExpense = txn.accountCategory === 'Expense';
+      const totalAmt = Number(txn.amount || 0);
+      const paidAmt = txn.paymentStatus === 'Part' ? Number(txn.partAmount || 0) : 0;
+      const outstanding = totalAmt - paidAmt;
+      if(outstanding > 0 && (isRevenue || isExpense)){
+        const acctName = isRevenue ? 'Accounts Receivable' : 'Accounts Payable';
+        const acctCategory = isRevenue ? 'Asset' : 'Liability';
+        let outstandingAcct = b.accounts.find(a => a.name === acctName);
+        if(!outstandingAcct){
+          outstandingAcct = { id: uid('acct'), name: acctName, category: acctCategory, disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0 };
+          b.accounts.push(outstandingAcct);
         }
+        const outstandingTxn = {
+          id: uid('txn'),
+          date: txn.date,
+          action: txn.action,
+          accountId: outstandingAcct.id,
+          accountName: outstandingAcct.name,
+          accountCategory: acctCategory,
+          description: `Outstanding: ${txn.description || ''}`,
+          amount: outstanding,
+          vatType: 'none',
+          whtApplied: false,
+          paye: false,
+          contact: txn.contact || '',
+          linkedTxnId: txn.id,
+          isOutstanding: true
+        };
+        state.transactions[selectedUserId][selectedBizId].push(outstandingTxn);
       }
     }
     
@@ -3840,6 +3869,33 @@
           };
           state.transactions[selectedUserId][selectedBizId].push(cogsTxn);
           addAudit('txn.cogs','txn',cogsTxn.id,`Auto COGS for sale ${t.id}: ${cogsAmount}`,{ amount: cogsAmount, qty: t.qty, avgCost: avgCost });
+        }
+      }
+    }
+
+    // For Part/Unpaid inventory transactions, post outstanding to AR (sales) or AP (purchases)
+    if(t.paymentStatus === 'Part' || t.paymentStatus === 'Unpaid'){
+      const bInv = findBiz(selectedBizId);
+      if(bInv){
+        const isRevenue = t.action === 'InventorySale';
+        const totalAmt = Number(t.amount || 0);
+        const paidAmt = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : 0;
+        const outstanding = totalAmt - paidAmt;
+        if(outstanding > 0){
+          const acctName = isRevenue ? 'Accounts Receivable' : 'Accounts Payable';
+          const acctCategory = isRevenue ? 'Asset' : 'Liability';
+          let outstandingAcct = bInv.accounts.find(a => a.name === acctName);
+          if(!outstandingAcct){
+            outstandingAcct = { id: uid('acct'), name: acctName, category: acctCategory, disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0 };
+            bInv.accounts.push(outstandingAcct);
+          }
+          state.transactions[selectedUserId][selectedBizId].push({
+            id: uid('txn'), date: t.date, action: t.action,
+            accountId: outstandingAcct.id, accountName: outstandingAcct.name, accountCategory: acctCategory,
+            description: `Outstanding: ${t.description || ''}`, amount: outstanding,
+            vatType: 'none', whtApplied: false, paye: false, contact: t.contact || '',
+            linkedTxnId: t.id, isOutstanding: true
+          });
         }
       }
     }
@@ -3972,6 +4028,29 @@
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
     state.transactions[selectedUserId][selectedBizId].push(t);
     addAudit('asset.add','asset',t.id, `Added asset txn ${t.description}`, { amount: t.amount, qty: t.qty, assetId: t.assetId });
+    // For Part/Unpaid asset purchases, post outstanding to Accounts Payable
+    if((t.paymentStatus === 'Part' || t.paymentStatus === 'Unpaid') && t.action !== 'AssetDisposal'){
+      const bAsset = findBiz(selectedBizId);
+      if(bAsset){
+        const totalAmt = Number(t.amount || 0);
+        const paidAmt = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : 0;
+        const outstanding = totalAmt - paidAmt;
+        if(outstanding > 0){
+          let apAcct = bAsset.accounts.find(a => a.name === 'Accounts Payable');
+          if(!apAcct){
+            apAcct = { id: uid('acct'), name: 'Accounts Payable', category: 'Liability', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0 };
+            bAsset.accounts.push(apAcct);
+          }
+          state.transactions[selectedUserId][selectedBizId].push({
+            id: uid('txn'), date: t.date, action: t.action,
+            accountId: apAcct.id, accountName: apAcct.name, accountCategory: 'Liability',
+            description: `Outstanding: ${t.description || ''}`, amount: outstanding,
+            vatType: 'none', whtApplied: false, paye: false, contact: t.contact || '',
+            linkedTxnId: t.id, isOutstanding: true
+          });
+        }
+      }
+    }
     saveState();
     txnAction.value=''; assetPurchaseSubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -5081,14 +5160,14 @@
     }
 
     // CIT calculation with turnover threshold
-    // Compute turnover from Revenue transactions for the business
+    // Compute turnover from Revenue and InventorySale transactions for the business
     let computedTurnover = 0;
     for(const t of arr){
-      if(t.action === 'Revenue') {
+      if(t.action === 'Revenue' || t.action === 'InventorySale') {
         computedTurnover += Number(t.amount || 0);
       }
     }
-    const turnoverForCIT = computedTurnover; // Use derived Revenue turnover
+    const turnoverForCIT = computedTurnover; // Use derived Revenue+InventorySale turnover
     
     let citCharge = 0;
     let whtCarryForward = 0;
@@ -5213,6 +5292,7 @@
       html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover: ${fmt(turnoverForCIT)}</div>`;
       if(citOutstanding > 0) {
         html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CIT', ${citOutstanding})">Pay CIT (${fmt(citOutstanding)})</button>`;
+        html += `<button class="small" style="margin-top:6px;margin-left:6px;" onclick="createCITProvision(${citCharge})">Create CIT Provision</button>`;
       }
       html += `</div>`;
       
@@ -5369,10 +5449,45 @@
   
   // Make payTax available globally for inline onclick handlers
   window.payTax = payTax;
-  
+
   /**
-   * Handle manual cashbook entry (Receipts/Payments amount input)
+   * Create CIT provision entry: Dr Income Tax Expense, Cr CIT Provision (Liability)
+   * Shows under "Less tax" in P&L and as CIT Provision on balance sheet.
    */
+  function createCITProvision(citAmount) {
+    if(!selectedUserId || !selectedBizId) return alert('Please select a user and business');
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    const provisionAmt = prompt(`Enter CIT provision amount:\nComputed CIT: ${fmt(citAmount)}`, citAmount);
+    if(!provisionAmt || isNaN(provisionAmt) || Number(provisionAmt) <= 0) return;
+    const finalAmt = Number(provisionAmt);
+    // Find or create Income Tax Expense account
+    let taxExpAcct = b.accounts.find(a => a.name === 'Income Tax Expense');
+    if(!taxExpAcct){
+      taxExpAcct = { id: uid('acct'), name: 'Income Tax Expense', category: 'Expense', disallowableDefault: true, nonTaxableDefault: false };
+      b.accounts.push(taxExpAcct);
+    }
+    // Find or create CIT Provision (Liability)
+    let citProvAcct = b.accounts.find(a => a.name === 'CIT Provision');
+    if(!citProvAcct){
+      citProvAcct = { id: uid('acct'), name: 'CIT Provision', category: 'Liability', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0 };
+      b.accounts.push(citProvAcct);
+    }
+    const today = new Date().toISOString().split('T')[0];
+    // Dr Income Tax Expense
+    const expTxn = { id: uid('txn'), date: today, action: 'Expense', accountId: taxExpAcct.id, accountName: taxExpAcct.name, accountCategory: 'Expense', description: 'CIT Provision', amount: finalAmt, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isCITProvision: true };
+    // Cr CIT Provision (Liability)
+    const provTxn = { id: uid('txn'), date: today, action: 'Tax Payment', accountId: citProvAcct.id, accountName: citProvAcct.name, accountCategory: 'Liability', description: 'CIT Provision', amount: finalAmt, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isTaxPayment: true, isCITProvision: true };
+    state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
+    state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
+    state.transactions[selectedUserId][selectedBizId].push(expTxn, provTxn);
+    addAudit('cit.provision', 'transaction', expTxn.id, `CIT Provision: ${fmt(finalAmt)}`);
+    saveState();
+    renderAll();
+    alert(`CIT Provision of ${fmt(finalAmt)} created.\nDr Income Tax Expense | Cr CIT Provision.`);
+  }
+  window.createCITProvision = createCITProvision;
+
   function handleAddCashbookEntry() {
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
@@ -5381,31 +5496,41 @@
     const descEl = document.getElementById('cashbookDesc');
     const receiptsEl = document.getElementById('cashbookReceiptsAmt');
     const paymentsEl = document.getElementById('cashbookPaymentsAmt');
+    const bankAcctEl = document.getElementById('cashbookBankAccount');
+    const counterpartyEl = document.getElementById('cashbookCounterparty');
     const receiptsAmt = Number(receiptsEl && receiptsEl.value || 0);
     const paymentsAmt = Number(paymentsEl && paymentsEl.value || 0);
     if(receiptsAmt <= 0 && paymentsAmt <= 0) return alert('Enter a receipts or payments amount');
-    const bankAcct = b.accounts.find(a => a.name === 'Bank');
-    const txn = {
-      id: uid('txn'),
-      date: (dateEl && dateEl.value) || today(),
-      action: receiptsAmt > 0 ? 'Revenue' : 'Expense',
-      accountId: bankAcct ? bankAcct.id : '',
-      accountName: 'Bank',
-      accountCategory: receiptsAmt > 0 ? 'Revenue' : 'Expense',
-      description: (descEl && descEl.value) || (receiptsAmt > 0 ? 'Receipt' : 'Payment'),
-      amount: receiptsAmt > 0 ? receiptsAmt : paymentsAmt,
-      vatType: 'none',
-      whtApplied: false,
-      paye: false,
-      contact: '',
-      cashbookReceipts: receiptsAmt,
-      cashbookPayments: paymentsAmt,
-      isCashbookEntry: true
-    };
+    // Resolve bank account (default to "Bank")
+    const bankAcctId = bankAcctEl && bankAcctEl.value;
+    const bankAcct = (bankAcctId && b.accounts.find(a => a.id === bankAcctId)) || b.accounts.find(a => a.name === 'Bank');
+    // Resolve counterparty account
+    const cpAcctId = counterpartyEl && counterpartyEl.value;
+    const cpAcct = (cpAcctId && b.accounts.find(a => a.id === cpAcctId)) || null;
+    const txnDate = (dateEl && dateEl.value) || today();
+    const txnDesc = (descEl && descEl.value) || (receiptsAmt > 0 ? 'Receipt' : 'Payment');
+    const txnAmt = receiptsAmt > 0 ? receiptsAmt : paymentsAmt;
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
-    state.transactions[selectedUserId][selectedBizId].push(txn);
-    addAudit('cashbook.add', 'txn', txn.id, `Manual cashbook entry: receipts=${receiptsAmt} payments=${paymentsAmt}`);
+    if(receiptsAmt > 0){
+      // Dr Bank (receipt), Cr counterparty account
+      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Revenue', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: receiptsAmt, cashbookPayments: 0, isCashbookEntry: true };
+      state.transactions[selectedUserId][selectedBizId].push(bankTxn);
+      if(cpAcct){
+        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
+        state.transactions[selectedUserId][selectedBizId].push(cpTxn);
+      }
+      addAudit('cashbook.add', 'txn', bankTxn.id, `Cashbook receipt: ${txnAmt} to ${bankAcct ? bankAcct.name : 'Bank'}`);
+    } else {
+      // Dr counterparty account, Cr Bank (payment)
+      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Expense', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: paymentsAmt, isCashbookEntry: true };
+      state.transactions[selectedUserId][selectedBizId].push(bankTxn);
+      if(cpAcct){
+        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
+        state.transactions[selectedUserId][selectedBizId].push(cpTxn);
+      }
+      addAudit('cashbook.add', 'txn', bankTxn.id, `Cashbook payment: ${txnAmt} from ${bankAcct ? bankAcct.name : 'Bank'}`);
+    }
     saveState();
     if(dateEl) dateEl.value = today();
     if(descEl) descEl.value = '';
@@ -5633,6 +5758,8 @@
         if(acct.category === 'Asset'){
           // WHT Receivable is shown separately below; skip duplicate
           if(acct.name === 'WHT Receivable') continue;
+          // VAT Recoverable is shown separately as computed value; skip account balance to avoid double-count
+          if(acct.name === 'VAT Recoverable') continue;
           assets[acct.name] = balance;
         } else if(acct.category === 'Liability'){
           // Tax payable accounts handled by computed accruals section
@@ -5717,7 +5844,9 @@
           payeByContact[t.contact] = (payeByContact[t.contact] || 0) + amt;
         }
       }
-      const vatNetOutstanding = Math.max(0, (vatCollected - vatExpensePaid) - vatPaidToGovt + vatRefunded);
+      const vatRawNet = (vatCollected - vatExpensePaid) - vatPaidToGovt + vatRefunded;
+      const vatNetOutstanding = Math.max(0, vatRawNet);
+      const vatRecoverableBS = vatRawNet < 0 ? Math.abs(vatRawNet) : 0;
       const whtPayableOutstanding = Math.max(0, whtPayable - whtPaidToAuthority);
       let payeAnnualTotal = 0;
       for(const cName in payeByContact){
@@ -5743,7 +5872,7 @@
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
         let citCharge = 0;
         let computedTurnover = 0;
-        for(const t of arr){ if(t.action === 'Revenue') computedTurnover += Number(t.amount||0); }
+        for(const t of arr){ if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount||0); }
         if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) {
           citCharge = 0.25 * taxableProfit;
         } else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) {
@@ -5757,7 +5886,8 @@
       const totalAssetsAll = totalAccountAssets
         + (inventoryTotal > 0 ? inventoryTotal : 0)
         + (ppeNBV > 0 ? ppeNBV : 0)
-        + (whtReceivableNet > 0 ? whtReceivableNet : 0);
+        + (whtReceivableNet > 0 ? whtReceivableNet : 0)
+        + (vatRecoverableBS > 0 ? vatRecoverableBS : 0);
 
       const totalAccountLiabilities = Object.values(liabilities).reduce((s,v)=>s+v,0);
       const totalTaxLiabilities = vatNetOutstanding + whtPayableOutstanding + payeOutstanding + pitOutstanding + citOutstanding + cgtOutstanding;
@@ -5790,6 +5920,9 @@
       // WHT Receivable (credit against CIT/PIT)
       if(whtReceivableNet > 0)
         html += `<tr><td style="padding-left:20px;">WHT Receivable</td><td style="text-align:right;">${fmt(whtReceivableNet)}</td></tr>`;
+      // VAT Recoverable (reclassified from negative VAT payable)
+      if(vatRecoverableBS > 0)
+        html += `<tr><td style="padding-left:20px;">VAT Recoverable</td><td style="text-align:right;">${fmt(vatRecoverableBS)}</td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>Total Assets</strong></td><td style="text-align:right;"><strong>${fmt(totalAssetsAll)}</strong></td></tr>`;
 
       html += `<tr><td colspan="2" style="padding-top:10px;"></td></tr>`;
@@ -6222,6 +6355,9 @@
     // Taxable profit
     html += `<tr><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
     
+    // For Enterprise plans: show full breakdown; for others: show summarized from here
+    const isEnterprisePlan = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
+    if(isEnterprisePlan){
     // Statutory deductions
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
@@ -6244,6 +6380,11 @@
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply PIT Band</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    } else {
+    // Summarized section for Business/Company plans
+    html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
+    }
     
     // Final liability
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
@@ -6285,7 +6426,7 @@
       
       // Exclude tax payments from revenue/expenses
       if (!isTaxPayment) {
-        if(t.accountCategory === 'Revenue') {
+        if(t.accountCategory === 'Revenue' || t.action === 'InventorySale') {
           revenue += Number(t.amount || 0);
           const acctObj = findAccount(b, t.accountId);
           if(acctObj && acctObj.nonTaxableDefault) {
@@ -6397,9 +6538,16 @@
     
     html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
     
+    // For Enterprise plans: show full breakdown; for others: show summarized from taxable profit
+    const isEnterpriseCIT = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
+    if(isEnterpriseCIT){
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    } else {
+    html += `<tr><td style="padding-left:20px;">Tax liability at ${(citRate * 100).toFixed(0)}% CIT rate</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    }
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
@@ -6685,6 +6833,8 @@
       
       // Exclude COGS auto-generated transactions from cashbook (P&L only)
       if(t.isCOGS) continue;
+      // Exclude cashbook counterparty leg entries (P&L/ledger only, not cash movement)
+      if(t.isCashbookCounterparty) continue;
       
       // Compute gross amount including VAT for exclusive transactions
       const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
