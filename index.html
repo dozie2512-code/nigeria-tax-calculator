@@ -5533,7 +5533,7 @@
     const arr = (state.transactions[userId] && state.transactions[userId][bizId]) || [];
     let computedTurnover = 0;
     for(const t of arr){
-      if(t.isCITProvisionAuto) continue; // skip auto provision itself
+      if(t.isCITProvisionAuto || t.isOutstanding) continue; // skip auto provision and AR/AP legs
       if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount || 0);
     }
     const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
@@ -5559,8 +5559,8 @@
     const citCharge = Math.round(citRate * taxableProfit * 100) / 100;
     if(citCharge <= 0) return;
 
-    // Find existing auto provision expense transaction
-    const txns = state.transactions[userId][bizId];
+    // Find existing auto provision expense transaction (use arr which is guaranteed non-null)
+    const txns = arr;
     const existingExpIdx = txns.findIndex(t => t.isCITProvisionAuto && t.accountCategory === 'Expense');
     const existingProvIdx = txns.findIndex(t => t.isCITProvisionAuto && t.accountCategory === 'Liability');
 
@@ -5585,7 +5585,7 @@
 
     const today = new Date().toISOString().split('T')[0];
     const expTxn = { id: uid('txn'), date: today, action: 'Expense', accountId: taxExpAcct.id, accountName: taxExpAcct.name, accountCategory: 'Expense', description: 'CIT Provision (auto)', amount: citCharge, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isCITProvision: true, isCITProvisionAuto: true };
-    const provTxn = { id: uid('txn'), date: today, action: 'Tax Payment', accountId: citProvAcct.id, accountName: citProvAcct.name, accountCategory: 'Liability', description: 'CIT Provision (auto)', amount: citCharge, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isTaxPayment: true, isCITProvision: true, isCITProvisionAuto: true };
+    const provTxn = { id: uid('txn'), date: today, action: 'CITProvisionAccrual', accountId: citProvAcct.id, accountName: citProvAcct.name, accountCategory: 'Liability', description: 'CIT Provision (auto)', amount: citCharge, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isCITProvision: true, isCITProvisionAuto: true };
     txns.push(expTxn, provTxn);
     addAudit('cit.provision.auto', 'transaction', expTxn.id, `Auto CIT Provision: ${fmt(citCharge)}`);
   }
@@ -6927,16 +6927,18 @@
     
     // Get opening balance: sum opening balances of all bank/cash Asset accounts
     let balance = 0;
+    let namedBankFound = false;
     for(const a of (b.accounts || [])){
       if(a.category === 'Asset'){
         const nm = (a.name || '').toLowerCase();
         if(nm.includes('bank') || nm === 'cash' || nm.includes('petty cash')){
           balance += Number(a.openingBalance || 0);
+          namedBankFound = true;
         }
       }
     }
     // Fallback: if no bank/cash account found by name, use the first Asset account named 'Bank'
-    if(balance === 0){
+    if(!namedBankFound){
       const bankAcct = b.accounts.find(a => a.name === 'Bank' && a.category === 'Asset');
       if(bankAcct) balance = Number(bankAcct.openingBalance || 0);
     }
