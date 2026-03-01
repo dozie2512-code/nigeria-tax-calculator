@@ -1876,6 +1876,8 @@
         { name: 'Share of profit', category: 'Revenue' },
         { name: 'Receivable', category: 'Asset' },
         { name: 'Payable', category: 'Liability' },
+        { name: 'Accounts Receivable', category: 'Asset' },
+        { name: 'Accounts Payable', category: 'Liability' },
         { name: 'Capital', category: 'Capital' },
         { name: 'Accruals', category: 'Liability' },
         { name: 'Prepayment', category: 'Asset' },
@@ -1918,6 +1920,13 @@
       b.accounts.forEach(a => {
         if(a.name === 'Account Receivable') a.name = 'Receivable';
       });
+      // MIGRATION: Add Accounts Receivable / Accounts Payable if missing
+      if(!b.accounts.find(a => a.name === 'Accounts Receivable')){
+        b.accounts.push({ id: uid('acct'), name: 'Accounts Receivable', category: 'Asset', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0, closingBalance: 0 });
+      }
+      if(!b.accounts.find(a => a.name === 'Accounts Payable')){
+        b.accounts.push({ id: uid('acct'), name: 'Accounts Payable', category: 'Liability', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0, closingBalance: 0 });
+      }
     });
     
     // MIGRATION: Map Income action to Revenue in transactions (for backwards compatibility)
@@ -3230,6 +3239,8 @@
       newBiz.accounts.push({ id: uid('acct'), name:'VAT Recoverable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'VAT Payable', category:'Liability', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'WHT Receivable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'Accounts Receivable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
+      newBiz.accounts.push({ id: uid('acct'), name:'Accounts Payable', category:'Liability', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Sales Revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
@@ -3545,10 +3556,21 @@
     // Add blank option for counterparty
     const blank = document.createElement('option'); blank.value = ''; blank.textContent = '-- None --';
     cpSel.appendChild(blank);
-    for(const a of b.accounts){
+    // Bank/Cash Account selector: only accounts with 'bank' or 'cash' in their name (Asset category)
+    // Fall back to all Asset accounts if none found by name
+    const bankAccounts = b.accounts.filter(a => {
+      if(a.category !== 'Asset') return false;
+      const nm = (a.name || '').toLowerCase();
+      return nm.includes('bank') || nm === 'cash' || nm.includes('petty cash');
+    });
+    const bankSrcList = bankAccounts.length > 0 ? bankAccounts : b.accounts.filter(a => a.category === 'Asset');
+    for(const a of bankSrcList){
       const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name + ' ('+a.category+')';
       bankSel.appendChild(opt);
-      const opt2 = opt.cloneNode(true);
+    }
+    // Counterparty: all accounts
+    for(const a of b.accounts){
+      const opt2 = document.createElement('option'); opt2.value = a.id; opt2.textContent = a.name + ' ('+a.category+')';
       cpSel.appendChild(opt2);
     }
     // Default bank account to "Bank"
@@ -3747,6 +3769,7 @@
       }
     }
     
+    autoUpdateCITProvision(selectedBizId, selectedUserId);
     saveState();
     resetForms();
     txnAction.value=''; inventorySubform.style.display='none'; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
@@ -3900,6 +3923,7 @@
       }
     }
 
+    autoUpdateCITProvision(selectedBizId, selectedUserId);
     saveState();
     txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -4667,6 +4691,9 @@
       const accountName = acct?.name || t.accountName || '';
       const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
       
+      // Skip outstanding AR/AP legs and auto CIT provision entries
+      if(t.isOutstanding || t.isCITProvisionAuto) continue;
+      
       // Exclude tax payments from revenue/expenses
       if (!isTaxPayment) {
         if(t.accountCategory === 'Revenue') {
@@ -5002,6 +5029,9 @@
       const acct = findAccount(b, t.accountId);
       const accountName = acct?.name || t.accountName || '';
       
+      // Skip AR/AP outstanding legs and auto CIT provision entries (prevent double-counting / circular computation)
+      if(t.isOutstanding || t.isCITProvisionAuto) continue;
+
       // Check if this is a tax payment transaction
       const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
       
@@ -5163,6 +5193,7 @@
     // Compute turnover from Revenue and InventorySale transactions for the business
     let computedTurnover = 0;
     for(const t of arr){
+      if(t.isOutstanding || t.isCITProvisionAuto) continue; // skip AR/AP legs and auto provisions
       if(t.action === 'Revenue' || t.action === 'InventorySale') {
         computedTurnover += Number(t.amount || 0);
       }
@@ -5292,7 +5323,6 @@
       html += `<div class="small-note">CIT threshold: ${fmt(threshold)} | Turnover: ${fmt(turnoverForCIT)}</div>`;
       if(citOutstanding > 0) {
         html += `<button class="small primary" style="margin-top:6px;" onclick="payTax('CIT', ${citOutstanding})">Pay CIT (${fmt(citOutstanding)})</button>`;
-        html += `<button class="small" style="margin-top:6px;margin-left:6px;" onclick="createCITProvision(${citCharge})">Create CIT Provision</button>`;
       }
       html += `</div>`;
       
@@ -5488,6 +5518,78 @@
   }
   window.createCITProvision = createCITProvision;
 
+  /**
+   * Auto-generate or update the CIT provision entry whenever a transaction is saved.
+   * Called from pushTransaction and pushInventoryTxn.
+   * Creates: Dr Income Tax Expense | Cr CIT Provision (both flagged isCITProvision: true, isCITProvisionAuto: true)
+   * Updates the existing auto entry rather than creating duplicates.
+   */
+  function autoUpdateCITProvision(bizId, userId) {
+    const b = findBiz(bizId);
+    if(!b) return;
+    if(b.entity !== 'Company' || !b.citEnabled) return;
+
+    // Compute current turnover and CIT charge
+    const arr = (state.transactions[userId] && state.transactions[userId][bizId]) || [];
+    let computedTurnover = 0;
+    for(const t of arr){
+      if(t.isCITProvisionAuto || t.isOutstanding) continue; // skip auto provision and AR/AP legs
+      if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount || 0);
+    }
+    const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+    if(threshold === 0) return; // CIT_THRESHOLDS.NONE
+
+    let citRate = 0;
+    if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) citRate = 0.25;
+    else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) citRate = 0.30;
+
+    if(citRate === 0) return; // turnover below threshold — no provision needed
+
+    // Compute taxable profit (revenue minus expenses, excluding CIT provision itself)
+    let revenue = 0, expenses = 0;
+    for(const t of arr){
+      if(t.isCITProvisionAuto) continue;
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(t.accountName || '') || t.isTaxPayment;
+      if(isTaxPayment) continue;
+      if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income') revenue += Number(t.amount || 0);
+      else if(t.accountCategory === 'Expense' && !t.isCOGS) expenses += Number(t.amount || 0);
+      else if(t.isCOGS) expenses += Number(t.amount || 0);
+    }
+    const taxableProfit = Math.max(0, revenue - expenses);
+    const citCharge = Math.round(citRate * taxableProfit * 100) / 100;
+    if(citCharge <= 0) return;
+
+    // Find existing auto provision expense transaction (use arr which is guaranteed non-null)
+    const txns = arr;
+    const existingExpIdx = txns.findIndex(t => t.isCITProvisionAuto && t.accountCategory === 'Expense');
+    const existingProvIdx = txns.findIndex(t => t.isCITProvisionAuto && t.accountCategory === 'Liability');
+
+    if(existingExpIdx >= 0 && existingProvIdx >= 0) {
+      // Update amounts in place
+      txns[existingExpIdx].amount = citCharge;
+      txns[existingProvIdx].amount = citCharge;
+      return;
+    }
+
+    // Create the accounts if needed
+    let taxExpAcct = b.accounts.find(a => a.name === 'Income Tax Expense');
+    if(!taxExpAcct){
+      taxExpAcct = { id: uid('acct'), name: 'Income Tax Expense', category: 'Expense', disallowableDefault: true, nonTaxableDefault: false };
+      b.accounts.push(taxExpAcct);
+    }
+    let citProvAcct = b.accounts.find(a => a.name === 'CIT Provision');
+    if(!citProvAcct){
+      citProvAcct = { id: uid('acct'), name: 'CIT Provision', category: 'Liability', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0 };
+      b.accounts.push(citProvAcct);
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const expTxn = { id: uid('txn'), date: today, action: 'Expense', accountId: taxExpAcct.id, accountName: taxExpAcct.name, accountCategory: 'Expense', description: 'CIT Provision (auto)', amount: citCharge, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isCITProvision: true, isCITProvisionAuto: true };
+    const provTxn = { id: uid('txn'), date: today, action: 'CITProvisionAccrual', accountId: citProvAcct.id, accountName: citProvAcct.name, accountCategory: 'Liability', description: 'CIT Provision (auto)', amount: citCharge, vatType: 'none', whtApplied: false, paye: false, contact: 'Tax Authority', isCITProvision: true, isCITProvisionAuto: true };
+    txns.push(expTxn, provTxn);
+    addAudit('cit.provision.auto', 'transaction', expTxn.id, `Auto CIT Provision: ${fmt(citCharge)}`);
+  }
+
   function handleAddCashbookEntry() {
     if(!selectedUserId || !selectedBizId) return alert('Select user & business');
     const b = findBiz(selectedBizId);
@@ -5572,23 +5674,27 @@
 
     let totalRevenue = 0, totalCOGS = 0, totalOtherIncome = 0;
     let totalExpense = 0, totalTax = 0, totalDividend = 0, totalGeneralReserve = 0;
+    let totalCITProvision = 0;
     const revenueByAcct = {}, cogsAmt = {}, otherIncomeByAcct = {};
     const expenseByAcct = {}, taxByAcct = {}, dividendByAcct = {}, generalReserveByAcct = {};
+    const citProvisionByAcct = {};
 
     for(const t of arr) {
       const acctName = t.accountName || 'Other';
-      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(acctName);
+      const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(acctName) || t.isTaxPayment;
       const isCOGS = (acctName === 'COGS' || t.isCOGS) && t.accountCategory === 'Expense';
       const isDividend = isDividendAccount(acctName, t.accountCategory);
       const isGenReserve = isGeneralReserveAccount(acctName, t.accountCategory);
+      // CIT provision transactions are separated from regular expenses
+      const isCITProv = !!(t.isCITProvision && t.accountCategory === 'Expense');
       const amt = Number(t.amount || 0);
 
-      if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income') {
+      if(isTaxPayment) {
+        // Tax payments are balance-sheet only — excluded from P&L
+        continue;
+      } else if(t.accountCategory === 'Revenue' || t.accountCategory === 'Income') {
         revenueByAcct[acctName] = (revenueByAcct[acctName] || 0) + amt;
         totalRevenue += amt;
-      } else if(isTaxPayment) {
-        taxByAcct[acctName] = (taxByAcct[acctName] || 0) + amt;
-        totalTax += amt;
       } else if(isCOGS) {
         cogsAmt[acctName] = (cogsAmt[acctName] || 0) + amt;
         totalCOGS += amt;
@@ -5598,6 +5704,9 @@
       } else if(isGenReserve) {
         generalReserveByAcct[acctName] = (generalReserveByAcct[acctName] || 0) + amt;
         totalGeneralReserve += amt;
+      } else if(isCITProv) {
+        citProvisionByAcct[acctName] = (citProvisionByAcct[acctName] || 0) + amt;
+        totalCITProvision += amt;
       } else if(t.accountCategory === 'Expense') {
         expenseByAcct[acctName] = (expenseByAcct[acctName] || 0) + amt;
         totalExpense += amt;
@@ -5613,7 +5722,7 @@
 
     const grossProfit = totalRevenue - totalCOGS;
     const netProfitBeforeTax = grossProfit + totalOtherIncome - totalExpense;
-    const netProfitAfterTax = netProfitBeforeTax - totalTax;
+    const netProfitAfterTax = netProfitBeforeTax - totalCITProvision;
     const totalAppropriation = totalDividend + totalGeneralReserve;
     const retainedProfitForYear = netProfitAfterTax - totalAppropriation;
     const retainedProfitBF = Number((b && b.retainedProfitBF) || 0);
@@ -5621,6 +5730,7 @@
 
     return {
       totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve,
+      totalCITProvision, citProvisionByAcct,
       grossProfit, netProfitBeforeTax, netProfitAfterTax, totalAppropriation,
       retainedProfitForYear, retainedProfitBF, retainedProfitCF,
       revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct
@@ -5697,13 +5807,13 @@
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
 
-      // Tax
+      // CIT Provision (replaces old "Less: Tax" from payment entries)
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>less: Tax</strong></td><td></td></tr>`;
-      for(const [n,v] of Object.entries(pl.taxByAcct)){
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: CIT provision</strong></td><td></td></tr>`;
+      for(const [n,v] of Object.entries(pl.citProvisionByAcct || {})){
         html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      if(pl.totalTax === 0) {
+      if(!pl.totalCITProvision) {
         html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
@@ -5872,7 +5982,7 @@
         const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
         let citCharge = 0;
         let computedTurnover = 0;
-        for(const t of arr){ if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount||0); }
+        for(const t of arr){ if(!t.isOutstanding && !t.isCITProvisionAuto && (t.action === 'Revenue' || t.action === 'InventorySale')) computedTurnover += Number(t.amount||0); }
         if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) {
           citCharge = 0.25 * taxableProfit;
         } else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) {
@@ -6815,9 +6925,24 @@
     const b = findBiz(selectedBizId);
     if(!b){ tbody.innerHTML = '<tr><td colspan="5">Select a business</td></tr>'; return; }
     
-    // Get opening balance from Bank account
-    const bankAcct = b.accounts.find(a => a.name === 'Bank');
-    let balance = Number((bankAcct && bankAcct.openingBalance) || 0);
+    // Get opening balance: sum opening balances of all bank/cash Asset accounts
+    let balance = 0;
+    let namedBankFound = false;
+    for(const a of (b.accounts || [])){
+      if(a.category === 'Asset'){
+        const nm = (a.name || '').toLowerCase();
+        if(nm.includes('bank') || nm === 'cash' || nm.includes('petty cash')){
+          balance += Number(a.openingBalance || 0);
+          namedBankFound = true;
+        }
+      }
+    }
+    // Fallback: if no bank/cash account found by name, use the first Asset account named 'Bank'
+    if(!namedBankFound){
+      const bankAcct = b.accounts.find(a => a.name === 'Bank' && a.category === 'Asset');
+      if(bankAcct) balance = Number(bankAcct.openingBalance || 0);
+    }
+    const openingBalance = balance; // save for filtered view recalculation
     
     const arr = ((state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [])
       .slice().sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -6835,13 +6960,18 @@
       if(t.isCOGS) continue;
       // Exclude cashbook counterparty leg entries (P&L/ledger only, not cash movement)
       if(t.isCashbookCounterparty) continue;
+      // Exclude CIT provision entries — purely a P&L/balance-sheet accrual, no cash
+      if(t.isCITProvision) continue;
+      // Exclude outstanding AR/AP leg entries (non-cash portion)
+      if(t.isOutstanding) continue;
       
       // Compute gross amount including VAT for exclusive transactions
       const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
       const grossAmt = amount + vatAmt;
       
       if(action === 'Revenue' || action === 'Investment Income'){
-        receipts = grossAmt;
+        if(t.paymentStatus === 'Unpaid') continue;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
       } else if(action === 'Expense'){
         // Only record cash payments - unpaid/part transactions reduce payment by outstanding
         if(t.paymentStatus === 'Unpaid') continue;
@@ -6850,7 +6980,8 @@
         if(t.paymentStatus === 'Unpaid') continue;
         payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
       } else if(action === 'InventorySale'){
-        receipts = grossAmt;
+        if(t.paymentStatus === 'Unpaid') continue;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
       } else if(action === 'AssetPurchase' || action === 'OpeningAssetBal'){
         if(t.paymentStatus === 'Unpaid') continue;
         payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : amount;
@@ -6881,7 +7012,7 @@
 
     // For receipts/payments views, recalculate running balance
     if (view !== 'all') {
-      let runBal = Number((bankAcct && bankAcct.openingBalance) || 0);
+      let runBal = openingBalance;
       for (const row of filtered) {
         if (row.isOpening) { row.balance = runBal; continue; }
         runBal += row.receipts - row.payments;
@@ -9597,4 +9728,4 @@
 
   </script>
 </body>
-          </html>
+  </html>
