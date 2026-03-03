@@ -722,6 +722,7 @@
             <option value="AssetPurchase">Asset Purchase</option>
             <option value="AssetDisposal">Asset Disposal</option>
             <option value="OpeningAssetBal">Opening Asset Bal</option>
+            <option value="InventoryOpeningBal">Opening Bal (Inventory)</option>
           </select>
         </label>
 
@@ -818,6 +819,7 @@
 
           <label>Opening Qty: <input type="number" id="invOpeningQty" min="0" step="1" /></label>
           <label>Opening Avg Cost (₦): <input type="number" id="invOpeningAvgCost" min="0" step="0.01" /></label>
+          <label id="invOpeningAmountLabel">Opening Amount (₦): <input type="number" id="invOpeningAmount" min="0" step="0.01" readonly /></label>
 
           <label id="invVatLabel">VAT:
             <select id="invVatType">
@@ -2421,6 +2423,16 @@
     btnInvCancel.addEventListener('click', ()=>{ txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex'; resetForms(); });
     btnInvUndo.addEventListener('click', handleUndoInventory);
     
+    // Auto-compute Opening Amount when qty or avg cost changes
+    if(invOpeningQty && invOpeningAvgCost){
+      const calcOpeningAmount = () => {
+        const amtEl = document.getElementById('invOpeningAmount');
+        if(amtEl) amtEl.value = (Number(invOpeningQty.value||0) * Number(invOpeningAvgCost.value||0)).toFixed(2);
+      };
+      invOpeningQty.addEventListener('input', calcOpeningAmount);
+      invOpeningAvgCost.addEventListener('input', calcOpeningAmount);
+    }
+    
     // Inventory payment status toggle
     const invPaymentStatus = document.getElementById('invPaymentStatus');
     const invPartAmountLabel = document.getElementById('invPartAmountLabel');
@@ -3304,13 +3316,14 @@
       activeTab = 'cashbook';
       renderTab();
       txnAction.value = ''; // Reset dropdown
-    } else if(val === 'InventoryPurchase' || val === 'InventorySale'){
+    } else if(val === 'InventoryPurchase' || val === 'InventorySale' || val === 'InventoryOpeningBal'){
       mainTxnForm.style.display = 'none';
       inventorySubform.style.display = 'block';
       assetPurchaseSubform.style.display = 'none';
       assetDisposalSubform.style.display = 'none';
       populateAccountSelect();
       renderFeatureVisibility();
+      updateInventoryFormFields(val); // enable/disable fields and set defaults
     } else if(val === 'AssetPurchase' || val === 'OpeningAssetBal'){
       mainTxnForm.style.display = 'none';
       assetPurchaseSubform.style.display = 'block';
@@ -3383,6 +3396,53 @@
     if(bankAccount){
       if(assetPurchaseAccount) assetPurchaseAccount.value = bankAccount.id;
       if(assetDisposalAccount) assetDisposalAccount.value = bankAccount.id;
+    }
+  }
+
+  /**
+   * Updates inventory subform field enable/disable state and sets default accounts
+   * based on the selected inventory action (Purchase, Sale, or Opening Bal).
+   */
+  function updateInventoryFormFields(action) {
+    const b = findBiz(selectedBizId);
+    const invQtyEl = document.getElementById('invQty');
+    const invUnitPriceEl = document.getElementById('invUnitPrice');
+    const invOpeningQtyEl = document.getElementById('invOpeningQty');
+    const invOpeningAvgCostEl = document.getElementById('invOpeningAvgCost');
+    const invOpeningAmountLabelEl = document.getElementById('invOpeningAmountLabel');
+    const invVatLabelEl = document.getElementById('invVatLabel');
+    const invPayStatusLabelEl = document.getElementById('invPaymentStatusLabel');
+    const invPartAmtLabelEl = document.getElementById('invPartAmountLabel');
+
+    if(action === 'InventoryOpeningBal') {
+      // Opening balance: only opening qty/avg cost fields are active
+      if(invQtyEl) invQtyEl.disabled = true;
+      if(invUnitPriceEl) invUnitPriceEl.disabled = true;
+      if(invOpeningQtyEl) invOpeningQtyEl.disabled = false;
+      if(invOpeningAvgCostEl) invOpeningAvgCostEl.disabled = false;
+      if(invOpeningAmountLabelEl) invOpeningAmountLabelEl.style.display = '';
+      if(invVatLabelEl) invVatLabelEl.style.display = 'none';
+      if(invPayStatusLabelEl) invPayStatusLabelEl.style.display = 'none';
+      if(invPartAmtLabelEl) invPartAmtLabelEl.style.display = 'none';
+    } else {
+      // Purchase or Sale: qty/unit price active; opening fields disabled
+      if(invQtyEl) invQtyEl.disabled = false;
+      if(invUnitPriceEl) invUnitPriceEl.disabled = false;
+      if(invOpeningQtyEl) invOpeningQtyEl.disabled = true;
+      if(invOpeningAvgCostEl) invOpeningAvgCostEl.disabled = true;
+      if(invOpeningAmountLabelEl) invOpeningAmountLabelEl.style.display = 'none';
+      if(invVatLabelEl) invVatLabelEl.style.display = '';
+      if(invPayStatusLabelEl) invPayStatusLabelEl.style.display = '';
+      // Set default accounts based on action
+      if(b) {
+        if(action === 'InventoryPurchase') {
+          const bankAcct = b.accounts.find(a => a.name === 'Bank' && a.category === 'Asset');
+          if(bankAcct && invAccountSelect) invAccountSelect.value = bankAcct.id;
+        } else if(action === 'InventorySale') {
+          const salesAcct = b.accounts.find(a => a.category === 'Revenue');
+          if(salesAcct && invAccountSelect) invAccountSelect.value = salesAcct.id;
+        }
+      }
     }
   }
 
@@ -3624,6 +3684,8 @@
     if(txnAmortPeriodLabelEl) txnAmortPeriodLabelEl.style.display = 'none';
 
     invItemSelect.value=''; invNewName.value=''; invAccountSelect.selectedIndex=0; invQty.value=''; invUnitPrice.value=''; invVatType.value='none'; invContact.value=''; invReceipt.value=''; invOpeningQty.value=''; invOpeningAvgCost.value='';
+    const invOpeningAmtEl = document.getElementById('invOpeningAmount');
+    if(invOpeningAmtEl) invOpeningAmtEl.value = '';
     const invPayStatus = document.getElementById('invPaymentStatus');
     const invPartAmtLabel = document.getElementById('invPartAmountLabel');
     const invPartAmtEl = document.getElementById('invPartAmount');
@@ -3782,6 +3844,7 @@
     if(!selectedBizId) return alert('Select business');
     const b = findBiz(selectedBizId);
     const selectedItemId = invItemSelect.value;
+    const action = txnAction.value || 'InventoryPurchase';
     let inventoryItemId = null;
     let prevState = null; // Store previous inventory state for undo/delete reversal
     let isNewItem = false;
@@ -3789,16 +3852,17 @@
     if(selectedItemId === '__new__'){
       const name = (invNewName.value || '').trim();
       if(!name) return alert('New item name required');
-      const item = { id: uid('item'), name, qty: Number(invQty.value||0), avgCost: Number(invUnitPrice.value || 0) };
-      if(Number(invOpeningQty.value)){
-        item.qty = Number(invOpeningQty.value);
-        item.avgCost = Number(invOpeningAvgCost.value || item.avgCost);
+      let item;
+      if(action === 'InventoryOpeningBal') {
+        // Opening balance: set qty and avgCost from opening fields
+        item = { id: uid('item'), name, qty: Number(invOpeningQty.value||0), avgCost: Number(invOpeningAvgCost.value||0) };
+      } else {
+        item = { id: uid('item'), name, qty: Number(invQty.value||0), avgCost: Number(invUnitPrice.value || 0) };
       }
       b.inventory = b.inventory || [];
       b.inventory.push(item);
       inventoryItemId = item.id;
       isNewItem = true;
-      // For new items, store that this was a new item creation (no previous state)
       prevState = { isNewItem: true, itemId: item.id };
       addAudit('inv.add','inventory', item.id, `Added inventory ${item.name}`, { amount: item.qty * item.avgCost, qty: item.qty, avgCost: item.avgCost });
     } else {
@@ -3809,40 +3873,48 @@
       prevState = { isNewItem: false, itemId: item.id, prevQty: item.qty || 0, prevAvgCost: item.avgCost || 0 };
       const qty = Number(invQty.value || 0);
       const unit = Number(invUnitPrice.value || 0);
-      if(txnAction.value === 'InventoryPurchase'){
+      if(action === 'InventoryPurchase'){
         const existingValue = (item.qty || 0) * (item.avgCost || 0);
         const incomingValue = qty * unit;
         const newQty = (item.qty || 0) + qty;
         item.avgCost = newQty ? ((existingValue + incomingValue) / newQty) : item.avgCost;
         item.qty = newQty;
-      } else if(txnAction.value === 'InventorySale'){
+      } else if(action === 'InventorySale'){
         item.qty = (item.qty || 0) - qty;
         if(item.qty < 0) item.qty = 0;
+      } else if(action === 'InventoryOpeningBal'){
+        // Opening balance: set qty and avgCost directly
+        item.qty = Number(invOpeningQty.value||0);
+        item.avgCost = Number(invOpeningAvgCost.value||0);
       }
-      addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`, { amount: qty * unit, qty: qty, prevQty: prevState.prevQty, prevAvgCost: prevState.prevAvgCost });
+      addAudit('inv.update','inventory', item.id, `Inventory updated ${item.name}`, { action, qty: qty || Number(invOpeningQty.value||0), prevQty: prevState.prevQty, prevAvgCost: prevState.prevAvgCost });
     }
     const invPayStatus = document.getElementById('invPaymentStatus');
     const invPartAmt = document.getElementById('invPartAmount');
+    const isOpeningBal = action === 'InventoryOpeningBal';
     const t = { 
       id: uid('txn'), 
       date: today(), 
-      action: txnAction.value || 'InventoryPurchase', 
+      action: action, 
       accountId: invAccountSelect.value, 
       accountName: findAccount(b, invAccountSelect.value)?.name || '', 
       accountCategory: findAccount(b, invAccountSelect.value)?.category || '', 
       description: 'Inventory '+ (invNewName.value||findItemName(invItemSelect.value)), 
-      qty: Number(invQty.value||0), 
-      unitPrice: Number(invUnitPrice.value||0), 
-      amount: Number((invQty.value||0)*(invUnitPrice.value||0)), 
-      vatType: invVatType.value || 'none', 
+      qty: isOpeningBal ? Number(invOpeningQty.value||0) : Number(invQty.value||0), 
+      unitPrice: isOpeningBal ? Number(invOpeningAvgCost.value||0) : Number(invUnitPrice.value||0), 
+      amount: isOpeningBal
+        ? Number(invOpeningQty.value||0) * Number(invOpeningAvgCost.value||0)
+        : Number((invQty.value||0)*(invUnitPrice.value||0)), 
+      vatType: isOpeningBal ? 'none' : (invVatType.value || 'none'), 
       whtApplied: false, 
       paye: false, 
       contact: invContact.value || '',
-      paymentStatus: invPayStatus ? invPayStatus.value : 'Paid',
-      partAmount: (invPayStatus && invPayStatus.value === 'Part') ? Number(invPartAmt && invPartAmt.value || 0) : undefined,
+      paymentStatus: (isOpeningBal || !invPayStatus) ? 'Paid' : invPayStatus.value,
+      partAmount: (!isOpeningBal && invPayStatus && invPayStatus.value === 'Part') ? Number(invPartAmt && invPartAmt.value || 0) : undefined,
       receiptId: null, 
       inventoryItemId: inventoryItemId, 
-      inventoryPrevState: prevState 
+      inventoryPrevState: prevState,
+      isInventoryOpeningBal: isOpeningBal
     };
     if(invReceipt.files && invReceipt.files[0]){
       const r = invReceipt.files[0];
@@ -3963,7 +4035,14 @@
         // Revert inventory state before removing the transaction
         revertInventoryState(tx, b);
         arr.splice(i,1);
-        addAudit('txn.undo','txn',tx.id || '','Undo inventory txn - inventory state reverted', { amount: tx.amount, qty: tx.qty, action: tx.action });
+        // Also remove the auto-generated COGS entry linked to this sale
+        for(let j=arr.length-1;j>=0;j--){
+          if(arr[j].isCOGS && arr[j].linkedInventoryTxnId === tx.id){
+            arr.splice(j,1);
+            break;
+          }
+        }
+        addAudit('txn.undo','txn',tx.id || '','Undo inventory txn - inventory state and COGS reverted', { amount: tx.amount, qty: tx.qty, action: tx.action });
         saveState();
         renderAll();
         refreshAllReports();
@@ -5221,9 +5300,9 @@
       }
       // If threshold is 0 (NONE), CIT = 0
       
-      // Deduct WHT remitted (already paid) only if CIT was actually computed (turnover above threshold and CIT > 0)
+      // Deduct WHT receivable (withheld from income by clients) from CIT charge
       if(citCharge > 0) {
-        citCharge = Math.max(0, citCharge - whtPaidToAuthority);
+        citCharge = Math.max(0, citCharge - whtReceivable);
       } else {
         // CIT is 0% (turnover below threshold): carry forward WHT receivable to next period
         whtCarryForward = whtReceivable;
@@ -5235,8 +5314,8 @@
     if((b.entity === 'Business' || b.entity === 'Enterprise Plus' || b.entity === 'Enterprise') && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        // Deduct WHT remitted (already paid) from PIT charge
-        pitCharge = Math.max(0, pitLiability - whtPaidToAuthority);
+        // Deduct WHT receivable (withheld by clients) from PIT charge
+        pitCharge = Math.max(0, pitLiability - whtReceivable);
       }
     }
 
@@ -5680,6 +5759,8 @@
     const citProvisionByAcct = {};
 
     for(const t of arr) {
+      // Inventory opening balance is a stock adjustment — no P&L impact
+      if(t.isInventoryOpeningBal || t.action === 'InventoryOpeningBal') continue;
       const acctName = t.accountName || 'Other';
       const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(acctName) || t.isTaxPayment;
       const isCOGS = (acctName === 'COGS' || t.isCOGS) && t.accountCategory === 'Expense';
@@ -5718,6 +5799,24 @@
     if(depreciation > 0) {
       expenseByAcct['Depreciation'] = (expenseByAcct['Depreciation'] || 0) + depreciation;
       totalExpense += depreciation;
+    }
+
+    // Add asset disposal gains/losses to P&L (proceeds - NBV at disposal date)
+    if(b) {
+      for(const a of (b.assets || [])) {
+        if(a.disposed && a.disposal) {
+          const nbv = computeTaxWrittenDownValue(a, a.disposal.date || today());
+          const proceeds = Number(a.disposal.proceeds || 0);
+          const disposalPL = proceeds - nbv;
+          if(disposalPL > 0) {
+            otherIncomeByAcct['Profit on Disposal'] = (otherIncomeByAcct['Profit on Disposal'] || 0) + disposalPL;
+            totalOtherIncome += disposalPL;
+          } else if(disposalPL < 0) {
+            expenseByAcct['Loss on Disposal'] = (expenseByAcct['Loss on Disposal'] || 0) + Math.abs(disposalPL);
+            totalExpense += Math.abs(disposalPL);
+          }
+        }
+      }
     }
 
     const grossProfit = totalRevenue - totalCOGS;
@@ -5807,9 +5906,9 @@
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
 
-      // CIT Provision (replaces old "Less: Tax" from payment entries)
+      // Tax provision (CIT provision or income tax expense)
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
-      html += `<tr style="background:#f2f6fa;"><td><strong>less: CIT provision</strong></td><td></td></tr>`;
+      html += `<tr style="background:#f2f6fa;"><td><strong>less: Tax</strong></td><td></td></tr>`;
       for(const [n,v] of Object.entries(pl.citProvisionByAcct || {})){
         html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
@@ -5864,7 +5963,15 @@
 
       // Calculate balances for each account, excluding tax payable accounts (handled via accruals)
       for(const acct of b.accounts || []){
-        const balance = calculateAccountClosingBalance(acct, selectedBizId);
+        // For bank/cash accounts, use cashbook-style directional balance (receipts − payments)
+        const isBankCash = (acct.category === 'Asset' && (
+          (acct.name || '').toLowerCase().includes('bank') ||
+          (acct.name || '').toLowerCase() === 'cash' ||
+          (acct.name || '').toLowerCase().includes('petty cash')
+        ));
+        const balance = isBankCash
+          ? computeBankAccountBalance(acct, selectedBizId)
+          : calculateAccountClosingBalance(acct, selectedBizId);
         if(acct.category === 'Asset'){
           // WHT Receivable is shown separately below; skip duplicate
           if(acct.name === 'WHT Receivable') continue;
@@ -6434,6 +6541,9 @@
     html += `<p><strong>Tax Year:</strong> ${currentYear}</p>`;
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     
+    // For Enterprise plans: show full detailed breakdown
+    const isEnterprisePlan = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
+    if(isEnterprisePlan){
     // Accounting profit
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
     
@@ -6465,9 +6575,6 @@
     // Taxable profit
     html += `<tr><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
     
-    // For Enterprise plans: show full breakdown; for others: show summarized from here
-    const isEnterprisePlan = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
-    if(isEnterprisePlan){
     // Statutory deductions
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Less: Statutory Deductions</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Pension</td><td style="text-align:right;">${fmt(ded.pension)}</td></tr>`;
@@ -6491,8 +6598,9 @@
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     } else {
-    // Summarized section for Business/Company plans
-    html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
+    // Summary only for Business/Company plans
+    html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Apply PIT amount</td><td style="text-align:right;">${fmt(pitLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     }
     
@@ -6625,6 +6733,9 @@
     html += `<p><strong>Financial Year Ended:</strong> ${currentYear}</p>`;
     html += `<table style="width:100%;border-collapse:collapse;margin-top:16px;"><thead><tr><th style="text-align:left;">Description</th><th style="text-align:right;width:150px;">Amount (₦)</th></tr></thead><tbody>`;
     
+    // For Enterprise plans: show full breakdown; for Company/others: show summary only
+    const isEnterpriseCIT = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
+    if(isEnterpriseCIT){
     html += `<tr><td><strong>Accounting profit</strong></td><td style="text-align:right;"><strong>${fmt(accountingProfit)}</strong></td></tr>`;
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Add: Disallowable Expenses</strong></td></tr>`;
@@ -6648,14 +6759,13 @@
     
     html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
     
-    // For Enterprise plans: show full breakdown; for others: show summarized from taxable profit
-    const isEnterpriseCIT = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
-    if(isEnterpriseCIT){
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     } else {
-    html += `<tr><td style="padding-left:20px;">Tax liability at ${(citRate * 100).toFixed(0)}% CIT rate</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
+    // Summary only for Company: 4 key lines
+    html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Apply CIT amount (${(citRate * 100).toFixed(0)}%)</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
     }
     
@@ -6964,6 +7074,8 @@
       if(t.isCITProvision) continue;
       // Exclude outstanding AR/AP leg entries (non-cash portion)
       if(t.isOutstanding) continue;
+      // Exclude inventory opening balance entries — stock adjustment, no cash
+      if(t.isInventoryOpeningBal || action === 'InventoryOpeningBal') continue;
       
       // Compute gross amount including VAT for exclusive transactions
       const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
@@ -8642,6 +8754,35 @@
   
   // Make showPayeContactDeductions available globally for onclick handler
   window.showPayeContactDeductions = showPayeContactDeductions;
+
+  /**
+   * Computes the closing balance for a bank/cash account using cashbook-style
+   * directional logic (receipts add, payments subtract).
+   * Used in the Balance Sheet so that cashbook entries correctly feed into Bank.
+   */
+  function computeBankAccountBalance(account, bizId) {
+    const txns = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+    let balance = Number(account.openingBalance || 0);
+    for (const t of txns) {
+      if (t.accountId !== account.id) continue;
+      if (t.isCOGS || t.isCashbookCounterparty || t.isCITProvision || t.isOutstanding) continue;
+      const amt = Number(t.amount || 0);
+      const action = t.action || '';
+      let receipts = 0, payments = 0;
+      if (t.cashbookReceipts || t.cashbookPayments) {
+        receipts = Number(t.cashbookReceipts || 0);
+        payments = Number(t.cashbookPayments || 0);
+      } else if (action === 'Revenue' || action === 'Investment Income' || action === 'InventorySale' || action === 'AssetDisposal') {
+        receipts = amt;
+      } else if (action === 'Expense' || action === 'InventoryPurchase' || action === 'AssetPurchase' || action === 'OpeningAssetBal' || t.isTaxPayment) {
+        payments = amt;
+      } else if (action === 'InventoryOpeningBal') {
+        // Opening balance does not represent cash movement; skip
+      }
+      balance += receipts - payments;
+    }
+    return balance;
+  }
 
   /**
    * Calculate closing balance for an account based on transactions
