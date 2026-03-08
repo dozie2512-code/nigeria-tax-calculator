@@ -783,6 +783,7 @@
         <label id="txnWhtBasisLabel" style="display:none;">Basis:
           <select id="txnWhtBasis">
             <option value="gross">Gross</option>
+            <option value="net">Net</option>
           </select>
         </label>
         <label id="txnWhtRateLabel" style="display:none;">Rate (%) <input type="number" id="txnWhtRate" class="smallInput" min="0" step="0.01" /></label>
@@ -994,18 +995,13 @@
     <!-- Cashbook Section -->
     <section id="cashbookSection" class="panel section" style="display:none;">
       <h2 style="margin:0 0 8px 0;">Cashbook</h2>
-      <div class="tabbar" style="margin-bottom:10px;">
-        <button class="tab active" id="cashbookTabAll" onclick="switchCashbookTab('all')">All</button>
-        <button class="tab" id="cashbookTabReceipts" onclick="switchCashbookTab('receipts')">Receipts</button>
-        <button class="tab" id="cashbookTabPayments" onclick="switchCashbookTab('payments')">Payments</button>
-      </div>
       <div class="form-inline" style="margin-bottom:10px;">
         <label>Date: <input type="date" id="cashbookDate" /></label>
         <label>Description: <input type="text" id="cashbookDesc" placeholder="Description" /></label>
         <label>Bank/Cash Account: <select id="cashbookBankAccount"></select></label>
         <label>Counterparty Account: <select id="cashbookCounterparty"></select></label>
-        <label>Receipts amount (₦): <input type="number" id="cashbookReceiptsAmt" min="0" step="0.01" placeholder="0.00" /></label>
-        <label>Payments amount (₦): <input type="number" id="cashbookPaymentsAmt" min="0" step="0.01" placeholder="0.00" /></label>
+        <label>Amount (₦): <input type="number" id="cashbookAmt" min="0" step="0.01" placeholder="0.00" /></label>
+        <label>Type: <select id="cashbookType"><option value="receipt">Receipt</option><option value="payment">Payment</option></select></label>
         <button class="small primary" id="btnAddCashbookEntry">Add Entry</button>
       </div>
       <div class="table-scroll">
@@ -3870,7 +3866,7 @@
       }
     }
     
-    autoUpdateCITProvision(selectedBizId, selectedUserId);
+    // CIT charge is now computed directly in P&L; no auto provision needed
     saveState();
     resetForms();
     txnAction.value=''; inventorySubform.style.display='none'; assetPurchaseSubform.style.display='none'; assetDisposalSubform.style.display='none'; mainTxnForm.style.display='flex';
@@ -4034,7 +4030,7 @@
       }
     }
 
-    autoUpdateCITProvision(selectedBizId, selectedUserId);
+    // CIT charge is now computed directly in P&L; no auto provision needed
     saveState();
     txnAction.value=''; inventorySubform.style.display='none'; mainTxnForm.style.display='flex';
     resetForms();
@@ -5714,13 +5710,13 @@
     if(!b) return alert('Business not found');
     const dateEl = document.getElementById('cashbookDate');
     const descEl = document.getElementById('cashbookDesc');
-    const receiptsEl = document.getElementById('cashbookReceiptsAmt');
-    const paymentsEl = document.getElementById('cashbookPaymentsAmt');
+    const amtEl = document.getElementById('cashbookAmt');
+    const typeEl = document.getElementById('cashbookType');
     const bankAcctEl = document.getElementById('cashbookBankAccount');
     const counterpartyEl = document.getElementById('cashbookCounterparty');
-    const receiptsAmt = Number(receiptsEl && receiptsEl.value || 0);
-    const paymentsAmt = Number(paymentsEl && paymentsEl.value || 0);
-    if(receiptsAmt <= 0 && paymentsAmt <= 0) return alert('Enter a receipts or payments amount');
+    const txnAmt = Number(amtEl && amtEl.value || 0);
+    if(txnAmt <= 0) return alert('Enter an amount greater than zero');
+    const isReceipt = !typeEl || typeEl.value === 'receipt';
     // Resolve bank account (default to "Bank")
     const bankAcctId = bankAcctEl && bankAcctEl.value;
     const bankAcct = (bankAcctId && b.accounts.find(a => a.id === bankAcctId)) || b.accounts.find(a => a.name === 'Bank');
@@ -5728,13 +5724,17 @@
     const cpAcctId = counterpartyEl && counterpartyEl.value;
     const cpAcct = (cpAcctId && b.accounts.find(a => a.id === cpAcctId)) || null;
     const txnDate = (dateEl && dateEl.value) || today();
-    const txnDesc = (descEl && descEl.value) || (receiptsAmt > 0 ? 'Receipt' : 'Payment');
-    const txnAmt = receiptsAmt > 0 ? receiptsAmt : paymentsAmt;
+    const txnDesc = (descEl && descEl.value) || (isReceipt ? 'Receipt' : 'Payment');
     state.transactions[selectedUserId] = state.transactions[selectedUserId] || {};
     state.transactions[selectedUserId][selectedBizId] = state.transactions[selectedUserId][selectedBizId] || [];
-    if(receiptsAmt > 0){
-      // Dr Bank (receipt), Cr counterparty account
-      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Revenue', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: receiptsAmt, cashbookPayments: 0, isCashbookEntry: true };
+
+    // Double-entry posting rules:
+    //   Receipt + revenue/capital counterparty  => revenue/capital increases
+    //   Receipt + asset counterparty            => asset reduces
+    //   Payment + expense counterparty          => expense increases
+    //   Payment + liability/capital counterparty => liability/capital reduces
+    if(isReceipt){
+      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Revenue', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: txnAmt, cashbookPayments: 0, isCashbookEntry: true };
       state.transactions[selectedUserId][selectedBizId].push(bankTxn);
       if(cpAcct){
         const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
@@ -5742,8 +5742,7 @@
       }
       addAudit('cashbook.add', 'txn', bankTxn.id, `Cashbook receipt: ${txnAmt} to ${bankAcct ? bankAcct.name : 'Bank'}`);
     } else {
-      // Dr counterparty account, Cr Bank (payment)
-      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Expense', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: paymentsAmt, isCashbookEntry: true };
+      const bankTxn = { id: uid('txn'), date: txnDate, action: 'Expense', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: txnAmt, isCashbookEntry: true };
       state.transactions[selectedUserId][selectedBizId].push(bankTxn);
       if(cpAcct){
         const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
@@ -5754,8 +5753,7 @@
     saveState();
     if(dateEl) dateEl.value = today();
     if(descEl) descEl.value = '';
-    if(receiptsEl) receiptsEl.value = '';
-    if(paymentsEl) paymentsEl.value = '';
+    if(amtEl) amtEl.value = '';
     renderCashbook();
   }
 
@@ -5860,7 +5858,25 @@
 
     const grossProfit = totalRevenue - totalCOGS;
     const netProfitBeforeTax = grossProfit + totalOtherIncome - totalExpense;
-    const netProfitAfterTax = netProfitBeforeTax - totalCITProvision;
+
+    // Compute CIT Charge directly (replaces old CIT provision mechanism)
+    let citCharge = 0;
+    if(b && b.entity === 'Company' && b.citEnabled) {
+      const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
+      let computedTurnover = 0;
+      for(const t of arr) {
+        if(!t.isCITProvisionAuto && !t.isOutstanding) {
+          if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount || 0);
+        }
+      }
+      const citRate = (threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) ? 0.25 :
+                      (threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) ? 0.30 : 0;
+      if(citRate > 0) {
+        citCharge = Math.round(citRate * Math.max(0, netProfitBeforeTax) * 100) / 100;
+      }
+    }
+
+    const netProfitAfterTax = netProfitBeforeTax - citCharge;
     const totalAppropriation = totalDividend + totalGeneralReserve;
     const retainedProfitForYear = netProfitAfterTax - totalAppropriation;
     const retainedProfitBF = Number((b && b.retainedProfitBF) || 0);
@@ -5868,7 +5884,7 @@
 
     return {
       totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve,
-      totalCITProvision, citProvisionByAcct,
+      totalCITProvision, citProvisionByAcct, citCharge,
       grossProfit, netProfitBeforeTax, netProfitAfterTax, totalAppropriation,
       retainedProfitForYear, retainedProfitBF, retainedProfitCF,
       revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct
@@ -5945,13 +5961,12 @@
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
 
-      // Tax provision (CIT provision or income tax expense)
+      // Tax: show computed CIT Charge (replaces old CIT provision entries)
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>less: Tax</strong></td><td></td></tr>`;
-      for(const [n,v] of Object.entries(pl.citProvisionByAcct || {})){
-        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
-      }
-      if(!pl.totalCITProvision) {
+      if(pl.citCharge > 0) {
+        html += `<tr><td style="padding-left:20px;">CIT Charge</td><td style="text-align:right;">(${fmt(pl.citCharge)})</td></tr>`;
+      } else {
         html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
@@ -6020,6 +6035,8 @@
         } else if(acct.category === 'Liability'){
           // Tax payable accounts handled by computed accruals section
           if(taxPayableAcctNames.includes(acct.name)) continue;
+          // CIT Provision is replaced by computed CIT Charge; exclude from balance sheet liabilities
+          if(acct.name === 'CIT Provision') continue;
           liabilities[acct.name] = balance;
         } else if(acct.category === 'Capital'){
           capital[acct.name] = balance;
@@ -6227,6 +6244,27 @@
   
   // Make showFinancialSubReport available globally
   window.showFinancialSubReport = showFinancialSubReport;
+
+  /** Toggle the Net VAT Flow breakdown in the VAT report */
+  function toggleVatNetDetail() {
+    const d = document.getElementById('vatNetDetail');
+    if(d) d.style.display = d.style.display === 'none' ? 'block' : 'none';
+  }
+  window.toggleVatNetDetail = toggleVatNetDetail;
+
+  /** Toggle WHT Collected breakdown in WHT report */
+  function toggleWhtCollectedDetail() {
+    const d = document.getElementById('whtCollectedDetail');
+    if(d) d.style.display = d.style.display === 'none' ? 'block' : 'none';
+  }
+  window.toggleWhtCollectedDetail = toggleWhtCollectedDetail;
+
+  /** Toggle WHT Suffered breakdown in WHT report */
+  function toggleWhtSufferedDetail() {
+    const d = document.getElementById('whtSufferedDetail');
+    if(d) d.style.display = d.style.display === 'none' ? 'block' : 'none';
+  }
+  window.toggleWhtSufferedDetail = toggleWhtSufferedDetail;
   
   /**
    * Check if the current business is on the Enterprise Plus plan.
@@ -7057,13 +7095,10 @@
   /** Current cashbook view tab: 'all' | 'receipts' | 'payments' */
   let cashbookView = 'all';
 
+
   /** Switches the cashbook tab view and re-renders. */
   function switchCashbookTab(view) {
     cashbookView = view;
-    ['all', 'receipts', 'payments'].forEach(v => {
-      const btn = document.getElementById('cashbookTab' + v.charAt(0).toUpperCase() + v.slice(1));
-      if (btn) btn.classList.toggle('active', v === view);
-    });
     renderCashbook();
   }
   window.switchCashbookTab = switchCashbookTab;
@@ -7119,20 +7154,34 @@
       // Compute gross amount including VAT for exclusive transactions
       const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
       const grossAmt = amount + vatAmt;
-      
+
+      // When WHT is applied and fully paid, cashbook reflects net cash (grossAmt minus WHT)
+      // WHT amount is remitted separately to tax authority, not part of cash movement
+      let whtDeduction = 0;
+      if(t.whtApplied && t.paymentStatus !== 'Unpaid'){
+        const whtRate = Number(t.whtRate || b.whtRate);
+        const whtBasis = t.whtBasis || 'gross';
+        // For net basis, amount stored is already grossed up; WHT = amount - netAmount
+        if(whtBasis === 'net' && t.netAmount != null) {
+          whtDeduction = amount - Number(t.netAmount);
+        } else {
+          whtDeduction = computeWHT(amount, whtBasis, whtRate);
+        }
+      }
+
       if(action === 'Revenue' || action === 'Investment Income'){
         if(t.paymentStatus === 'Unpaid') continue;
-        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
       } else if(action === 'Expense'){
         // Only record cash payments - unpaid/part transactions reduce payment by outstanding
         if(t.paymentStatus === 'Unpaid') continue;
-        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
       } else if(action === 'InventoryPurchase'){
         if(t.paymentStatus === 'Unpaid') continue;
-        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
       } else if(action === 'InventorySale'){
         if(t.paymentStatus === 'Unpaid') continue;
-        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : grossAmt;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
       } else if(action === 'AssetPurchase' || action === 'OpeningAssetBal'){
         if(t.paymentStatus === 'Unpaid') continue;
         payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : amount;
@@ -7152,27 +7201,8 @@
       rows.push({ date: t.date||'', desc: t.description||t.action||'', receipts, payments, balance });
     }
     
-    // Filter rows based on cashbook view
-    const view = cashbookView || 'all';
-    const filtered = rows.filter(row => {
-      if (row.isOpening) return true; // always show opening balance
-      if (view === 'receipts') return row.receipts > 0;
-      if (view === 'payments') return row.payments > 0;
-      return true;
-    });
-
-    // For receipts/payments views, recalculate running balance
-    if (view !== 'all') {
-      let runBal = openingBalance;
-      for (const row of filtered) {
-        if (row.isOpening) { row.balance = runBal; continue; }
-        runBal += row.receipts - row.payments;
-        row.balance = runBal;
-      }
-    }
-    
     tbody.innerHTML = '';
-    for(const row of filtered){
+    for(const row of rows){
       const tr = document.createElement('tr');
       if(row.isOpening) tr.style.fontWeight='bold';
       tr.innerHTML = `<td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.desc)}</td>` +
@@ -8249,60 +8279,63 @@
     if(name === 'vatReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       let html = `<h3>VAT Report</h3>`;
-      
-      // Summary section at the top
+
+      // Calculate totals
       let totalVATCollected = 0;
       let totalVATPaid = 0;
-      
-      // Calculate totals first
+      let vatRemitted = 0;
+      const collectedTxns = [];
+      const paidTxns = [];
+
       for(const t of arr){
+        const acctName = t.accountName || '';
+        if(acctName === 'VAT Paid') { vatRemitted += Number(t.amount||0); continue; }
+        if(acctName === 'VAT Refunded') { vatRemitted -= Number(t.amount||0); continue; }
         if(t.vatType && t.vatType !== 'none'){
           const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
           if(t.accountCategory === 'Revenue'){
             totalVATCollected += vat;
+            collectedTxns.push({ date: t.date, description: t.description||'', contact: t.contact||'', amount: t.amount, vat });
           } else if(t.accountCategory === 'Expense'){
             totalVATPaid += vat;
+            paidTxns.push({ date: t.date, description: t.description||'', contact: t.contact||'', amount: t.amount, vat });
           }
         }
       }
-      
+
       const vatNet = totalVATCollected - totalVATPaid;
-      
-      // Display summary
+
+      // Summary cards
       html += `<div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-bottom:16px;">`;
-      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">`;
+      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">`;
       html += `<div><strong>VAT Collected:</strong><br/><span style="font-size:1.2rem;color:#059669;">${fmt(totalVATCollected)}</span></div>`;
       html += `<div><strong>VAT Paid:</strong><br/><span style="font-size:1.2rem;color:#dc2626;">${fmt(totalVATPaid)}</span></div>`;
-      html += `<div><strong>Net VAT Flow:</strong><br/><span style="font-size:1.2rem;font-weight:700;color:${vatNet >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(vatNet)}</span></div>`;
+      html += `<div><strong>Net VAT Flow:</strong><br/><button class="small" onclick="toggleVatNetDetail()" style="font-size:1.1rem;font-weight:700;color:${vatNet>=0?'#0b76d1':'#dc2626'};background:none;border:none;cursor:pointer;padding:0;text-decoration:underline dotted;">${fmt(vatNet)}</button><br/><small style="color:#64748b;">${vatNet>=0?'Payable to authority':'Refund due'} — click to expand</small></div>`;
+      html += `<div><strong>VAT Remitted:</strong><br/><span style="font-size:1.2rem;color:#64748b;">${fmt(vatRemitted)}</span><br/><small style="color:#64748b;">Paid to tax authority</small></div>`;
       html += `</div>`;
-      html += `<div class="small-note" style="margin-top:8px;">${vatNet >= 0 ? 'VAT payable to tax authority' : 'VAT refund due'}</div>`;
       html += `</div>`;
-      
-      html += `<h4>Sales (VAT Collected)</h4>`;
+
+      // Clickable breakdown for Net VAT Flow (hidden by default)
+      html += `<div id="vatNetDetail" style="display:none;margin-top:8px;">`;
+      html += `<h4>VAT Collected Transactions</h4>`;
       html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
-      totalVATCollected = 0; // Reset for detailed list
-      for(const t of arr){
-        if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Revenue'){
-          const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
-          totalVATCollected += vat;
-          html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
-        }
+      for(const r of collectedTxns){
+        html += `<tr><td>${r.date}</td><td>${escapeHtml(r.description)}</td><td>${escapeHtml(r.contact)}</td><td style="text-align:right;">${fmt(r.amount)}</td><td style="text-align:right;">${fmt(r.vat)}</td></tr>`;
       }
-      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Collected</th><th>${fmt(totalVATCollected)}</th></tr></tfoot></table>`;
-      
-      html += `<h4 style="margin-top:16px;">Purchases (VAT Paid)</h4>`;
+      if(collectedTxns.length === 0) html += `<tr><td colspan="5" style="color:#64748b;">No VAT-inclusive sales</td></tr>`;
+      html += `</tbody><tfoot><tr><th colspan="4">Total</th><th style="text-align:right;">${fmt(totalVATCollected)}</th></tr></tfoot></table>`;
+      html += `<h4 style="margin-top:16px;">VAT Paid Transactions</h4>`;
       html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Description</th><th>Contact</th><th>Amount</th><th>VAT</th></tr></thead><tbody>`;
-      totalVATPaid = 0; // Reset for detailed list
-      for(const t of arr){
-        if(t.vatType && t.vatType !== 'none' && t.accountCategory === 'Expense'){
-          const vat = computeVAT(Number(t.amount||0), t.vatType, b.vatRate);
-          totalVATPaid += vat;
-          html += `<tr><td>${t.date}</td><td>${t.description||''}</td><td>${t.contact||''}</td><td>${fmt(t.amount)}</td><td>${fmt(vat)}</td></tr>`;
-        }
+      for(const r of paidTxns){
+        html += `<tr><td>${r.date}</td><td>${escapeHtml(r.description)}</td><td>${escapeHtml(r.contact)}</td><td style="text-align:right;">${fmt(r.amount)}</td><td style="text-align:right;">${fmt(r.vat)}</td></tr>`;
       }
-      html += `</tbody><tfoot><tr><th colspan="4">Total VAT Paid</th><th>${fmt(totalVATPaid)}</th></tr></tfoot></table>`;
+      if(paidTxns.length === 0) html += `<tr><td colspan="5" style="color:#64748b;">No VAT-inclusive purchases</td></tr>`;
+      html += `</tbody><tfoot><tr><th colspan="4">Total</th><th style="text-align:right;">${fmt(totalVATPaid)}</th></tr></tfoot></table>`;
+      html += `</div>`;
+
       reportContent.innerHTML = html;
-      
+
+
     } else if(name === 'whtPayable'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       let html = `<h3>WHT Payable Report</h3>`;
@@ -8341,80 +8374,57 @@
       // Unified WHT Report combining payable and receivable
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       let html = `<h3>WHT Report (Withholding Tax)</h3>`;
-      
-      // Calculate totals first
+
+      // Calculate totals and collect transactions
       let totalWHTCollected = 0; // WHT deducted from customers (payable to tax authority)
       let totalWHTSuffered = 0;  // WHT paid to suppliers (recoverable/credit)
-      
-      const whtCollectedByRate = {};
-      const whtSufferedByRate = {};
-      
+      const collectedRows = [];
+      const sufferedRows = [];
+
       for(const t of arr){
         if(t.whtApplied){
           const rate = Number(t.whtRate || b.whtRate);
           const basis = t.whtBasis || 'gross';
           const wht = computeWHT(Number(t.amount||0), basis, rate);
-          
           if(t.accountCategory === 'Revenue'){
             totalWHTCollected += wht;
-            whtCollectedByRate[rate] = (whtCollectedByRate[rate] || 0) + wht;
+            collectedRows.push({ date: t.date, contact: t.contact||'', description: t.description||'', rate, amount: t.amount, wht });
           } else if(t.accountCategory === 'Expense'){
             totalWHTSuffered += wht;
-            whtSufferedByRate[rate] = (whtSufferedByRate[rate] || 0) + wht;
+            sufferedRows.push({ date: t.date, contact: t.contact||'', description: t.description||'', rate, amount: t.amount, wht });
           }
         }
       }
-      
-      const whtNet = totalWHTCollected - totalWHTSuffered;
-      
-      // Summary section
+
+      // Summary section — no Net WHT Position per requirements
       html += `<div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-bottom:16px;">`;
       html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">`;
-      html += `<div><strong>WHT Collected:</strong><br/><span style="font-size:1.2rem;color:#059669;">${fmt(totalWHTCollected)}</span><br/><span class="small-muted">Deducted by customer</span></div>`;
-      html += `<div><strong>WHT Suffered:</strong><br/><span style="font-size:1.2rem;color:#dc2626;">${fmt(totalWHTSuffered)}</span><br/><span class="small-muted">Paid for supplier</span></div>`;
-      html += `<div><strong>Net WHT Position:</strong><br/><span style="font-size:1.2rem;font-weight:700;color:${whtNet >= 0 ? '#0b76d1' : '#dc2626'};">${fmt(whtNet)}</span><br/><span class="small-muted">${whtNet >= 0 ? 'Payable to tax authority' : 'Credit available'}</span></div>`;
+      html += `<div><strong>WHT Collected:</strong><br/><button class="small" onclick="toggleWhtCollectedDetail()" style="font-size:1.2rem;color:#059669;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline dotted;">${fmt(totalWHTCollected)}</button><br/><small style="color:#64748b;">Deducted by customer — click to expand</small></div>`;
+      html += `<div><strong>WHT Suffered:</strong><br/><button class="small" onclick="toggleWhtSufferedDetail()" style="font-size:1.2rem;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline dotted;">${fmt(totalWHTSuffered)}</button><br/><small style="color:#64748b;">Paid for supplier — click to expand</small></div>`;
       html += `</div>`;
       html += `</div>`;
-      
-      // WHT Collected (from revenue) - breakdown by rate
-      html += `<h4>WHT Collected (Deducted by Customer)</h4>`;
-      if(Object.keys(whtCollectedByRate).length > 0){
-        html += `<div style="margin-bottom:8px;">`;
-        for(const rate in whtCollectedByRate){
-          html += `<span style="display:inline-block;margin-right:16px;"><strong>${rate}%:</strong> ${fmt(whtCollectedByRate[rate])}</span>`;
-        }
-        html += `</div>`;
-      }
+
+      // WHT Collected breakdown (hidden by default)
+      html += `<div id="whtCollectedDetail" style="display:none;margin-top:8px;">`;
+      html += `<h4>WHT Collected Breakdown (Deducted by Customer)</h4>`;
       html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Contact</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT</th></tr></thead><tbody>`;
-      for(const t of arr){
-        if(t.whtApplied && t.accountCategory === 'Revenue'){
-          const rate = Number(t.whtRate || b.whtRate);
-          const basis = t.whtBasis || 'gross';
-          const wht = computeWHT(Number(t.amount||0), basis, rate);
-          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
-        }
+      for(const r of collectedRows){
+        html += `<tr><td>${r.date}</td><td>${escapeHtml(r.contact)}</td><td>${escapeHtml(r.description)}</td><td>${r.rate}</td><td style="text-align:right;">${fmt(r.amount)}</td><td style="text-align:right;">${fmt(r.wht)}</td></tr>`;
       }
-      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Collected</th><th>${fmt(totalWHTCollected)}</th></tr></tfoot></table>`;
-      
-      // WHT Suffered (from expenses) - breakdown by rate
-      html += `<h4 style="margin-top:16px;">WHT Suffered (Paid for Supplier)</h4>`;
-      if(Object.keys(whtSufferedByRate).length > 0){
-        html += `<div style="margin-bottom:8px;">`;
-        for(const rate in whtSufferedByRate){
-          html += `<span style="display:inline-block;margin-right:16px;"><strong>${rate}%:</strong> ${fmt(whtSufferedByRate[rate])}</span>`;
-        }
-        html += `</div>`;
-      }
+      if(collectedRows.length === 0) html += `<tr><td colspan="6" style="color:#64748b;">No transactions with WHT collected</td></tr>`;
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Collected</th><th style="text-align:right;">${fmt(totalWHTCollected)}</th></tr></tfoot></table>`;
+      html += `</div>`;
+
+      // WHT Suffered breakdown (hidden by default)
+      html += `<div id="whtSufferedDetail" style="display:none;margin-top:8px;">`;
+      html += `<h4>WHT Suffered Breakdown (Paid for Supplier)</h4>`;
       html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Rate %</th><th>Gross</th><th>WHT</th></tr></thead><tbody>`;
-      for(const t of arr){
-        if(t.whtApplied && t.accountCategory === 'Expense'){
-          const rate = Number(t.whtRate || b.whtRate);
-          const basis = t.whtBasis || 'gross';
-          const wht = computeWHT(Number(t.amount||0), basis, rate);
-          html += `<tr><td>${t.date}</td><td>${t.contact||''}</td><td>${t.description||''}</td><td>${rate}</td><td>${fmt(t.amount)}</td><td>${fmt(wht)}</td></tr>`;
-        }
+      for(const r of sufferedRows){
+        html += `<tr><td>${r.date}</td><td>${escapeHtml(r.contact)}</td><td>${escapeHtml(r.description)}</td><td>${r.rate}</td><td style="text-align:right;">${fmt(r.amount)}</td><td style="text-align:right;">${fmt(r.wht)}</td></tr>`;
       }
-      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Suffered</th><th>${fmt(totalWHTSuffered)}</th></tr></tfoot></table>`;
+      if(sufferedRows.length === 0) html += `<tr><td colspan="6" style="color:#64748b;">No transactions with WHT suffered</td></tr>`;
+      html += `</tbody><tfoot><tr><th colspan="5">Total WHT Suffered</th><th style="text-align:right;">${fmt(totalWHTSuffered)}</th></tr></tfoot></table>`;
+      html += `</div>`;
       reportContent.innerHTML = html;
       
     } else if(name === 'citReport'){
@@ -8795,6 +8805,7 @@
    * Used in the Balance Sheet so that cashbook entries correctly feed into Bank.
    */
   function computeBankAccountBalance(account, bizId) {
+    const b = findBiz(bizId);
     const txns = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
     let balance = Number(account.openingBalance || 0);
     for (const t of txns) {
@@ -8803,13 +8814,26 @@
       const amt = Number(t.amount || 0);
       const action = t.action || '';
       let receipts = 0, payments = 0;
+
+      // WHT deduction: when WHT applied and paid, cashbook reflects net cash
+      let whtDeduction = 0;
+      if(t.whtApplied && t.paymentStatus !== 'Unpaid' && b){
+        const whtRate = Number(t.whtRate || b.whtRate);
+        const whtBasis = t.whtBasis || 'gross';
+        if(whtBasis === 'net' && t.netAmount != null) {
+          whtDeduction = amt - Number(t.netAmount);
+        } else {
+          whtDeduction = computeWHT(amt, whtBasis, whtRate);
+        }
+      }
+
       if (t.cashbookReceipts || t.cashbookPayments) {
         receipts = Number(t.cashbookReceipts || 0);
         payments = Number(t.cashbookPayments || 0);
       } else if (action === 'Revenue' || action === 'Investment Income' || action === 'InventorySale' || action === 'AssetDisposal') {
-        receipts = amt;
+        receipts = Math.max(0, amt - whtDeduction);
       } else if (action === 'Expense' || action === 'InventoryPurchase' || action === 'AssetPurchase' || action === 'OpeningAssetBal' || t.isTaxPayment) {
-        payments = amt;
+        payments = Math.max(0, amt - whtDeduction);
       } else if (action === 'InventoryOpeningBal') {
         // Opening balance does not represent cash movement; skip
       }
