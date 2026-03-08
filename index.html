@@ -1960,6 +1960,22 @@
       if(!b.accounts.find(a => a.name === 'Accounts Payable')){
         b.accounts.push({ id: uid('acct'), name: 'Accounts Payable', category: 'Liability', disallowableDefault: false, nonTaxableDefault: false, openingBalance: 0, closingBalance: 0 });
       }
+      
+      // MIGRATION: Add appropriation accounts (Expense category) if missing
+      if(!b.accounts.find(a => a.name === 'Dividend' && a.category === 'Expense')){
+        b.accounts.push({ id: uid('acct'), name: 'Dividend', category: 'Expense', disallowableDefault: false, nonTaxableDefault: false });
+      }
+      if(!b.accounts.find(a => a.name === 'General Reserve')){
+        b.accounts.push({ id: uid('acct'), name: 'General Reserve', category: 'Expense', disallowableDefault: false, nonTaxableDefault: false });
+      }
+      if(!b.accounts.find(a => a.name === 'Other Reserve')){
+        b.accounts.push({ id: uid('acct'), name: 'Other Reserve', category: 'Expense', disallowableDefault: false, nonTaxableDefault: false });
+      }
+      
+      // MIGRATION: Set enterpriseFinType default for Enterprise entities
+      if ((b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') && !b.enterpriseFinType) {
+        b.enterpriseFinType = 'Company';
+      }
     });
     
     // MIGRATION: Map Income action to Revenue in transactions (for backwards compatibility)
@@ -3023,7 +3039,9 @@
     const btnPayablesTab = document.getElementById('btnPayablesTab');
     
     if(btnBankReconciliationTab) btnBankReconciliationTab.addEventListener('click', ()=> {
-      if(!isEnterprisePlus()) { alert('Bank Reconciliation is available on the Enterprise plan only.'); return; }
+      const biz = findBiz(selectedBizId);
+      const isEnterprisePlusEntity = biz && (biz.entity === 'Enterprise Plus' || biz.plan === 'Enterprise Plus');
+      if(!isEnterprisePlusEntity) { alert('Bank Reconciliation is available on the Enterprise Plus plan only.'); return; }
       activeTab='bankReconciliation'; renderTab();
     });
     if(btnJournalEntryTab) btnJournalEntryTab.addEventListener('click', ()=> {
@@ -3285,6 +3303,10 @@
       newBiz.accounts.push({ id: uid('acct'), name:'Accounts Receivable', category:'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Accounts Payable', category:'Liability', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 });
       newBiz.accounts.push({ id: uid('acct'), name:'Sales Revenue', category:'Revenue', disallowableDefault:false, nonTaxableDefault:false });
+      // Appropriation accounts
+      newBiz.accounts.push({ id: uid('acct'), name:'Dividend', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'General Reserve', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
+      newBiz.accounts.push({ id: uid('acct'), name:'Other Reserve', category:'Expense', disallowableDefault:false, nonTaxableDefault:false });
       state.businesses.push(newBiz);
       for(const u of state.users){ state.transactions[u.id] = state.transactions[u.id] || {}; state.transactions[u.id][newBiz.id] = []; }
       addAudit('business.add','business', newBiz.id, 'Added business');
@@ -5775,24 +5797,30 @@
     const lower = (acctName || '').toLowerCase();
     return lower.includes('general reserve');
   }
+  function isOtherReserveAccount(acctName, acctCategory) {
+    if(acctCategory !== 'Expense') return false;
+    const lower = (acctName || '').toLowerCase();
+    return lower.includes('other reserve');
+  }
 
   /**
    * Computes P&L figures shared between the P&L Statement and Balance Sheet.
    * @param {string} bizId
    * @param {string} userId
    * @returns {{ totalRevenue, totalCOGS, totalExpense, totalTax, totalDividend, totalGeneralReserve,
-   *             retainedProfitForYear, retainedProfitBF, retainedProfitCF,
-   *             revenueByAcct, cogsAmt, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct }}
+   *             totalOtherReserve, retainedProfitForYear, retainedProfitBF, retainedProfitCF,
+   *             revenueByAcct, cogsAmt, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct,
+   *             otherReserveByAcct }}
    */
   function computePLFigures(bizId, userId) {
     const b = findBiz(bizId);
     const arr = (state.transactions[userId] && state.transactions[userId][bizId]) || [];
 
     let totalRevenue = 0, totalCOGS = 0, totalOtherIncome = 0;
-    let totalExpense = 0, totalTax = 0, totalDividend = 0, totalGeneralReserve = 0;
+    let totalExpense = 0, totalTax = 0, totalDividend = 0, totalGeneralReserve = 0, totalOtherReserve = 0;
     let totalCITProvision = 0;
     const revenueByAcct = {}, cogsAmt = {}, otherIncomeByAcct = {};
-    const expenseByAcct = {}, taxByAcct = {}, dividendByAcct = {}, generalReserveByAcct = {};
+    const expenseByAcct = {}, taxByAcct = {}, dividendByAcct = {}, generalReserveByAcct = {}, otherReserveByAcct = {};
     const citProvisionByAcct = {};
 
     for(const t of arr) {
@@ -5803,6 +5831,7 @@
       const isCOGS = (acctName === 'COGS' || t.isCOGS) && t.accountCategory === 'Expense';
       const isDividend = isDividendAccount(acctName, t.accountCategory);
       const isGenReserve = isGeneralReserveAccount(acctName, t.accountCategory);
+      const isOtherReserve = isOtherReserveAccount(acctName, t.accountCategory);
       // CIT provision transactions are separated from regular expenses
       const isCITProv = !!(t.isCITProvision && t.accountCategory === 'Expense');
       const amt = Number(t.amount || 0);
@@ -5822,6 +5851,9 @@
       } else if(isGenReserve) {
         generalReserveByAcct[acctName] = (generalReserveByAcct[acctName] || 0) + amt;
         totalGeneralReserve += amt;
+      } else if(isOtherReserve) {
+        otherReserveByAcct[acctName] = (otherReserveByAcct[acctName] || 0) + amt;
+        totalOtherReserve += amt;
       } else if(isCITProv) {
         citProvisionByAcct[acctName] = (citProvisionByAcct[acctName] || 0) + amt;
         totalCITProvision += amt;
@@ -5860,8 +5892,14 @@
     const netProfitBeforeTax = grossProfit + totalOtherIncome - totalExpense;
 
     // Compute CIT Charge directly (replaces old CIT provision mechanism)
+    // Also applies to Enterprise businesses configured as Company type
     let citCharge = 0;
-    if(b && b.entity === 'Company' && b.citEnabled) {
+    const isCompanyForCIT = b && b.citEnabled && (
+      b.entity === 'Company' ||
+      (b.entity === 'Enterprise' && (b.enterpriseFinType || 'Company') === 'Company') ||
+      (b.entity === 'Enterprise Plus' && (b.enterpriseFinType || 'Company') === 'Company')
+    );
+    if(isCompanyForCIT) {
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
       let computedTurnover = 0;
       for(const t of arr) {
@@ -5877,18 +5915,38 @@
     }
 
     const netProfitAfterTax = netProfitBeforeTax - citCharge;
-    const totalAppropriation = totalDividend + totalGeneralReserve;
+    const totalAppropriation = totalDividend + totalGeneralReserve + totalOtherReserve;
     const retainedProfitForYear = netProfitAfterTax - totalAppropriation;
     const retainedProfitBF = Number((b && b.retainedProfitBF) || 0);
     const retainedProfitCF = retainedProfitForYear + retainedProfitBF;
 
     return {
-      totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve,
+      totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve, totalOtherReserve,
       totalCITProvision, citProvisionByAcct, citCharge,
       grossProfit, netProfitBeforeTax, netProfitAfterTax, totalAppropriation,
       retainedProfitForYear, retainedProfitBF, retainedProfitCF,
-      revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct
+      revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct, otherReserveByAcct
     };
+  }
+  
+  /**
+   * Sets the financial entity type for Enterprise businesses (Company or Business).
+   * This determines whether CIT or PIT applies in financial reports.
+   * @param {string} finType - 'Company' or 'Business'
+   */
+  function setEnterpriseFinType(finType) {
+    const b = findBiz(selectedBizId);
+    if(!b) return;
+    b.enterpriseFinType = finType;
+    saveState();
+    // Re-render the current sub-report with updated type
+    const subReportDiv = document.getElementById('financialSubReport');
+    if(subReportDiv) {
+      const plBtn = document.getElementById('plSubTabBtn');
+      const bsBtn = document.getElementById('bsSubTabBtn');
+      const activeType = (bsBtn && bsBtn.classList.contains('active')) ? 'bs' : 'pl';
+      showFinancialSubReport(activeType);
+    }
   }
   
   /**
@@ -5901,6 +5959,12 @@
     
     const subReportDiv = document.getElementById('financialSubReport');
     if(!subReportDiv) return;
+    
+    // Update sub-tab active state
+    const plBtn = document.getElementById('plSubTabBtn');
+    const bsBtn = document.getElementById('bsSubTabBtn');
+    if(plBtn) plBtn.classList.toggle('active', type === 'pl');
+    if(bsBtn) bsBtn.classList.toggle('active', type === 'bs');
     
     let html = '';
     
@@ -5942,7 +6006,7 @@
       for(const [n,v] of Object.entries(pl.cogsAmt)){
         html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      html += `<tr style="background:#e6f3ff;"><td><strong>= Gross Profit</strong></td><td style="text-align:right;"><strong>${fmt(pl.grossProfit)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Gross Profit</strong></td><td style="text-align:right;"><strong>${fmt(pl.grossProfit)}</strong></td></tr>`;
 
       // Other Income
       if(pl.totalOtherIncome > 0) {
@@ -5959,7 +6023,7 @@
       for(const [n,v] of Object.entries(pl.expenseByAcct)){
         html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
 
       // Tax: show computed CIT Charge (replaces old CIT provision entries)
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
@@ -5969,7 +6033,7 @@
       } else {
         html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
       }
-      html += `<tr style="background:#e6f3ff;"><td><strong>= Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
+      html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
 
       // Appropriations
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
@@ -5980,8 +6044,8 @@
       for(const [n,v] of Object.entries(pl.generalReserveByAcct)){
         html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
-      if(pl.totalAppropriation === 0) {
-        html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
+      for(const [n,v] of Object.entries(pl.otherReserveByAcct)){
+        html += `<tr><td style="padding-left:20px;">${n}</td><td style="text-align:right;">(${fmt(v)})</td></tr>`;
       }
 
       // Retained Profit
@@ -6244,6 +6308,7 @@
   
   // Make showFinancialSubReport available globally
   window.showFinancialSubReport = showFinancialSubReport;
+  window.setEnterpriseFinType = setEnterpriseFinType;
 
   /** Toggle the Net VAT Flow breakdown in the VAT report */
   function toggleVatNetDetail() {
@@ -6288,15 +6353,19 @@
   
   /**
    * Update visibility of Enterprise Plus feature tabs.
-   * Payables, Journal Entry, and Bank Reconciliation are only shown for Enterprise Plus businesses.
+   * Journal Entry and Payables are shown for Enterprise and Enterprise Plus.
+   * Bank Reconciliation is removed for Enterprise — shown only for Enterprise Plus.
    */
   function updateEnterpriseFeatureVisibility() {
+    const b = findBiz(selectedBizId);
     const btnBankReconciliationTab = document.getElementById('btnBankReconciliationTab');
     const btnJournalEntryTab = document.getElementById('btnJournalEntryTab');
     const btnPayablesTab = document.getElementById('btnPayablesTab');
     const visible = isEnterprisePlus() ? 'inline-block' : 'none';
+    // Bank Reconciliation is only for Enterprise Plus (not regular Enterprise)
+    const isEnterprisePlusEntity = b && (b.entity === 'Enterprise Plus' || b.plan === 'Enterprise Plus');
 
-    if (btnBankReconciliationTab) btnBankReconciliationTab.style.display = visible;
+    if (btnBankReconciliationTab) btnBankReconciliationTab.style.display = isEnterprisePlusEntity ? 'inline-block' : 'none';
     if (btnJournalEntryTab) btnJournalEntryTab.style.display = visible;
     if (btnPayablesTab) btnPayablesTab.style.display = visible;
   }
@@ -6707,19 +6776,11 @@
     let disallowableExpenses = 0;
     let nonTaxableIncome = 0;
     let whtReceivable = 0;
-    let whtRemitted = 0;
     
     for(const t of arr){
       const acct = findAccount(b, t.accountId);
       const accountName = acct?.name || t.accountName || '';
       const isTaxPayment = TAX_PAYMENT_ACCOUNTS.includes(accountName);
-      
-      // Track WHT remitted
-      if (accountName === 'WHT Remitted' || accountName === 'WHT Paid') {
-        whtRemitted += Number(t.amount || 0);
-      }
-      
-      // Exclude tax payments from revenue/expenses
       if (!isTaxPayment) {
         if(t.accountCategory === 'Revenue' || t.action === 'InventorySale') {
           revenue += Number(t.amount || 0);
@@ -6801,8 +6862,8 @@
     
     const citLiability = taxableProfit * citRate;
     
-    // Use WHT remitted instead of WHT receivable for final liability
-    const finalLiability = Math.max(0, citLiability - whtRemitted);
+    // Deduct WHT receivable (same source as Tax Liabilities section) from CIT charge
+    const finalLiability = Math.max(0, citLiability - whtReceivable);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Company Income Tax Computation</h3>`;
@@ -6838,12 +6899,12 @@
     
     html += `<tr><td colspan="2" style="padding-top:12px;"><strong>Apply CIT Rate (${(citRate * 100).toFixed(0)}%)</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Tax liability</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     } else {
     // Summary only for Company: 4 key lines
     html += `<tr style="background:#f2f6fa;"><td><strong>Taxable Profit</strong></td><td style="text-align:right;"><strong>${fmt(taxableProfit)}</strong></td></tr>`;
     html += `<tr><td style="padding-left:20px;">Apply CIT amount (${(citRate * 100).toFixed(0)}%)</td><td style="text-align:right;">${fmt(citLiability)}</td></tr>`;
-    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtRemitted)})</td></tr>`;
+    html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     }
     
     html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
@@ -8560,10 +8621,22 @@
       let html = `<h3>Financial Reports</h3>`;
       if(periodLabel) html += `<p class="small-note" style="margin:0 0 8px 0;">${escapeHtml(periodLabel)}</p>`;
       
+      // For Enterprise entity: show Company/Business selector that determines tax treatment
+      if(b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') {
+        const currentFinType = b.enterpriseFinType || 'Company';
+        html += `<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">`;
+        html += `<label style="font-weight:600;">Financial Entity Type:</label>`;
+        html += `<select id="enterpriseFinTypeSelect" onchange="setEnterpriseFinType(this.value)" style="padding:4px 8px;border-radius:4px;border:1px solid #d1d5db;">`;
+        html += `<option value="Company"${currentFinType === 'Company' ? ' selected' : ''}>Company (CIT applies)</option>`;
+        html += `<option value="Business"${currentFinType === 'Business' ? ' selected' : ''}>Business (PIT applies)</option>`;
+        html += `</select>`;
+        html += `</div>`;
+      }
+      
       // Sub-tabs for P&L and Balance Sheet
       html += `<div style="display:flex; gap:8px; margin-bottom:16px;">`;
-      html += `<button class="small tab active" onclick="showFinancialSubReport('pl')">Profit &amp; Loss Statement</button>`;
-      html += `<button class="small tab" onclick="showFinancialSubReport('bs')">Balance Sheet (Accrual)</button>`;
+      html += `<button id="plSubTabBtn" class="small tab active" onclick="showFinancialSubReport('pl')">Profit &amp; Loss Statement</button>`;
+      html += `<button id="bsSubTabBtn" class="small tab" onclick="showFinancialSubReport('bs')">Balance Sheet (Accrual)</button>`;
       html += `</div>`;
       
       html += `<div id="financialSubReport"></div>`;
