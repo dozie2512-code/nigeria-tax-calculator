@@ -1115,6 +1115,17 @@
         <label><input type="checkbox" id="permDelete" /> Delete</label>
       </div>
     </div>
+    <div id="transferBusinessSection" class="form-section" style="margin-top:8px;">
+      <h4 style="margin:4px 0;">Transfer Business (Enterprise &amp; Accountant)</h4>
+      <div class="row">
+        <label style="flex:1;">Business to Transfer:
+          <select id="transferBusinessSelect" style="width:100%;margin-top:4px;">
+            <option value="">-- None (no transfer) --</option>
+          </select>
+        </label>
+      </div>
+      <small class="note">Select a business to transfer/share access to the user being added. The user will gain access to all transactions in that business.</small>
+    </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="userCancel">Cancel</button>
       <button class="primary" id="userSave">Save</button>
@@ -3207,6 +3218,29 @@
     const userPassword = document.getElementById('userPassword');
     if (userPassword) userPassword.value = '';
     
+    // Populate Transfer Business dropdown with businesses for Enterprise/Accountant
+    const transferBusinessSelect = document.getElementById('transferBusinessSelect');
+    const transferBusinessSection = document.getElementById('transferBusinessSection');
+    if(transferBusinessSelect) {
+      transferBusinessSelect.innerHTML = '<option value="">-- None (no transfer) --</option>';
+      const b = findBiz(selectedBizId);
+      const showTransfer = !editId && b && (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus' || userRole.value === 'Tax Accountant');
+      if(transferBusinessSection) transferBusinessSection.style.display = showTransfer ? 'block' : 'none';
+      if(showTransfer || !editId) {
+        // Show all businesses for potential transfer
+        for(const biz of state.businesses){
+          const opt = document.createElement('option');
+          opt.value = biz.id;
+          opt.textContent = `${biz.name} (${biz.entity})`;
+          transferBusinessSelect.appendChild(opt);
+        }
+        // Pre-select current business
+        if(selectedBizId) transferBusinessSelect.value = selectedBizId;
+        // Always show section for new users (they can always transfer a business)
+        if(transferBusinessSection && !editId) transferBusinessSection.style.display = 'block';
+      }
+    }
+    
     // No arbitrary limit on user count; canAddUserToBusiness checks MAX_USERS_PER_BUSINESS (Infinity)
     
     if(editId){
@@ -3285,6 +3319,23 @@
             biz.userIds.push(newUser.id);
           }
         }
+      }
+      
+      // Handle business transfer (Enterprise entity or Tax Accountant role)
+      const transferBusinessSelect = document.getElementById('transferBusinessSelect');
+      const transferBizId = transferBusinessSelect ? transferBusinessSelect.value : '';
+      if(transferBizId && transferBizId !== selectedBizId) {
+        const transferBiz = findBiz(transferBizId);
+        if(transferBiz) {
+          // Give user access to the transferred business
+          transferBiz.userIds = transferBiz.userIds || [];
+          if(!transferBiz.userIds.includes(newUser.id)) transferBiz.userIds.push(newUser.id);
+          // Initialize transactions for the transferred business
+          state.transactions[newUser.id][transferBizId] = state.transactions[newUser.id][transferBizId] || [];
+          addAudit('business.transfer','business',transferBizId,`Business transferred to user: ${email}`);
+        }
+      } else if(transferBizId && transferBizId === selectedBizId) {
+        // Already handled above
       }
       
       addAudit('user.add','user',newUser.id,'Admin added user to business: ' + (selectedBizId || 'none'));
@@ -4633,10 +4684,6 @@
     const isViewOnly = currentUser && currentUser.permissions && currentUser.permissions.view && !currentUser.permissions.edit;
     
     for(const t of arr){
-      // Hide Unpaid and Part-paid entries from ledger display
-      // (these are still tracked in receivables/payables for balance sheet)
-      if(t.paymentStatus === 'Unpaid' || t.paymentStatus === 'Part') continue;
-      
       if(search){
         const hay = `${t.date} ${t.action} ${t.accountName || ''} ${t.description || ''} ${t.amount || ''} ${t.contact || ''}`.toLowerCase();
         if(!hay.includes(search)) continue;
@@ -5871,7 +5918,7 @@
       const bankTxn = { id: uid('txn'), date: txnDate, action: 'Revenue', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: txnAmt, cashbookPayments: 0, isCashbookEntry: true };
       state.transactions[selectedUserId][selectedBizId].push(bankTxn);
       if(cpAcct){
-        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
+        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, cashbookIsReceipt: true, linkedTxnId: bankTxn.id };
         state.transactions[selectedUserId][selectedBizId].push(cpTxn);
       }
       addAudit('cashbook.add', 'txn', bankTxn.id, `Cashbook receipt: ${txnAmt} to ${bankAcct ? bankAcct.name : 'Bank'}`);
@@ -5879,7 +5926,7 @@
       const bankTxn = { id: uid('txn'), date: txnDate, action: 'Expense', accountId: bankAcct ? bankAcct.id : '', accountName: bankAcct ? bankAcct.name : 'Bank', accountCategory: 'Asset', description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: txnAmt, isCashbookEntry: true };
       state.transactions[selectedUserId][selectedBizId].push(bankTxn);
       if(cpAcct){
-        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, linkedTxnId: bankTxn.id };
+        const cpTxn = { id: uid('txn'), date: txnDate, action: cpAcct.category === 'Revenue' ? 'Revenue' : (cpAcct.category === 'Expense' ? 'Expense' : 'CashbookLeg'), accountId: cpAcct.id, accountName: cpAcct.name, accountCategory: cpAcct.category, description: txnDesc, amount: txnAmt, vatType: 'none', whtApplied: false, paye: false, contact: '', cashbookReceipts: 0, cashbookPayments: 0, isCashbookEntry: true, isCashbookCounterparty: true, cashbookIsReceipt: false, linkedTxnId: bankTxn.id };
         state.transactions[selectedUserId][selectedBizId].push(cpTxn);
       }
       addAudit('cashbook.add', 'txn', bankTxn.id, `Cashbook payment: ${txnAmt} from ${bankAcct ? bankAcct.name : 'Bank'}`);
@@ -5916,6 +5963,61 @@
   }
 
   /**
+   * Returns the CIT charge computed in the Ledger (source of truth).
+   * Delegates to computePLFigures which embeds the authoritative CIT calculation.
+   * @param {string} bizId
+   * @param {string} userId
+   * @returns {number} CIT charge amount
+   */
+  function computeLedgerCITCharge(bizId, userId) {
+    const pl = computePLFigures(bizId, userId);
+    return pl.citCharge || 0;
+  }
+
+  /**
+   * Returns the PIT final liability computed using the same logic as generatePitBusinessReport.
+   * Used as the source-of-truth PIT figure for Dashboard and Balance Sheet.
+   * @param {string} bizId
+   * @returns {number} PIT final liability
+   */
+  function computeLedgerPITCharge(bizId) {
+    const b = findBiz(bizId);
+    if(!b) return 0;
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+    let revenue = 0, expenses = 0, disallowableExpenses = 0, nonTaxableIncome = 0;
+    for(const t of arr){
+      if(t.accountCategory === 'Revenue') { revenue += Number(t.amount || 0); }
+      if(t.accountCategory === 'Expense') {
+        expenses += Number(t.amount || 0);
+        const acct = findAccount(b, t.accountId);
+        if(acct && acct.disallowableDefault) disallowableExpenses += Number(t.amount || 0);
+        if(t.adjustmentType === 'disallowable') disallowableExpenses += Number(t.adjustmentAmount || t.amount || 0);
+      }
+      if(t.adjustmentType === 'nontaxable') nonTaxableIncome += Number(t.adjustmentAmount || t.amount || 0);
+    }
+    const depreciation = computeTotalDepreciation();
+    expenses += depreciation;
+    disallowableExpenses += depreciation;
+    const capitalAllowance = computeTotalCapitalAllowance() + (b.caCarryForward || 0);
+    const ded = getStatutoryDeductions(b, null);
+    const totalDed = totalStatutoryDeductions(ded);
+    const accountingProfit = revenue - expenses;
+    const adjustedProfit = accountingProfit + disallowableExpenses - nonTaxableIncome;
+    const assessableProfit = Math.max(0, adjustedProfit - Number(b.lossBroughtForward || 0));
+    const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
+    const adjustedTaxableProfit = Math.max(0, taxableProfit - totalDed);
+    const pitLiability = computePAYEOnAnnualIncome(adjustedTaxableProfit);
+    let whtReceivable = 0;
+    for(const t of arr){
+      if(t.whtApplied && t.accountCategory === 'Revenue') {
+        const rate = Number(t.whtRate || b.whtRate) / 100;
+        whtReceivable += Number(t.amount || 0) * rate;
+      }
+    }
+    return Math.max(0, pitLiability - whtReceivable);
+  }
+
+   /**
    * Computes P&L figures shared between the P&L Statement and Balance Sheet.
    * @param {string} bizId
    * @param {string} userId
@@ -6015,7 +6117,7 @@
       const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
       let computedTurnover = 0;
       for(const t of arr) {
-        if(!t.isCITProvisionAuto && !t.isOutstanding) {
+        if(!t.isCITProvisionAuto && !t.isOutstanding && !t.isCashbookEntry) {
           if(t.action === 'Revenue' || t.action === 'InventorySale') computedTurnover += Number(t.amount || 0);
         }
       }
@@ -6303,31 +6405,21 @@
       }
       const payeOutstanding = Math.max(0, payeAnnualTotal - payePaid);
 
-      // PIT / CIT — reuse tax summary computation
-      const plSnap = computePLSnapshot();
-      const taxableProfit = Math.max(0, plSnap.accountingProfit);
+      // PIT / CIT — use Ledger-computed charges as source of truth
       let pitOutstanding = 0, citOutstanding = 0, cgtOutstanding = 0;
-      if(b.entity !== 'Company' && b.pitEnabled){
-        const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
-        pitOutstanding = Math.max(0, pitLiability - whtReceivable - pitPaid);
+      if((b.entity === 'Business' || b.entity === 'Enterprise') && b.pitEnabled){
+        const pitLedger = computeLedgerPITCharge(selectedBizId);
+        pitOutstanding = Math.max(0, pitLedger - pitPaid);
       }
-      if(b.entity === 'Company' && b.citEnabled){
-        // Use the CIT from chargeableGains
+      if((b.entity === 'Company' || b.entity === 'Enterprise') && b.citEnabled){
+        // Use the CIT from chargeableGains for CGT
         const gains = computeChargeableGainsForBiz();
         let cgtCharge = 0;
         for(const g of gains) cgtCharge += g.cgtCharge || 0;
         cgtOutstanding = Math.max(0, cgtCharge - cgtPaid);
 
-        const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-        let citCharge = 0;
-        let computedTurnover = 0;
-        for(const t of arr){ if(!t.isOutstanding && !t.isCITProvisionAuto && (t.action === 'Revenue' || t.action === 'InventorySale')) computedTurnover += Number(t.amount||0); }
-        if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) {
-          citCharge = 0.25 * taxableProfit;
-        } else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) {
-          citCharge = 0.30 * taxableProfit;
-        }
-        citOutstanding = Math.max(0, citCharge - whtReceivable - citPaid);
+        const citLedger = computeLedgerCITCharge(selectedBizId, selectedUserId);
+        citOutstanding = Math.max(0, citLedger - whtReceivable - citPaid);
       }
 
       // Build totals
@@ -6356,11 +6448,7 @@
       html += `<tr style="background:#f2f6fa;"><td><strong>Assets</strong></td><td></td></tr>`;
       for(const [name, balance] of Object.entries(assets)){
         if(balance !== 0) {
-          if(name === 'Accounts Receivable' || name === 'Receivable') {
-            html += `<tr><td style="padding-left:20px;"><button class="link-like" onclick="showReceivablePayableHistory('receivable')" style="background:none;border:none;cursor:pointer;color:#1a56db;text-decoration:underline;font-size:inherit;padding:0;" role="button" aria-label="View receivable transaction history">${name}</button></td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
-          } else {
-            html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
-          }
+          html += `<tr><td style="padding-left:20px;">${name}</td><td style="text-align:right;">${fmt(balance)}</td></tr>`;
         }
       }
       // Inventory closing balance from schedule
@@ -6676,9 +6764,9 @@
         'payeReport': true,
         'inventoryReport': true,
         'assetsReport': true,
-        'pitBusiness': enterpriseShowPIT,  // Enterprise: only show PIT if fin type = Business
+        'pitBusiness': true,    // Enterprise: show PIT summary report always
         'cgtReport': true,
-        'citReport': enterpriseShowCIT,    // Enterprise: only show CIT if fin type = Company
+        'citReport': true,      // Enterprise: show CIT report always
         'companyAccounts': false,
         'financialReport': true,
         'auditTrail': true,
@@ -6879,7 +6967,10 @@
     
     // WHT receivable
     let whtReceivable = 0;
+    let pitRemitted = 0;
     for(const t of arr){
+      const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+      if(acctName === 'PIT Paid') { pitRemitted += Number(t.amount||0); continue; }
       if(t.whtApplied && t.accountCategory === 'Revenue') {
         const rate = Number(t.whtRate || b.whtRate) / 100;
         whtReceivable += Number(t.amount || 0) * rate;
@@ -6887,6 +6978,7 @@
     }
     
     const finalLiability = Math.max(0, pitLiability - whtReceivable);
+    const pitPayable = Math.max(0, finalLiability - pitRemitted);
     const effectiveRate = grossTaxableProfit > 0 ? ((finalLiability / grossTaxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Personal Income Tax Computation (Business)</h3>`;
@@ -6957,8 +7049,10 @@
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     }
     
-    // Final liability
-    html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
+    // Final liability + remitted
+    html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability (PIT Charge)</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">PIT Remitted (Paid)</td><td style="text-align:right;">${fmt(pitRemitted)}</td></tr>`;
+    html += `<tr style="background:#e6f3ff;"><td><strong>PIT Payable (Charge − Remitted)</strong></td><td style="text-align:right;font-weight:700;color:${pitPayable>0?'#dc2626':'#059669'};">${fmt(pitPayable)}</strong></td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
     
     html += `</tbody></table>`;
@@ -7053,24 +7147,37 @@
     const assessableProfit = Math.max(0, adjustedProfit - lossBF);
     const taxableProfit = Math.max(0, assessableProfit - capitalAllowance);
     
-    // Determine CIT rate based on turnover (Nigerian CIT progressive rates)
+    // Determine CIT rate based on turnover threshold setting (matches computePLFigures logic)
     // Micro companies (turnover <= ₦25M): 0%
-    // Small companies (turnover > ₦25M and <= ₦100M): 20%
-    // Large companies (turnover > ₦100M): 30%
+    // Medium companies (threshold=50M and revenue > 50M): 25%
+    // Large companies (threshold=100M and revenue > 100M): 30%
+    const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
     let citRate = 0;
-    if(revenue > CIT_THRESHOLDS.LARGE) {
-      citRate = 0.30; // 30% for large companies
-    } else if(revenue > CIT_THRESHOLDS.MEDIUM) {
-      citRate = 0.20; // 20% for medium companies
-    } else if(revenue > 25000000) {
-      citRate = 0.20; // 20% for small companies above ₦25M
+    let computedTurnover = 0;
+    for(const t of arr){
+      if(!t.isCITProvisionAuto && !t.isOutstanding && !t.isCashbookEntry &&
+         (t.action === 'Revenue' || t.action === 'InventorySale')) {
+        computedTurnover += Number(t.amount || 0);
+      }
     }
-    // Below ₦25M = 0% rate
+    if(threshold === CIT_THRESHOLDS.MEDIUM && computedTurnover > CIT_THRESHOLDS.MEDIUM) {
+      citRate = 0.25;
+    } else if(threshold === CIT_THRESHOLDS.LARGE && computedTurnover > CIT_THRESHOLDS.LARGE) {
+      citRate = 0.30;
+    }
+    // Below threshold = 0% rate
     
     const citLiability = taxableProfit * citRate;
     
     // Deduct WHT receivable (same source as Tax Liabilities section) from CIT charge
     const finalLiability = Math.max(0, citLiability - whtReceivable);
+    // CIT remitted (paid to authority)
+    let citRemitted = 0;
+    for(const t of arr){
+      const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+      if(acctName === 'CIT Paid') citRemitted += Number(t.amount||0);
+    }
+    const citPayable = Math.max(0, finalLiability - citRemitted);
     const effectiveRate = taxableProfit > 0 ? ((finalLiability / taxableProfit) * 100).toFixed(2) : '0.00';
     
     let html = `<h3>Company Income Tax Computation</h3>`;
@@ -7114,12 +7221,13 @@
     html += `<tr><td style="padding-left:20px;">Less: WHT receivable</td><td style="text-align:right;">(${fmt(whtReceivable)})</td></tr>`;
     }
     
-    html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
+    html += `<tr style="background:#e6f3ff;"><td><strong>Final Tax Liability (CIT Charge)</strong></td><td style="text-align:right;"><strong>${fmt(finalLiability)}</strong></td></tr>`;
+    html += `<tr><td style="padding-left:20px;">CIT Remitted (Paid)</td><td style="text-align:right;">${fmt(citRemitted)}</td></tr>`;
+    html += `<tr style="background:#e6f3ff;"><td><strong>CIT Payable (Charge − Remitted)</strong></td><td style="text-align:right;font-weight:700;color:${citPayable>0?'#dc2626':'#059669'};">${fmt(citPayable)}</td></tr>`;
     html += `<tr><td><strong>Effective Tax Rate</strong></td><td style="text-align:right;"><strong>${effectiveRate}%</strong></td></tr>`;
     
     html += `</tbody></table>`;
-    const threshold = b.turnoverThreshold || DEFAULTS.turnoverThreshold;
-    html += `<p class="small-note" style="margin-top:12px;">Turnover threshold: ${fmt(threshold)} | CIT Rate: ${(citRate * 100).toFixed(0)}%</p>`;
+    html += `<p class="small-note" style="margin-top:12px;">Turnover threshold setting: ${fmt(threshold)} | Computed turnover: ${fmt(computedTurnover)} | CIT Rate: ${(citRate * 100).toFixed(0)}%</p>`;
     
     return html;
   }
@@ -7359,6 +7467,16 @@
     html += `<tr><td>Total Offset Used (from prior-year losses)</td><td style="text-align:right;">(${fmt(totalOffsetUsed)})</td></tr>`;
     html += `<tr style="background:#f2f6fa;"><td><strong>Net Gains After Offset</strong></td><td style="text-align:right;"><strong>${fmt(Math.max(0, totalGains - totalOffsetUsed))}</strong></td></tr>`;
     html += `<tr style="background:#e6f3ff;"><td><strong>Total CGT Charge</strong></td><td style="text-align:right;"><strong>${fmt(totalCgtCharge)}</strong></td></tr>`;
+    // CGT Remitted
+    const allTxns = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+    let cgtRemitted = 0;
+    for(const t of allTxns){
+      const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+      if(acctName === 'CGT Paid') cgtRemitted += Number(t.amount || 0);
+    }
+    const cgtPayable = Math.max(0, totalCgtCharge - cgtRemitted);
+    html += `<tr><td style="padding-left:20px;">CGT Remitted (Paid)</td><td style="text-align:right;">${fmt(cgtRemitted)}</td></tr>`;
+    html += `<tr style="background:#e6f3ff;"><td><strong>CGT Payable (Charge − Remitted)</strong></td><td style="text-align:right;font-weight:700;color:${cgtPayable>0?'#dc2626':'#059669'};">${fmt(cgtPayable)}</td></tr>`;
     html += `</tbody></table>`;
     
     // Carryforward losses section
@@ -8506,12 +8624,13 @@
       </div>
     `;
     
-    // Add CIT info for Company and Enterprise (text only, no calculation)
+    // Add CIT info for Company and Enterprise (computed from Ledger, same as CIT report)
     if (b.entity === 'Company' || b.entity === 'Enterprise') {
+      const dashCIT = computeLedgerCITCharge(selectedBizId, selectedUserId);
       businessInfo += `
         <div class="dashboard-metric">
-          <span class="dashboard-metric-label">CIT Rate:</span>
-          <span class="dashboard-metric-value">0% / 30%</span>
+          <span class="dashboard-metric-label">CIT:</span>
+          <span class="dashboard-metric-value">${fmt(dashCIT)}</span>
         </div>
       `;
     }
@@ -8581,15 +8700,11 @@
     
     const vatNet = totalVATCollected - totalVATPaid;
     
-    // Calculate PIT for Business and Enterprise entities
+    // Calculate PIT for Business and Enterprise entities — feed from Ledger PIT charge
     let totalPIT = 0;
     
-    if ((b.entity === 'Business' || b.entity === 'Enterprise') && profit > 0) {
-      // PIT calculation (simplified progressive tax up to 25%)
-      const pitBase = profit - (b.lossBroughtForward || 0);
-      if (pitBase > 0) {
-        totalPIT = pitBase * 0.15; // Average estimate, actual is progressive 0-25%
-      }
+    if (b.entity === 'Business' || b.entity === 'Enterprise') {
+      totalPIT = computeLedgerPITCharge(selectedBizId);
     }
     
     let taxSummary = `
@@ -8619,18 +8734,19 @@
     if (b.entity === 'Business' || b.entity === 'Enterprise') {
       taxSummary += `
         <div class="dashboard-metric">
-          <span class="dashboard-metric-label">PIT (est.):</span>
+          <span class="dashboard-metric-label">PIT:</span>
           <span class="dashboard-metric-value">${fmt(totalPIT)}</span>
         </div>
       `;
     }
     
-    // Show CIT rate as text for Company and Enterprise (no calculation)
+    // Show CIT for Company and Enterprise — feeds from Ledger CIT charge
     if (b.entity === 'Company' || b.entity === 'Enterprise') {
+      const dashCIT2 = computeLedgerCITCharge(selectedBizId, selectedUserId);
       taxSummary += `
         <div class="dashboard-metric">
-          <span class="dashboard-metric-label">CIT Rate:</span>
-          <span class="dashboard-metric-value">0% / 30%</span>
+          <span class="dashboard-metric-label">CIT:</span>
+          <span class="dashboard-metric-value">${fmt(dashCIT2)}</span>
         </div>
       `;
     }
@@ -8775,10 +8891,13 @@
       // Calculate totals and collect transactions
       let totalWHTCollected = 0; // WHT deducted from customers (payable to tax authority)
       let totalWHTSuffered = 0;  // WHT paid to suppliers (recoverable/credit)
+      let whtRemitted = 0;       // WHT remitted to tax authority
       const collectedRows = [];
       const sufferedRows = [];
 
       for(const t of arr){
+        const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+        if(acctName === 'WHT Remitted') { whtRemitted += Number(t.amount||0); continue; }
         if(t.whtApplied){
           const rate = Number(t.whtRate || b.whtRate);
           const basis = t.whtBasis || 'gross';
@@ -8792,12 +8911,15 @@
           }
         }
       }
+      const whtPayable = Math.max(0, totalWHTCollected - whtRemitted);
 
-      // Summary section — no Net WHT Position per requirements
+      // Summary section
       html += `<div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-bottom:16px;">`;
       html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">`;
       html += `<div><strong>WHT Collected:</strong><br/><button class="small" onclick="toggleWhtCollectedDetail()" style="font-size:1.2rem;color:#059669;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline dotted;">${fmt(totalWHTCollected)}</button><br/><small style="color:#64748b;">Deducted by customer — click to expand</small></div>`;
       html += `<div><strong>WHT Suffered:</strong><br/><button class="small" onclick="toggleWhtSufferedDetail()" style="font-size:1.2rem;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline dotted;">${fmt(totalWHTSuffered)}</button><br/><small style="color:#64748b;">Paid for supplier — click to expand</small></div>`;
+      html += `<div><strong>WHT Remitted:</strong><br/><span style="font-size:1.2rem;color:#64748b;">${fmt(whtRemitted)}</span><br/><small style="color:#64748b;">Paid to tax authority</small></div>`;
+      html += `<div><strong>WHT Payable:</strong><br/><span style="font-size:1.2rem;color:${whtPayable>0?'#dc2626':'#059669'};">${fmt(whtPayable)}</span><br/><small style="color:#64748b;">Collected − Remitted</small></div>`;
       html += `</div>`;
       html += `</div>`;
 
@@ -8831,8 +8953,11 @@
     } else if(name === 'payeReport'){
       const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
       const payeByContact = {};
+      let payeRemitted = 0;
       // Exclude sole traders from PAYE report
       for(const t of arr){
+        const acctName = (findAccount(b, t.accountId) || {}).name || t.accountName || '';
+        if(acctName === 'PAYE Paid') { payeRemitted += Number(t.amount||0); continue; }
         if(t.paye && t.contact){
           // Check if contact is a sole trader
           const contact = b.contacts.find(c => c.name === t.contact);
@@ -8863,6 +8988,7 @@
       
       if(Object.keys(payeByContact).length===0) html += '<div>No PAYE records found</div>';
       else {
+        let totalPayeCharge = 0;
         html += `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>Contact</th><th>Annual Salary</th><th>Stat. Deductions</th><th>Taxable Income</th><th>PAYE Annual</th><th>PAYE Monthly</th></tr></thead><tbody>`;
         for(const cName in payeByContact){
           const annual = payeByContact[cName];
@@ -8872,9 +8998,15 @@
           const totalDed = totalStatutoryDeductions(ded);
           const taxableIncome = Math.max(0, annual - totalDed);
           const tax = computePAYEOnAnnualIncome(taxableIncome);
+          totalPayeCharge += tax;
           html += `<tr><td>${cName}</td><td>${fmt(annual)}</td><td>${fmt(totalDed)}</td><td>${fmt(taxableIncome)}</td><td>${fmt(tax)}</td><td>${fmt(tax/12)}</td></tr>`;
         }
-        html += `</tbody></table>`;
+        html += `</tbody><tfoot>`;
+        html += `<tr style="background:#f2f6fa;"><th colspan="4">Total PAYE Charge</th><th colspan="2" style="text-align:right;">${fmt(totalPayeCharge)}</th></tr>`;
+        html += `<tr><th colspan="4">PAYE Remitted (Paid)</th><th colspan="2" style="text-align:right;">${fmt(payeRemitted)}</th></tr>`;
+        const payeOutstanding = Math.max(0, totalPayeCharge - payeRemitted);
+        html += `<tr style="background:#e6f3ff;"><th colspan="4">PAYE Payable (Charge − Remitted)</th><th colspan="2" style="text-align:right;color:${payeOutstanding>0?'#dc2626':'#059669'};">${fmt(payeOutstanding)}</th></tr>`;
+        html += `</tfoot></table>`;
       }
       reportContent.innerHTML = html;
       
@@ -9271,13 +9403,34 @@
     
     for (const txn of txns) {
       if (txn.accountId !== account.id) continue;
-      
+      const amt = Number(txn.amount || 0);
+
+      // For cashbook counterparty transactions, apply proper debit/credit direction.
+      // Receipt (bank Dr): counterparty is Cr → Asset/Expense decreases, Revenue/Liability increases.
+      // Payment (bank Cr): counterparty is Dr → Liability/Capital decreases, Asset/Expense increases.
+      if (txn.isCashbookCounterparty) {
+        if (txn.cashbookIsReceipt) {
+          // Counterparty is credited in a receipt
+          if (account.category === 'Asset' || account.category === 'Expense') {
+            balance -= amt; // credit to asset/expense reduces it (e.g. AR reduced on receipt)
+          } else {
+            balance += amt; // credit to revenue/liability/capital increases it
+          }
+        } else {
+          // Counterparty is debited in a payment
+          if (account.category === 'Liability' || account.category === 'Capital') {
+            balance -= amt; // debit to liability/capital reduces it (e.g. AP paid off)
+          } else {
+            balance += amt; // debit to expense/asset increases it
+          }
+        }
+        continue;
+      }
+
       if (account.category === 'Asset' || account.category === 'Expense') {
-        // For Asset and Expense accounts, amounts add to balance
-        balance += (txn.amount || 0);
+        balance += amt;
       } else if (account.category === 'Liability' || account.category === 'Capital' || account.category === 'Revenue') {
-        // For Liability, Capital and Revenue accounts, amounts add to balance
-        balance += (txn.amount || 0);
+        balance += amt;
       }
     }
     
@@ -10274,4 +10427,4 @@
 
   </script>
 </body>
-     </html>
+  </html>
