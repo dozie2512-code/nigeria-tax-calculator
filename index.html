@@ -1311,7 +1311,7 @@
       </select>
     </label>
   </div>
-  <small class="note">Account valid for 7 days from signup. A notification will be sent to salesrepng@gmail.com.</small>
+  <small class="note">Account valid for 7 days from signup.</small>
   <small class="note" style="display:block;margin-top:4px;color:#555;">Secure authentication powered by Firebase. Your credentials are safely managed by Firebase Authentication.</small>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
     <button id="signupCancel">Cancel</button>
@@ -2061,58 +2061,23 @@
   }
 
   function seedDemo(){
-    const u = uid('user'), b = uid('biz');
-    // Removed Sales (Revenue) default account as per requirements
-    const cogs = { id: uid('acct'), name: 'COGS', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const purchases = { id: uid('acct'), name: 'Purchases', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const salaries = { id: uid('acct'), name: 'Salaries', category: 'Expense', disallowableDefault:false, nonTaxableDefault:false };
-    const rent = { id: uid('acct'), name: 'Rent', category: 'Revenue', disallowableDefault:false, nonTaxableDefault:false, rentFreq:'monthly' };
-    const bank = { id: uid('acct'), name: 'Bank', category: 'Asset', disallowableDefault:false, nonTaxableDefault:false, openingBalance:0, closingBalance:0 };
+    // Initialize with admin user only — no pre-populated demo business.
+    // New users should add their own business via the "+ Business" button.
+    const u = uid('user');
 
     state = {
       users: [{ id: u, username: 'admin', display:'Admin User', role:'Admin', isAdmin:true, permissions:{ view:true, edit:true, delete:true }, tourSeen: true, createdAt: Date.now() }],
-      businesses: [{
-        id: b,
-        name: 'Demo Business',
-        ownerId: u,
-        entity: 'Company',
-        entityLocked: false, // Demo business entity is not locked
-        vatRate: DEFAULTS.vatRate,
-        whtRate: DEFAULTS.whtRate,
-        citRate: DEFAULTS.citRate,
-        turnoverThreshold: DEFAULTS.turnoverThreshold,
-        vatEnabled: true, pitEnabled: true, payeEnabled: true, showLines: true, citEnabled: true,
-        caRateDefault: DEFAULTS.caRateDefault,
-        depRateDefault: DEFAULTS.depRateDefault,
-        accounts: [cogs, purchases, salaries, rent, bank], // Removed sales and chargeable asset accounts
-        inventory: [{ id: uid('item'), name: 'Widget', qty: 100, avgCost: 500.00 }],
-        assets: [
-          { id: uid('asset'), name: 'Office PC', category: 'Furniture & Fittings', qty:1, unitPrice:150000, cost: 150000, purchaseDate: today(), lifeYears: 5, caPercent: 20, depRate: 20, classification: 'Fixed', accumulatedDep:0, accumulatedDepreciation:0, capitalAllowances: [], disposed:false, disposal:{}, openingAccDep:0 },
-          { id: uid('asset'), name: 'Land Plot', category: 'Property Plant and Equipment', qty:1, unitPrice:2000000, cost: 2000000, purchaseDate: '2020-01-01', lifeYears: 20, caPercent: 5, depRate: 0, classification: 'Chargeable', accumulatedDep:0, accumulatedDepreciation:0, capitalAllowances: [], disposed:false, disposal:{}, openingAccDep:0 }
-        ],
-        contacts: [{ id: uid('c'), name:'John Employee', type:'Employee', statutory:{ pension: 20000, rent: 120000, life: 5000, mortgage: 100000, nhf: 5000 }, taxSettings: { vat:true, wht:true, paye:true, pit:true, cit:true } }],
-        statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
-        lossBroughtForward: 150000, caCarryForward: 50000,
-        defaultExpenseDisallowable:false, defaultRevenueNonTax:false,
-        userIds: [u], // Track users associated with this business
-        chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
-        shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
-      }],
+      businesses: [],
       transactions: {},
       attachments: {},
       audit: [],
       auth: { currentUserId: null }  // Not logged in by default - user must sign in via pre-login overlay
     };
     state.transactions[u] = {};
-    state.transactions[u][b] = [
-      { id: uid('txn'), date: today(), action: 'Revenue', accountId: cogs.id, accountName: 'COGS', accountCategory: 'Expense', description: 'Demo expense', amount: 50000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
-      { id: uid('txn'), date: today(), action: 'Expense', accountId: salaries.id, accountName: salaries.name, accountCategory: salaries.category, description: 'Demo salary', amount: 50000, vatType:'none', whtApplied:false, paye:true, contact:'John Employee', receiptId:null },
-      { id: uid('txn'), date: today(), action: 'InventoryPurchase', accountId: cogs.id, accountName: cogs.name, accountCategory: cogs.category, description: 'Purchase widgets', qty:50, unitPrice:520, amount: 26000, vatType:'none', whtApplied:false, paye:false, contact:'', receiptId:null },
-    ];
-    addAudit('seed','system','',`Seeded demo data`);
+    addAudit('seed','system','',`Initialized app state (no demo business)`);
     saveState();
     
-    // After seeding demo, seed the admin user with password
+    // After seeding, seed the admin user with password
     seedAdminIfNeeded();
   }
 
@@ -2413,17 +2378,17 @@
 
   /**
    * Clears all email signups from storage.
-   * This is a one-time operation to reset all user accounts.
+   * This migration runs once per version to reset registered user accounts.
    */
   function clearAllEmailSignups() {
-    // Check if already cleared by looking for a flag
-    const clearFlag = localStorage.getItem('emailSignupsCleared_v1');
+    // Check if already cleared by looking for a flag (v2 forces a new clear)
+    const clearFlag = localStorage.getItem('emailSignupsCleared_v2');
     if (clearFlag === 'true') {
-      console.log('Email signups already cleared.');
+      console.log('Email signups already cleared (v2).');
       return;
     }
     
-    console.log('Clearing all email signups...');
+    console.log('Clearing all registered signup emails...');
     
     // Clear all users
     state.users = [];
@@ -2443,13 +2408,15 @@
     // Save the cleared state
     saveState();
     
-    // Set flag to prevent clearing again
+    // Set flag to prevent clearing again for this version
+    localStorage.setItem('emailSignupsCleared_v2', 'true');
+    // Also set v1 flag in case older code checks it
     localStorage.setItem('emailSignupsCleared_v1', 'true');
     
     // Add audit entry for the clear operation
-    addAudit('system.clear_signups', 'system', null, 'All email signups cleared as per requirement');
+    addAudit('system.clear_signups', 'system', null, 'All registered signup emails cleared (migration v2)');
     
-    console.log('Email signups cleared successfully.');
+    console.log('Registered signup emails cleared successfully.');
   }
 
   // initialization
@@ -2800,11 +2767,10 @@
         });
         if (acctSignupMsg) acctSignupMsg.textContent = '';
         
-        // Accountant signup under Enterprise: always create 3 default businesses
+        // Clear form and complete signup — user will add a business via "+ Business"
         setTimeout(() => {
           if (preLoginOverlay) preLoginOverlay.classList.add('hidden');
-          // Bypass entity select modal — accountant accounts always use Enterprise (3 businesses)
-          createBusinessForUser(userId, 'Enterprise');
+          // No auto-business creation: new users start clean and add a business themselves
           completeSignupFlow(userId);
         }, 500);
       });
@@ -2989,49 +2955,16 @@
               }
             }
 
-            // Create default business via createBusinessForUser() if available
+            // No auto-business creation: new users start clean and add a business via "+ Business"
             var bizId = null;
-            if (typeof createBusinessForUser === 'function') {
-              try {
-                bizId = createBusinessForUser(userId, plan);
-              } catch (bizErr) {
-                console.warn('createBusinessForUser() failed:', bizErr);
-              }
-            }
 
-            // Set selected user and business
+            // Set selected user
             if (typeof selectedUserId !== 'undefined') {
               selectedUserId = userId;
             }
-            if (bizId && typeof selectedBizId !== 'undefined') {
-              selectedBizId = bizId;
-            }
-
-            // Open entity selection modal if present (and createBusinessForUser wasn't called or failed)
-            var entitySelectModal = document.getElementById('entitySelectModal');
-            if (entitySelectModal && !bizId) {
-              if (typeof pendingSignupUserId !== 'undefined') {
-                pendingSignupUserId = userId;
-              }
-              var entitySelectType = document.getElementById('entitySelectType');
-              if (entitySelectType) entitySelectType.value = plan;
-              if (typeof openModal === 'function') {
-                try {
-                  openModal(entitySelectModal);
-                } catch (openErr) {
-                  entitySelectModal.style.display = 'block';
-                  var overlay = document.getElementById('modalOverlay');
-                  if (overlay) overlay.style.display = 'block';
-                }
-              } else {
-                entitySelectModal.style.display = 'block';
-                var overlay = document.getElementById('modalOverlay');
-                if (overlay) overlay.style.display = 'block';
-              }
-            }
 
             // Trigger video tour for new user if available
-            if (typeof showTourModal === 'function' && bizId) {
+            if (typeof showTourModal === 'function') {
               try {
                 showTourModal(userId);
               } catch (tourErr) {
@@ -3349,12 +3282,7 @@
   }
 
   function openAddBusinessModal(){
-    // Check if current user is admin-created (scoped to business)
-    const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
-    if(currentUser && currentUser.createdByAdmin) {
-      return alert('You do not have permission to add businesses. Contact your admin.');
-    }
-    
+    // No entity-based restrictions — all entity types (Business, Company, Enterprise) can add businesses
     businessModalTitle.textContent = 'Add Business';
     bizName.value = ''; bizOwnerSelect.value = state.users[0] ? state.users[0].id : '';
     bizEntity.value = 'Company'; bizVat.value = DEFAULTS.vatRate; bizWht.value = DEFAULTS.whtRate; bizCit.value = DEFAULTS.citRate;
@@ -3379,11 +3307,7 @@
     if(!selectedBizId) return alert('Select business');
     const b = findBiz(selectedBizId); if(!b) return alert('Business not found');
     
-    // Check if current user is admin-created (scoped to business)
-    const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
-    if(currentUser && currentUser.createdByAdmin) {
-      return alert('You do not have permission to edit businesses. Contact your admin.');
-    }
+    // No entity-based restrictions — all entity types (Business, Company, Enterprise) can edit businesses
     
     businessModalTitle.textContent = 'Edit Business';
     bizName.value = b.name || ''; bizOwnerSelect.value = b.ownerId || (state.users[0] && state.users[0].id) || '';
@@ -3785,10 +3709,11 @@
     
     // Filter businesses based on user permissions
     const currentUser = state.users.find(u => u.id === state.auth.currentUserId);
-    const isAdministrator = currentUser && currentUser.email === 'salesrepng@gmail.com';
+    // Administrator: any user with isAdmin flag (no hardcoded email required)
+    const isAdministrator = currentUser && currentUser.isAdmin;
     
     for(const b of state.businesses){
-      // Show all businesses to Administrator (salesrepng@gmail.com)
+      // Show all businesses to Admin users.
       // Otherwise, only show businesses user created or is scoped to
       const canSee = isAdministrator || 
                      b.ownerId === state.auth.currentUserId || 
@@ -4918,24 +4843,14 @@
       }
     }
     
-    // Disable business controls for admin-created users (scoped to business)
-    if(currentUser && currentUser.createdByAdmin) {
-      if(btnAddBusiness) btnAddBusiness.disabled = true;
-      if(btnEditBusiness) btnEditBusiness.disabled = true;
-      if(btnDeleteBusiness) btnDeleteBusiness.disabled = true;
-      if(btnAddUser) btnAddUser.disabled = true;
-      if(btnEditUser) btnEditUser.disabled = true;
-      if(btnDeleteUser) btnDeleteUser.disabled = true;
-      if(businessSelect) businessSelect.disabled = true;
-    } else {
-      if(btnAddBusiness) btnAddBusiness.disabled = false;
-      if(btnDeleteBusiness) btnDeleteBusiness.disabled = false;
-      if(businessSelect) businessSelect.disabled = false;
-      if(btnAddUser) btnAddUser.disabled = false;
-      if(btnEditUser) btnEditUser.disabled = false;
-      if(btnDeleteUser) btnDeleteUser.disabled = false;
-      // Edit business may still be restricted per entityLocked
-    }
+    // All buttons enabled for all logged-in users regardless of createdByAdmin status
+    if(btnAddBusiness) btnAddBusiness.disabled = false;
+    if(btnEditBusiness) btnEditBusiness.disabled = false;
+    if(btnDeleteBusiness) btnDeleteBusiness.disabled = false;
+    if(btnAddUser) btnAddUser.disabled = false;
+    if(btnEditUser) btnEditUser.disabled = false;
+    if(btnDeleteUser) btnDeleteUser.disabled = false;
+    if(businessSelect) businessSelect.disabled = false;
   }
 
   function renderQuickPanels(){
@@ -5976,15 +5891,30 @@
   }
 
   /**
+   * Determines whether a business should have PIT applied in P&L calculations.
+   * Business entity (sole proprietor) and Enterprise configured as Business use PIT.
+   * @param {Object} b - The business object
+   * @returns {boolean}
+   */
+  function isBizSubjectToPIT(b) {
+    if (!b || !b.pitEnabled) return false;
+    return (
+      b.entity === 'Business' ||
+      (b.entity === 'Enterprise' && (b.enterpriseFinType || 'Company') === 'Business')
+    );
+  }
+
+  /**
    * Returns the PIT final liability computed using the same logic as generatePitBusinessReport.
    * Used as the source-of-truth PIT figure for Dashboard and Balance Sheet.
    * @param {string} bizId
    * @returns {number} PIT final liability
    */
-  function computeLedgerPITCharge(bizId) {
+  function computeLedgerPITCharge(bizId, userId) {
     const b = findBiz(bizId);
     if(!b) return 0;
-    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+    const uid = userId || selectedUserId;
+    const arr = (state.transactions[uid] && state.transactions[uid][bizId]) || [];
     let revenue = 0, expenses = 0, disallowableExpenses = 0, nonTaxableIncome = 0;
     for(const t of arr){
       if(t.accountCategory === 'Revenue') { revenue += Number(t.amount || 0); }
@@ -6129,7 +6059,13 @@
       }
     }
 
-    const netProfitAfterTax = netProfitBeforeTax - citCharge;
+    // Compute PIT charge for Business entities — single source of truth via computeLedgerPITCharge
+    let pitCharge = 0;
+    if(isBizSubjectToPIT(b)) {
+      pitCharge = computeLedgerPITCharge(bizId, userId);
+    }
+
+    const netProfitAfterTax = netProfitBeforeTax - citCharge - pitCharge;
     const totalAppropriation = totalDividend + totalGeneralReserve + totalOtherReserve;
     const retainedProfitForYear = netProfitAfterTax - totalAppropriation;
     const retainedProfitBF = Number((b && b.retainedProfitBF) || 0);
@@ -6137,7 +6073,7 @@
 
     return {
       totalRevenue, totalCOGS, totalOtherIncome, totalExpense, totalTax, totalDividend, totalGeneralReserve, totalOtherReserve,
-      totalCITProvision, citProvisionByAcct, citCharge,
+      totalCITProvision, citProvisionByAcct, citCharge, pitCharge,
       grossProfit, netProfitBeforeTax, netProfitAfterTax, totalAppropriation,
       retainedProfitForYear, retainedProfitBF, retainedProfitCF,
       revenueByAcct, cogsAmt, otherIncomeByAcct, expenseByAcct, taxByAcct, dividendByAcct, generalReserveByAcct, otherReserveByAcct
@@ -6240,12 +6176,16 @@
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit Before Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitBeforeTax)}</strong></td></tr>`;
 
-      // Tax: show computed CIT Charge (replaces old CIT provision entries)
+      // Tax: show computed CIT Charge and/or PIT Charge (source of truth from Ledger)
       html += `<tr><td colspan="2" style="padding-top:6px;"></td></tr>`;
       html += `<tr style="background:#f2f6fa;"><td><strong>less: Tax</strong></td><td></td></tr>`;
       if(pl.citCharge > 0) {
         html += `<tr><td style="padding-left:20px;">CIT Charge</td><td style="text-align:right;">(${fmt(pl.citCharge)})</td></tr>`;
-      } else {
+      }
+      if(pl.pitCharge > 0) {
+        html += `<tr><td style="padding-left:20px;">PIT Charge</td><td style="text-align:right;">(${fmt(pl.pitCharge)})</td></tr>`;
+      }
+      if(!pl.citCharge && !pl.pitCharge) {
         html += `<tr><td style="padding-left:20px;color:#64748b;">None</td><td style="text-align:right;color:#64748b;">–</td></tr>`;
       }
       html += `<tr style="background:#e6f3ff;"><td><strong>Net Profit After Tax</strong></td><td style="text-align:right;"><strong>${fmt(pl.netProfitAfterTax)}</strong></td></tr>`;
@@ -8632,13 +8572,13 @@
       </div>
     `;
     
-    // Add CIT info for Company and Enterprise (computed from Ledger, same as CIT report)
+    // Add CIT info for Company and Enterprise — show rate as % (not a Naira amount)
     if (b.entity === 'Company' || b.entity === 'Enterprise') {
-      const dashCIT = computeLedgerCITCharge(selectedBizId, selectedUserId);
+      const citRateDisplay = `${b.citRate ?? 0}%`;
       businessInfo += `
         <div class="dashboard-metric">
-          <span class="dashboard-metric-label">CIT rate:</span>
-          <span class="dashboard-metric-value">${fmt(dashCIT)}</span>
+          <span class="dashboard-metric-label">CIT Rate:</span>
+          <span class="dashboard-metric-value">${citRateDisplay}</span>
         </div>
       `;
     }
@@ -10212,8 +10152,7 @@
     const preLoginOverlay = document.getElementById('preLoginOverlay');
     
     if (!entitySelectModal || !entitySelectType) {
-      // Fallback: create business directly without modal
-      createBusinessForUser(userId, preselectedPlan || 'Business');
+      // Fallback: complete signup flow without creating a business — user adds one via "+ Business"
       completeSignupFlow(userId);
       return;
     }
@@ -10274,16 +10213,9 @@
         return;
       }
       
-      const entityType = entitySelectType ? entitySelectType.value : 'Business';
-      
-      // Create default business for the user
-      const bizId = createBusinessForUser(pendingSignupUserId, entityType);
-      
-      // Set as selected business
-      if (bizId) {
-        selectedBizId = bizId;
-        selectedUserId = pendingSignupUserId;
-      }
+      // Entity type is noted for record but no business is auto-created.
+      // The user will add their own business via the "+ Business" button.
+      selectedUserId = pendingSignupUserId;
       
       closeModal(entitySelectModal);
       
@@ -10401,7 +10333,7 @@
           addAudit('user.forgot_password', 'user', user.id, 'Password reset requested for: ' + email);
           
           if (forgotMsg) { 
-            forgotMsg.textContent = 'Reset request logged. Please contact your admin or salesrepng@gmail.com.'; 
+            forgotMsg.textContent = 'Reset request logged. Please contact your system administrator.'; 
             forgotMsg.style.color = 'green'; 
           }
           
