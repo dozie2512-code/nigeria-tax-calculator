@@ -1210,10 +1210,9 @@
         <div class="row">
           <label>Pension (₦): <input type="number" id="bizDedPension" class="smallInput" min="0" step="0.01" /></label>
           <label>Rent relief (₦): <input type="number" id="bizDedRent" class="smallInput" min="0" step="0.01" /></label>
-          <label>Life assurance / NHIS (₦): <input type="number" id="bizDedLife" class="smallInput" min="0" step="0.01" /></label>
+          <label>Life assurance (₦): <input type="number" id="bizDedLife" class="smallInput" min="0" step="0.01" /></label>
           <label>Mortgage interest (₦): <input type="number" id="bizDedMortgage" class="smallInput" min="0" step="0.01" /></label>
           <label>NHF (₦): <input type="number" id="bizDedNHF" class="smallInput" min="0" step="0.01" /></label>
-          <label>NHIS (₦): <input type="number" id="bizDedNHIS" class="smallInput" min="0" step="0.01" /></label>
         </div>
         <small class="note">If you set statutory deductions on a contact (SoleTrader), that will override these values for PIT.</small>
       </div>
@@ -1265,12 +1264,11 @@
       <div class="row">
         <label>Pension (₦): <input type="number" id="contactDedPension" class="smallInput" min="0" step="0.01" /></label>
         <label>Rent relief (₦): <input type="number" id="contactDedRent" class="smallInput" min="0" step="0.01" /></label>
-        <label>Life assurance / NHIS (₦): <input type="number" id="contactDedLife" class="smallInput" min="0" step="0.01" /></label>
+        <label>Life assurance (₦): <input type="number" id="contactDedLife" class="smallInput" min="0" step="0.01" /></label>
       </div>
       <div class="row">
         <label>Mortgage interest (₦): <input type="number" id="contactDedMortgage" class="smallInput" min="0" step="0.01" /></label>
         <label>NHF (₦): <input type="number" id="contactDedNHF" class="smallInput" min="0" step="0.01" /></label>
-        <label>NHIS (₦): <input type="number" id="contactDedNHIS" class="smallInput" min="0" step="0.01" /></label>
       </div>
       <small class="note">These deductions override business-level statutory deductions when computing PIT/PAYE for this contact.</small>
     </div>
@@ -1769,7 +1767,6 @@
   const bizDedLife = document.getElementById('bizDedLife');
   const bizDedMortgage = document.getElementById('bizDedMortgage');
   const bizDedNHF = document.getElementById('bizDedNHF');
-  const bizDedNHIS = document.getElementById('bizDedNHIS');
   const bizContactsList = document.getElementById('bizContactsList');
   const newContactName = document.getElementById('newContactName');
   const newContactType = document.getElementById('newContactType');
@@ -2803,10 +2800,12 @@
         });
         if (acctSignupMsg) acctSignupMsg.textContent = '';
         
-        // Show entity selection modal
+        // Accountant signup under Enterprise: always create 3 default businesses
         setTimeout(() => {
           if (preLoginOverlay) preLoginOverlay.classList.add('hidden');
-          showEntitySelectModal(userId, 'Enterprise');
+          // Bypass entity select modal — accountant accounts always use Enterprise (3 businesses)
+          createBusinessForUser(userId, 'Enterprise');
+          completeSignupFlow(userId);
         }, 500);
       });
     })();
@@ -3327,12 +3326,14 @@
       if(transferBizId && transferBizId !== selectedBizId) {
         const transferBiz = findBiz(transferBizId);
         if(transferBiz) {
-          // Give user access to the transferred business
+          // Give new user access to the transferred business
           transferBiz.userIds = transferBiz.userIds || [];
           if(!transferBiz.userIds.includes(newUser.id)) transferBiz.userIds.push(newUser.id);
           // Initialize transactions for the transferred business
           state.transactions[newUser.id][transferBizId] = state.transactions[newUser.id][transferBizId] || [];
-          addAudit('business.transfer','business',transferBizId,`Business transferred to user: ${email}`);
+          // Move: remove the originating Enterprise/Accountant user from the transferred business
+          transferBiz.userIds = transferBiz.userIds.filter(id => id !== selectedUserId);
+          addAudit('business.transfer','business',transferBizId,`Business transferred (moved) to user: ${email}`);
         }
       } else if(transferBizId && transferBizId === selectedBizId) {
         // Already handled above
@@ -3401,7 +3402,7 @@
     if(bizRetainedProfitBF) bizRetainedProfitBF.value = b.retainedProfitBF || 0;
     bizDefaultExpenseDisallowable.checked = !!b.defaultExpenseDisallowable; bizDefaultRevenueNonTax.checked = !!b.defaultRevenueNonTax;
     bizDedPension.value = b.statutoryDeductions?.pension || 0; bizDedRent.value = b.statutoryDeductions?.rent || 0; bizDedLife.value = b.statutoryDeductions?.life || 0;
-    bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0; bizDedNHIS.value = b.statutoryDeductions?.nhis || 0;
+    bizDedMortgage.value = b.statutoryDeductions?.mortgage || 0; bizDedNHF.value = b.statutoryDeductions?.nhf || 0;
 
     // Accounting period dates
     const bizPeriodStartEl = document.getElementById('bizPeriodStart');
@@ -3447,7 +3448,7 @@
       const bizRetainedProfitBF = document.getElementById('bizRetainedProfitBF');
       if(bizRetainedProfitBF) b.retainedProfitBF = Number(bizRetainedProfitBF.value || 0);
       b.defaultExpenseDisallowable = !!bizDefaultExpenseDisallowable.checked; b.defaultRevenueNonTax = !!bizDefaultRevenueNonTax.checked;
-      b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0), nhis:Number(bizDedNHIS.value||0) };
+      b.statutoryDeductions = { pension:Number(bizDedPension.value||0), rent:Number(bizDedRent.value||0), life:Number(bizDedLife.value||0), mortgage:Number(bizDedMortgage.value||0), nhf:Number(bizDedNHF.value||0) };
       // Accounting period
       const bizPeriodStartEl = document.getElementById('bizPeriodStart');
       const bizPeriodEndEl = document.getElementById('bizPeriodEnd');
@@ -3463,7 +3464,7 @@
         citRate: Number(bizCit.value||DEFAULTS.citRate),
         turnoverThreshold: turnoverThresholdValue,
         vatEnabled: !!bizVatEnabled.checked, pitEnabled: !!bizPitEnabled.checked, payeEnabled: !!bizPayeEnabled.checked, showLines: !!bizShowLines.checked, citEnabled: !!bizCitEnabled.checked,
-        accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0, nhis:0 },
+        accounts: [], inventory: [], assets: [], contacts: [], statutoryDeductions: { pension:0, rent:0, life:0, mortgage:0, nhf:0 },
         lossBroughtForward:0, caCarryForward:0, defaultExpenseDisallowable:false, defaultRevenueNonTax:false, caRateDefault: DEFAULTS.caRateDefault, depRateDefault: DEFAULTS.depRateDefault,
         chargeableLosses: {}, // CGT: { year: { assetClassName: amount } }
         shareDisposalsByYear: {} // CGT: { year: { proceedsSum: number, gainSum: number } }
@@ -6295,15 +6296,14 @@
 
       // Calculate balances for each account, excluding tax payable accounts (handled via accruals)
       for(const acct of b.accounts || []){
-        // For bank/cash accounts, use cashbook-style directional balance (receipts − payments)
+        // Bank/cash accounts are handled separately via computeCashbookClosingBalance; skip here
         const isBankCash = (acct.category === 'Asset' && (
           (acct.name || '').toLowerCase().includes('bank') ||
           (acct.name || '').toLowerCase() === 'cash' ||
           (acct.name || '').toLowerCase().includes('petty cash')
         ));
-        const balance = isBankCash
-          ? computeBankAccountBalance(acct, selectedBizId)
-          : calculateAccountClosingBalance(acct, selectedBizId);
+        if(isBankCash) continue; // combined bank balance is added below
+        const balance = calculateAccountClosingBalance(acct, selectedBizId);
         if(acct.category === 'Asset'){
           // WHT Receivable is shown separately below; skip duplicate
           if(acct.name === 'WHT Receivable') continue;
@@ -6320,6 +6320,10 @@
           capital[acct.name] = balance;
         }
       }
+
+      // Bank/Cash: always use cashbook closing balance as single combined Bank line
+      const cashbookBalance = computeCashbookClosingBalance(selectedBizId);
+      assets['Bank'] = cashbookBalance;
 
       // --- Inventory Schedule closing balance ---
       let inventoryTotal = 0;
@@ -7167,10 +7171,11 @@
     }
     // Below threshold = 0% rate
     
+    // Use computeLedgerCITCharge as the authoritative CIT charge (same source as P&L and Balance Sheet)
+    const ledgerCITCharge = computeLedgerCITCharge(bizId, selectedUserId);
     const citLiability = taxableProfit * citRate;
-    
-    // Deduct WHT receivable (same source as Tax Liabilities section) from CIT charge
-    const finalLiability = Math.max(0, citLiability - whtReceivable);
+    // Final liability uses the ledger CIT charge as the source of truth
+    const finalLiability = ledgerCITCharge;
     // CIT remitted (paid to authority)
     let citRemitted = 0;
     for(const t of arr){
@@ -7287,7 +7292,8 @@
       const isBankCash = (acct.category === 'Asset' && (
         (acct.name||'').toLowerCase().includes('bank') || (acct.name||'').toLowerCase() === 'cash' || (acct.name||'').toLowerCase().includes('petty cash')
       ));
-      const bal = isBankCash ? computeBankAccountBalance(acct, bizId) : calculateAccountClosingBalance(acct, bizId);
+      if(isBankCash) continue; // combined bank balance added below
+      const bal = calculateAccountClosingBalance(acct, bizId);
       if(acct.category === 'Asset'){
         if(acct.name === 'WHT Receivable' || acct.name === 'VAT Recoverable') continue;
         assets2[acct.name] = bal;
@@ -7298,6 +7304,8 @@
         capital2[acct.name] = bal;
       }
     }
+    // Bank/Cash: use cashbook closing balance as single combined Bank line
+    assets2['Bank'] = computeCashbookClosingBalance(bizId);
     let invTotal2 = 0;
     for(const item of (b.inventory||[])) invTotal2 += (item.qty||0) * (item.avgCost||0);
     computeTotalDepreciation();
@@ -8629,7 +8637,7 @@
       const dashCIT = computeLedgerCITCharge(selectedBizId, selectedUserId);
       businessInfo += `
         <div class="dashboard-metric">
-          <span class="dashboard-metric-label">CIT:</span>
+          <span class="dashboard-metric-label">CIT rate:</span>
           <span class="dashboard-metric-value">${fmt(dashCIT)}</span>
         </div>
       `;
@@ -9249,7 +9257,6 @@
     const contactDedLife = document.getElementById('contactDedLife');
     const contactDedMortgage = document.getElementById('contactDedMortgage');
     const contactDedNHF = document.getElementById('contactDedNHF');
-    const contactDedNHIS = document.getElementById('contactDedNHIS');
     const contactDeductionsSection = document.getElementById('contactDeductionsSection');
     
     if(!contactEditModal) return;
@@ -9265,7 +9272,6 @@
     contactDedLife.value = ded.life || 0;
     contactDedMortgage.value = ded.mortgage || 0;
     contactDedNHF.value = ded.nhf || 0;
-    contactDedNHIS.value = ded.nhis || 0;
     
     // Show/hide deductions section based on contact type
     const showDeductions = (contact.type === 'Employee' || contact.type === 'SoleTrader');
@@ -9381,6 +9387,86 @@
         payments = Math.max(0, amt - whtDeduction);
       } else if (action === 'InventoryOpeningBal') {
         // Opening balance does not represent cash movement; skip
+      }
+      balance += receipts - payments;
+    }
+    return balance;
+  }
+
+  /**
+   * Computes the cashbook closing balance for all bank/cash accounts combined.
+   * Mirrors the logic in renderCashbook() so the Balance Sheet Bank line always
+   * equals the cashbook tab's closing balance in real time.
+   * @param {string} bizId - The business ID
+   * @returns {number} Cashbook closing balance
+   */
+  function computeCashbookClosingBalance(bizId) {
+    const b = findBiz(bizId);
+    if (!b) return 0;
+
+    // Opening balance: sum opening balances of all bank/cash Asset accounts
+    let balance = 0;
+    for (const a of (b.accounts || [])) {
+      if (a.category === 'Asset') {
+        const nm = (a.name || '').toLowerCase();
+        if (nm.includes('bank') || nm === 'cash' || nm.includes('petty cash')) {
+          balance += Number(a.openingBalance || 0);
+        }
+      }
+    }
+
+    const arr = ((state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [])
+      .slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    for (const t of arr) {
+      const action = t.action || '';
+      const amount = Number(t.amount || 0);
+      let receipts = 0, payments = 0;
+
+      if (t.isCOGS) continue;
+      if (t.isCashbookCounterparty) continue;
+      if (t.isCITProvision) continue;
+      if (t.isOutstanding) continue;
+      if (t.isInventoryOpeningBal || action === 'InventoryOpeningBal') continue;
+
+      const vatAmt = (t.vatType === 'exclusive') ? computeVAT(amount, t.vatType, b.vatRate) : 0;
+      const grossAmt = amount + vatAmt;
+
+      let whtDeduction = 0;
+      if (t.whtApplied && t.paymentStatus !== 'Unpaid') {
+        const whtRate = Number(t.whtRate || b.whtRate);
+        const whtBasis = t.whtBasis || 'gross';
+        if (whtBasis === 'net' && t.netAmount != null) {
+          whtDeduction = amount - Number(t.netAmount);
+        } else {
+          whtDeduction = computeWHT(amount, whtBasis, whtRate);
+        }
+      }
+
+      if (action === 'Revenue' || action === 'Investment Income') {
+        if (t.paymentStatus === 'Unpaid') continue;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
+      } else if (action === 'Expense') {
+        if (t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
+      } else if (action === 'InventoryPurchase') {
+        if (t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
+      } else if (action === 'InventorySale') {
+        if (t.paymentStatus === 'Unpaid') continue;
+        receipts = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : Math.max(0, grossAmt - whtDeduction);
+      } else if (action === 'AssetPurchase' || action === 'OpeningAssetBal') {
+        if (t.paymentStatus === 'Unpaid') continue;
+        payments = t.paymentStatus === 'Part' ? Number(t.partAmount || 0) : amount;
+      } else if (action === 'AssetDisposal') {
+        receipts = amount;
+      } else if (action === 'Tax Payment' || t.isTaxPayment) {
+        payments = amount;
+      } else if (t.cashbookReceipts || t.cashbookPayments) {
+        receipts = Number(t.cashbookReceipts || 0);
+        payments = Number(t.cashbookPayments || 0);
+      } else {
+        continue;
       }
       balance += receipts - payments;
     }
@@ -10395,8 +10481,7 @@
             rent: Number(document.getElementById('contactDedRent').value || 0),
             life: Number(document.getElementById('contactDedLife').value || 0),
             mortgage: Number(document.getElementById('contactDedMortgage').value || 0),
-            nhf: Number(document.getElementById('contactDedNHF').value || 0),
-            nhis: Number(document.getElementById('contactDedNHIS').value || 0)
+            nhf: Number(document.getElementById('contactDedNHF').value || 0)
           };
         } else {
           // Clear deductions for non-employee/non-soletrader contacts
