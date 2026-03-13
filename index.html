@@ -1144,7 +1144,7 @@
         <select id="bizEntity">
           <option value="Company">Company</option>
           <option value="Business">Business</option>
-          <option value="Enterprise">Enterprise</option>
+          <option value="Accountant">Accountant</option>
         </select>
       </label>
       <label>VAT rate %: <input type="number" id="bizVat" class="smallInput" min="0" step="0.01" /></label>
@@ -1307,7 +1307,7 @@
       <select id="signupPlan">
         <option value="Business">Business</option>
         <option value="Company">Company</option>
-        <option value="Enterprise">Enterprise</option>
+        <option value="Accountant">Accountant</option>
       </select>
     </label>
   </div>
@@ -1344,11 +1344,47 @@
       <select id="entitySelectType">
         <option value="Business">Business</option>
         <option value="Company">Company</option>
-        <option value="Enterprise">Enterprise</option>
+        <option value="Accountant">Accountant</option>
       </select>
     </label>
   </div>
   <small class="note">This will create a default business for your account with the selected entity type.</small>
+
+  <!-- Additional users section — shown only when Accountant entity is selected -->
+  <div id="entityAdditionalUsersSection" style="display:none;margin-top:16px;border-top:1px solid #e6e6e6;padding-top:12px;">
+    <h4 style="margin:0 0 8px 0;">Additional Users</h4>
+    <p class="muted" style="margin-bottom:12px;">Provide details for 2 additional users who will have independent login access:</p>
+    <!-- User 2 -->
+    <div style="margin-bottom:12px;padding:10px;background:#f9f9f9;border-radius:6px;">
+      <h4 style="margin:0 0 8px 0;font-size:0.95rem;">User 2</h4>
+      <div class="row">
+        <label>Email: <input type="email" id="extraUser2Email" placeholder="user2@email.com" /></label>
+        <label>Entity:
+          <select id="extraUser2Entity">
+            <option value="Business">Business</option>
+            <option value="Company">Company</option>
+          </select>
+        </label>
+        <label>Password: <input type="password" id="extraUser2Password" placeholder="Min 6 chars" minlength="6" /></label>
+      </div>
+    </div>
+    <!-- User 3 -->
+    <div style="padding:10px;background:#f9f9f9;border-radius:6px;">
+      <h4 style="margin:0 0 8px 0;font-size:0.95rem;">User 3</h4>
+      <div class="row">
+        <label>Email: <input type="email" id="extraUser3Email" placeholder="user3@email.com" /></label>
+        <label>Entity:
+          <select id="extraUser3Entity">
+            <option value="Business">Business</option>
+            <option value="Company">Company</option>
+          </select>
+        </label>
+        <label>Password: <input type="password" id="extraUser3Password" placeholder="Min 6 chars" minlength="6" /></label>
+      </div>
+    </div>
+    <p id="entityAdditionalUsersMsg" class="auth-msg" style="margin-top:8px;"></p>
+  </div>
+
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
     <button class="primary" id="entitySelectConfirm">Confirm & Continue</button>
   </div>
@@ -1413,7 +1449,7 @@
   // Constants & defaults
   const STORAGE_KEY = 'ntc_full_accounting_v2'; // Updated storage key for migration
   const DEFAULTS = { 
-    vatRate:7.5, whtRate:5.0, citRate:25.0,
+    vatRate:7.5, whtRate:5.0, citRate:30.0,
     vatEnabled:true, payeEnabled:true, pitEnabled:true, showLines:true, citEnabled:true, 
     caRateDefault:20.0, depRateDefault:20.0, turnoverThreshold:100000000 
   };
@@ -1473,7 +1509,7 @@
     
     // Determine how many businesses to create based on entity type
     let businessesToCreate = 1;
-    if (entityType === 'Enterprise Plus' || entityType === 'Enterprise') {
+    if (entityType === 'Enterprise Plus' || entityType === 'Enterprise' || entityType === 'Accountant') {
       businessesToCreate = 3;
     }
     
@@ -1896,6 +1932,10 @@
       if (b.entity === 'Individual') {
         b.entity = 'Business';
       }
+      // MIGRATION: Rename Enterprise to Accountant
+      if (b.entity === 'Enterprise') {
+        b.entity = 'Accountant';
+      }
       
       // MIGRATION: Add turnoverThreshold if missing (default 100M)
       if (typeof b.turnoverThreshold === 'undefined') {
@@ -1999,8 +2039,8 @@
         b.accounts.push({ id: uid('acct'), name: 'Other Reserve', category: 'Expense', disallowableDefault: false, nonTaxableDefault: false });
       }
       
-      // MIGRATION: Set enterpriseFinType default for Enterprise entities
-      if ((b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') && !b.enterpriseFinType) {
+      // MIGRATION: Set enterpriseFinType default for Accountant/Enterprise entities
+      if ((b.entity === 'Accountant' || b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') && !b.enterpriseFinType) {
         b.enterpriseFinType = 'Company';
       }
     });
@@ -3156,7 +3196,7 @@
     if(transferBusinessSelect) {
       transferBusinessSelect.innerHTML = '<option value="">-- None (no transfer) --</option>';
       const b = findBiz(selectedBizId);
-      const showTransfer = !editId && b && (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus' || userRole.value === 'Tax Accountant');
+      const showTransfer = !editId && b && (b.entity === 'Accountant' || b.entity === 'Enterprise' || b.entity === 'Enterprise Plus' || userRole.value === 'Tax Accountant');
       if(transferBusinessSection) transferBusinessSection.style.display = showTransfer ? 'block' : 'none';
       if(showTransfer || !editId) {
         // Show all businesses for potential transfer
@@ -3237,9 +3277,11 @@
       state.users.push(newUser);
       state.transactions[newUser.id] = state.transactions[newUser.id] || {};
       
-      // Only initialize transactions for the scoped business
+      // Copy admin's existing transactions to the new user for the scoped business
+      // so the new user can see all existing postings per their assigned permissions
       if(selectedBizId) {
-        state.transactions[newUser.id][selectedBizId] = [];
+        const adminTxns = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+        state.transactions[newUser.id][selectedBizId] = adminTxns.map(t => JSON.parse(JSON.stringify(t)));
       }
       
       // Associate user with current business only (admin-created users are scoped)
@@ -4421,7 +4463,7 @@
         
         // CGT: Apply entity-specific rules for net (post-offset) gain
         if(netGainAfterOffset > 0 && !isShareExempt) {
-          if(b.entity === 'Business' || b.entity === 'Enterprise Plus' || b.entity === 'Enterprise') {
+          if(b.entity === 'Business' || b.entity === 'Accountant' || b.entity === 'Enterprise Plus' || b.entity === 'Enterprise') {
             // Business or Enterprise: include netGain in taxable profit
             includedInTaxableProfit = true;
             addAudit('cgt.taxable_profit', 'asset', asset.id, 
@@ -5443,7 +5485,7 @@
 
     // PIT for Business/Enterprise Plus (renamed from SoleProprietor)
     let pitCharge = 0;
-    if((b.entity === 'Business' || b.entity === 'Enterprise Plus' || b.entity === 'Enterprise') && b.pitEnabled){
+    if((b.entity === 'Business' || b.entity === 'Accountant' || b.entity === 'Enterprise Plus' || b.entity === 'Enterprise') && b.pitEnabled){
       if(taxableProfit > 0){
         const pitLiability = computePAYEOnAnnualIncome(taxableProfit);
         // Deduct WHT receivable (withheld by clients) from PIT charge
@@ -5900,6 +5942,7 @@
     if (!b || !b.pitEnabled) return false;
     return (
       b.entity === 'Business' ||
+      (b.entity === 'Accountant' && (b.enterpriseFinType || 'Company') === 'Business') ||
       (b.entity === 'Enterprise' && (b.enterpriseFinType || 'Company') === 'Business')
     );
   }
@@ -6037,10 +6080,11 @@
     const netProfitBeforeTax = grossProfit + totalOtherIncome - totalExpense;
 
     // Compute CIT Charge directly (replaces old CIT provision mechanism)
-    // Also applies to Enterprise businesses configured as Company type
+    // Also applies to Accountant/Enterprise businesses configured as Company type
     let citCharge = 0;
     const isCompanyForCIT = b && b.citEnabled && (
       b.entity === 'Company' ||
+      (b.entity === 'Accountant' && (b.enterpriseFinType || 'Company') === 'Company') ||
       (b.entity === 'Enterprise' && (b.enterpriseFinType || 'Company') === 'Company') ||
       (b.entity === 'Enterprise Plus' && (b.enterpriseFinType || 'Company') === 'Company')
     );
@@ -6351,11 +6395,11 @@
 
       // PIT / CIT — use Ledger-computed charges as source of truth
       let pitOutstanding = 0, citOutstanding = 0, cgtOutstanding = 0;
-      if((b.entity === 'Business' || b.entity === 'Enterprise') && b.pitEnabled){
+      if((b.entity === 'Business' || b.entity === 'Accountant' || b.entity === 'Enterprise') && b.pitEnabled){
         const pitLedger = computeLedgerPITCharge(selectedBizId);
         pitOutstanding = Math.max(0, pitLedger - pitPaid);
       }
-      if((b.entity === 'Company' || b.entity === 'Enterprise') && b.citEnabled){
+      if(b.entity === 'Company' && b.citEnabled){
         // Use the CIT from chargeableGains for CGT
         const gains = computeChargeableGainsForBiz();
         let cgtCharge = 0;
@@ -6564,7 +6608,7 @@
   function isEnterprisePlus() {
     const b = findBiz(selectedBizId);
     if (!b) return false;
-    return b.entity === 'Enterprise Plus' || b.entity === 'Enterprise' || b.plan === 'Enterprise Plus' || b.plan === 'Enterprise';
+    return b.entity === 'Enterprise Plus' || b.entity === 'Accountant' || b.entity === 'Enterprise' || b.plan === 'Enterprise Plus' || b.plan === 'Enterprise';
   }
 
   /**
@@ -6711,6 +6755,21 @@
         'pitBusiness': true,    // Enterprise: show PIT summary report always
         'cgtReport': true,
         'citReport': true,      // Enterprise: show CIT report always
+        'companyAccounts': false,
+        'financialReport': true,
+        'auditTrail': true,
+        'receiptsFolder': true,
+        'filingReport': taxAccountant      // Filing Report only for Tax Accountant
+      },
+      'Accountant': {
+        'vatReport': true,
+        'whtReport': true,
+        'payeReport': true,
+        'inventoryReport': true,
+        'assetsReport': true,
+        'pitBusiness': true,    // Accountant: show PIT summary report always
+        'cgtReport': true,
+        'citReport': true,      // Accountant: show CIT report always
         'companyAccounts': false,
         'financialReport': true,
         'auditTrail': true,
@@ -7191,8 +7250,8 @@
     const currentYear = new Date().getFullYear();
     const today_date = today();
     
-    // Determine entity type (Enterprise uses its selected sub-type)
-    const isEnterprise = (b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
+    // Determine entity type (Accountant/Enterprise uses its selected sub-type)
+    const isEnterprise = (b.entity === 'Accountant' || b.entity === 'Enterprise' || b.entity === 'Enterprise Plus');
     const finType = isEnterprise ? (b.enterpriseFinType || 'Company') : b.entity;
     const isCompany = (finType === 'Company');
     
@@ -8572,8 +8631,8 @@
       </div>
     `;
     
-    // Add CIT info for Company and Enterprise — show rate as % (not a Naira amount)
-    if (b.entity === 'Company' || b.entity === 'Enterprise') {
+    // Add CIT info for Company only — show rate as % (not a Naira amount)
+    if (b.entity === 'Company') {
       const citRateDisplay = `${b.citRate ?? 0}%`;
       businessInfo += `
         <div class="dashboard-metric">
@@ -8648,10 +8707,10 @@
     
     const vatNet = totalVATCollected - totalVATPaid;
     
-    // Calculate PIT for Business and Enterprise entities — feed from Ledger PIT charge
+    // Calculate PIT for Business and Accountant entities — feed from Ledger PIT charge
     let totalPIT = 0;
     
-    if (b.entity === 'Business' || b.entity === 'Enterprise') {
+    if (b.entity === 'Business' || b.entity === 'Accountant' || b.entity === 'Enterprise') {
       totalPIT = computeLedgerPITCharge(selectedBizId);
     }
     
@@ -8678,8 +8737,8 @@
       </div>
     `;
     
-    // Show PIT for Business and Enterprise entities
-    if (b.entity === 'Business' || b.entity === 'Enterprise') {
+    // Show PIT for Business and Accountant entities
+    if (b.entity === 'Business' || b.entity === 'Accountant' || b.entity === 'Enterprise') {
       taxSummary += `
         <div class="dashboard-metric">
           <span class="dashboard-metric-label">PIT:</span>
@@ -8688,8 +8747,8 @@
       `;
     }
     
-    // Show CIT for Company and Enterprise — feeds from Ledger CIT charge
-    if (b.entity === 'Company' || b.entity === 'Enterprise') {
+    // Show CIT only for Company entity — feeds from Ledger CIT charge
+    if (b.entity === 'Company') {
       const dashCIT2 = computeLedgerCITCharge(selectedBizId, selectedUserId);
       taxSummary += `
         <div class="dashboard-metric">
@@ -9043,8 +9102,8 @@
       let html = `<h3>Financial Reports</h3>`;
       if(periodLabel) html += `<p class="small-note" style="margin:0 0 8px 0;">${escapeHtml(periodLabel)}</p>`;
       
-      // For Enterprise entity: show Company/Business selector that determines tax treatment
-      if(b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') {
+      // For Accountant/Enterprise entity: show Company/Business selector that determines tax treatment
+      if(b.entity === 'Accountant' || b.entity === 'Enterprise' || b.entity === 'Enterprise Plus') {
         const currentFinType = b.enterpriseFinType || 'Company';
         html += `<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">`;
         html += `<label style="font-weight:600;">Financial Entity Type:</label>`;
@@ -10204,13 +10263,96 @@
     const entitySelectModal = document.getElementById('entitySelectModal');
     const entitySelectConfirm = document.getElementById('entitySelectConfirm');
     const entitySelectType = document.getElementById('entitySelectType');
+    const entityAdditionalUsersSection = document.getElementById('entityAdditionalUsersSection');
     
     if (!entitySelectModal || !entitySelectConfirm) return;
     
-    entitySelectConfirm.addEventListener('click', function() {
+    // Show/hide additional user fields when Accountant entity is selected
+    if (entitySelectType && entityAdditionalUsersSection) {
+      entitySelectType.addEventListener('change', function() {
+        entityAdditionalUsersSection.style.display = this.value === 'Accountant' ? 'block' : 'none';
+      });
+    }
+    
+    entitySelectConfirm.addEventListener('click', async function() {
       if (!pendingSignupUserId) {
         closeModal(entitySelectModal);
         return;
+      }
+      
+      const selectedEntity = entitySelectType ? entitySelectType.value : 'Business';
+      const msgEl = document.getElementById('entityAdditionalUsersMsg');
+      
+      // If Accountant entity is selected, validate and create 2 additional users
+      if (selectedEntity === 'Accountant') {
+        const u2Email = (document.getElementById('extraUser2Email') || {}).value?.trim().toLowerCase() || '';
+        const u2Entity = (document.getElementById('extraUser2Entity') || {}).value || 'Business';
+        const u2Pass = (document.getElementById('extraUser2Password') || {}).value || '';
+        const u3Email = (document.getElementById('extraUser3Email') || {}).value?.trim().toLowerCase() || '';
+        const u3Entity = (document.getElementById('extraUser3Entity') || {}).value || 'Business';
+        const u3Pass = (document.getElementById('extraUser3Password') || {}).value || '';
+        
+        if (!u2Email || !u2Pass || !u3Email || !u3Pass) {
+          if (msgEl) { msgEl.textContent = 'Please fill all fields for the additional users.'; msgEl.style.color = '#b00'; }
+          return;
+        }
+        if (u2Pass.length < 6 || u3Pass.length < 6) {
+          if (msgEl) { msgEl.textContent = 'Passwords must be at least 6 characters.'; msgEl.style.color = '#b00'; }
+          return;
+        }
+        if (!isValidEmail(u2Email) || !isValidEmail(u3Email)) {
+          if (msgEl) { msgEl.textContent = 'Please enter valid email addresses for additional users.'; msgEl.style.color = '#b00'; }
+          return;
+        }
+        if (u2Email === u3Email) {
+          if (msgEl) { msgEl.textContent = 'User 2 and User 3 must have different email addresses.'; msgEl.style.color = '#b00'; }
+          return;
+        }
+        // Check email uniqueness in a single pass
+        for (const u of state.users) {
+          if (u.email === u2Email || u.username === u2Email) {
+            if (msgEl) { msgEl.textContent = 'User 2 email already registered.'; msgEl.style.color = '#b00'; }
+            return;
+          }
+          if (u.email === u3Email || u.username === u3Email) {
+            if (msgEl) { msgEl.textContent = 'User 3 email already registered.'; msgEl.style.color = '#b00'; }
+            return;
+          }
+        }
+        
+        // Helper to build an additional user object
+        function buildExtraUser(email, entity, passwordHash) {
+          return {
+            id: uid('user'),
+            username: email,
+            display: email,
+            email: email,
+            passwordHash: passwordHash,
+            role: 'User',
+            isAdmin: false,
+            permissions: { view: true, edit: true, delete: false },
+            plan: entity,
+            entity: entity,
+            createdAt: Date.now(),
+            trialStart: Date.now(),
+            tourSeen: false,
+            createdDuringSignup: true
+          };
+        }
+        
+        // Create additional users
+        const u2Hash = await sha256Hex(u2Pass);
+        const u3Hash = await sha256Hex(u3Pass);
+        const user2 = buildExtraUser(u2Email, u2Entity, u2Hash);
+        const user3 = buildExtraUser(u3Email, u3Entity, u3Hash);
+        
+        state.users.push(user2);
+        state.users.push(user3);
+        state.transactions[user2.id] = {};
+        state.transactions[user3.id] = {};
+        
+        addAudit('user.add', 'user', user2.id, 'Additional user created during Accountant signup: ' + u2Email);
+        addAudit('user.add', 'user', user3.id, 'Additional user created during Accountant signup: ' + u3Email);
       }
       
       // Entity type is noted for record but no business is auto-created.
@@ -10221,6 +10363,9 @@
       
       // Remove the beforeunload block
       window.removeEventListener('beforeunload', blockPageLeaveUntilEntitySelected);
+      
+      // Save the 2 new users before completing signup flow
+      saveState();
       
       // Complete signup flow
       completeSignupFlow(pendingSignupUserId);
