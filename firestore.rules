@@ -1,0 +1,84 @@
+rules_version = '2';
+
+// Nigeria Tax Calculator — Firestore Security Rules
+// Phase 1 — tenant isolation
+//
+// Collections in scope:
+//   users/{uid}
+//   businesses/{businessId}
+//   businesses/{businessId}/members/{uid}
+//   businesses/{businessId}/transactions/{txnId}
+//   businesses/{businessId}/billing/subscription
+//
+// Deployment:
+//   firebase deploy --only firestore:rules
+//   OR copy-paste into the Firebase Console → Firestore → Rules tab
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // Returns true when the calling user is a member of the business.
+    // Reads the members sub-collection — efficient single-doc read.
+    function isMember(businessId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+    }
+
+    // ── users/{uid} ──────────────────────────────────────────────────────
+    // Each user may read and update only their own profile document.
+    // Fields like migrationComplete and lastLoginAt are written by the app.
+    match /users/{uid} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;  // soft-delete only — never hard-delete user docs
+    }
+
+    // ── businesses/{businessId} ──────────────────────────────────────────
+    match /businesses/{businessId} {
+      // Only members may read the business document.
+      allow read:   if isMember(businessId);
+      // Only members may create / update business metadata.
+      // (Owner is added as a member during creation, so this is safe.)
+      allow create: if isAuthenticated();
+      allow update: if isMember(businessId);
+      allow delete: if false;  // deactivate via status field; never hard-delete
+
+      // ── members sub-collection ──────────────────────────────────────
+      match /members/{uid} {
+        // Members can see who else is in the business.
+        allow read:   if isMember(businessId);
+        // A user can add themselves when creating a new business (uid matches).
+        // Existing members can add others.
+        allow create: if isAuthenticated() && (request.auth.uid == uid || isMember(businessId));
+        allow update: if isMember(businessId);
+        allow delete: if isMember(businessId);
+      }
+
+      // ── transactions sub-collection ─────────────────────────────────
+      match /transactions/{txnId} {
+        allow read:   if isMember(businessId);
+        allow create: if isMember(businessId);
+        allow update: if isMember(businessId);
+        allow delete: if isMember(businessId);
+      }
+
+      // ── billing sub-collection ───────────────────────────────────────
+      // Clients may read the subscription document to gate features.
+      // Only the backend (Admin SDK / Cloud Functions) may write billing docs.
+      match /billing/{docId} {
+        allow read:   if isMember(businessId);
+        allow write:  if false;  // backend-only writes via Admin SDK
+      }
+    }
+  }
+}
