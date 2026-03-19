@@ -378,9 +378,11 @@
   }
 
   function _markMigrationComplete(db, firebaseUid, localUserId) {
-    // Mark in Firestore
+    // Mark in Firestore (use an intermediate object for ES5 compatibility)
+    var migrationData = { migrationAt: serverTs(), localUserId: localUserId };
+    migrationData[MIGRATION_FS_FIELD] = true;
     var fsPromise = db.collection('users').doc(firebaseUid).set(
-      { [MIGRATION_FS_FIELD]: true, migrationAt: serverTs(), localUserId: localUserId },
+      migrationData,
       { merge: true }
     ).catch(function () {});
 
