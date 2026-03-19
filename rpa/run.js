@@ -19,7 +19,7 @@
  *   TAXPROMAX_BASE_URL    Base URL (default: https://taxpromax.firs.gov.ng)
  *   TAXPROMAX_LOGIN_URL   Full login URL (default: BASE_URL/taxpayer/logincit)
  *   TAXPROMAX_PENDING_URL Pending-filings URL (default: BASE_URL/taxpayer/pending)
- *   TAXPROMAX_SCHEDULE_URL Specific schedule URL; skips clicking Process if set
+ *   TAXPROMAX_SCHEDULE_URL Specific schedule URL override for /taxpayer/sch26?id=...; skips clicking Process if set
  *   RPA_MODE              "review" | "submit"  (default: "review")
  *   SELECTORS_FILE        Path to selectors JSON (default: ./selectors.taxpromax.example.json)
  *   FILING_JSON           Path to filing payload  (default: ./filing.sample.json)
@@ -213,36 +213,41 @@ async function run() {
     await page.waitForLoadState('networkidle');
     await snap(page, dir, '03-pending-page');
 
-    // ── Step 3: Click "Process" on the target filing row ──────────────────
+    // ── Step 3: Click "Process" on the "Installment Payment" row ─────────
     if (!scheduleUrl) {
-      step('Locate and click Process button');
+      step('Locate and click Process button for Installment Payment row');
 
-      const rowSel = sel.pending?.filingRow;
-      const btnSel = sel.pending?.processButton || 'text=Process';
+      const rowSel = sel.pending?.filingRow || 'tr, .filing-row, [class*="row"]';
+      const btnSel = sel.pending?.processButton || 'text=Process, button:has-text("Process"), a:has-text("Process")';
 
       let clickedRow = false;
 
-      // If we have a row selector and a TIN, try to find the matching row first
-      if (rowSel && (filing.tin || filing.period)) {
-        const rows = page.locator(rowSel);
-        const count = await rows.count();
-        for (let i = 0; i < count; i++) {
-          const row = rows.nth(i);
-          const text = await row.textContent().catch(() => '');
-          const matchesTin    = filing.tin    && text.includes(filing.tin);
-          const matchesPeriod = filing.period && text.includes(filing.period);
-          if (matchesTin || matchesPeriod) {
-            await row.locator(btnSel).click();
-            clickedRow = true;
-            step('Clicked Process on matched row', { tin: filing.tin, period: filing.period });
-            break;
-          }
+      // Primary: find the row that contains "Installment Payment" text
+      const rows = page.locator(rowSel);
+      const count = await rows.count();
+      for (let i = 0; i < count; i++) {
+        const row = rows.nth(i);
+        const text = await row.textContent().catch(() => '');
+        const lowerText = text.toLowerCase();
+        const matchesInstallment = lowerText.includes('installment payment') ||
+                                   lowerText.includes('instalment payment');
+        const matchesTin    = filing.tin    && text.includes(filing.tin);
+        const matchesPeriod = filing.period && text.includes(filing.period);
+        if (matchesInstallment || (matchesTin && matchesPeriod)) {
+          await row.locator(btnSel).first().click();
+          clickedRow = true;
+          step('Clicked Process on matched row', {
+            matchedText: text.trim().slice(0, 80),
+            tin: filing.tin,
+            period: filing.period,
+          });
+          break;
         }
       }
 
       if (!clickedRow) {
         // Fall back: click the first visible Process button
-        step('No row match found — clicking first Process button');
+        step('No matching row found — clicking first Process button as fallback');
         await page.locator(btnSel).first().click();
       }
 
@@ -257,7 +262,19 @@ async function run() {
       await page.goto(scheduleUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForLoadState('networkidle');
     }
-    step('On schedule page', { url: targetScheduleUrl });
+
+    // ── Verify we landed on /taxpayer/sch26?id=... ─────────────────────
+    const currentScheduleUrl = page.url();
+    const onSch26 = /\/taxpayer\/sch26\?id=/i.test(currentScheduleUrl);
+    if (onSch26) {
+      step('Verified: landed on /taxpayer/sch26?id=...', { url: currentScheduleUrl });
+    } else {
+      const msg = `Expected URL to match /taxpayer/sch26?id=... but got: ${currentScheduleUrl}`;
+      logError('Schedule URL verification', new Error(msg));
+      step('Warning: schedule URL did not match expected pattern', { url: currentScheduleUrl });
+    }
+
+    step('On schedule page', { url: currentScheduleUrl });
     await snap(page, dir, '05-schedule-page');
 
     // ── Step 5: Set Schedule Status (dropdown) ────────────────────────────
