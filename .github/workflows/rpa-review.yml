@@ -1,0 +1,65 @@
+name: TaxProMax RPA — Review Mode
+
+# ── Trigger ───────────────────────────────────────────────────────────────────
+# Manual only. This workflow NEVER auto-triggers on push or pull_request.
+# It always runs in review mode — the final Submit button is never clicked.
+on:
+  workflow_dispatch:
+    inputs:
+      schedule_url:
+        description: "Optional: override schedule URL (e.g. /taxpayer/sch?id=12345)"
+        required: false
+        default: ""
+      filing_note:
+        description: "Optional: short note to identify this run (for artifact naming)"
+        required: false
+        default: "manual"
+
+# ── Permissions ───────────────────────────────────────────────────────────────
+permissions:
+  contents: read
+
+jobs:
+  rpa-review:
+    name: RPA Review Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: rpa/package-lock.json
+
+      - name: Install dependencies
+        working-directory: rpa
+        run: npm ci
+
+      - name: Install Playwright Chromium browser
+        working-directory: rpa
+        run: npx playwright install --with-deps chromium
+
+      - name: Run RPA in review mode
+        working-directory: rpa
+        env:
+          TAXPROMAX_EMAIL: ${{ secrets.TAXPROMAX_EMAIL }}
+          TAXPROMAX_PASSWORD: ${{ secrets.TAXPROMAX_PASSWORD }}
+          TAXPROMAX_SCHEDULE_URL: ${{ github.event.inputs.schedule_url }}
+          RPA_MODE: review
+          HEADLESS: "true"
+          SLOW_MO: "0"
+          SELECTORS_FILE: "./selectors.taxpromax.example.json"
+          FILING_JSON: "./filing.sample.json"
+        run: node run.js
+
+      - name: Upload artifacts (screenshots + log)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpa-artifacts-${{ github.event.inputs.filing_note || 'run' }}-${{ github.run_number }}
+          path: rpa/artifacts/
+          retention-days: 30
