@@ -3333,8 +3333,62 @@
     document.getElementById('btnExportXlsx').addEventListener('click', ()=> exportCurrentReport('xlsx'));
     document.getElementById('btnExportTaxProMaxCIT').addEventListener('click', () => {
       function buildTaxProMaxCITPayload() {
+        const b = findBiz(selectedBizId);
+
+        // ── P&L figures ────────────────────────────────────────────────────
+        const pl = computePLFigures(selectedBizId, selectedUserId);
+        const depreciation = computeTotalDepreciation();
+        const capitalAllowance = computeTotalCapitalAllowance() + ((b && b.caCarryForward) || 0);
+
+        // ── CIT-specific adjustments ───────────────────────────────────────
+        const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
+        let disallowableExpenses = 0, nonTaxableIncome = 0;
+        if (b) {
+          for (const t of arr) {
+            const acctObj = findAccount(b, t.accountId);
+            const accountName = (acctObj && acctObj.name) || t.accountName || '';
+            if (TAX_PAYMENT_ACCOUNTS.includes(accountName)) continue;
+            if (t.accountCategory === 'Revenue' || t.action === 'InventorySale') {
+              if ((acctObj && acctObj.nonTaxableDefault) || t.adjustmentType === 'nontaxable') {
+                nonTaxableIncome += Number(t.adjustmentAmount || t.amount || 0);
+              }
+            }
+            if (t.accountCategory === 'Expense') {
+              if ((acctObj && acctObj.disallowableDefault) || t.adjustmentType === 'disallowable') {
+                disallowableExpenses += Number(t.adjustmentAmount || t.amount || 0);
+              }
+            }
+          }
+          disallowableExpenses += depreciation;
+        }
+        const profitAdjustment = disallowableExpenses - nonTaxableIncome;
+        const lossBF = Number((b && b.lossBroughtForward) || 0);
+
+        // ── Balance-sheet extracts (PPE NBV + Inventory) ───────────────────
+        let ppeNBV = 0;
+        let inventoryTotal = 0;
+        if (b) {
+          for (const a of (b.assets || [])) {
+            if (a.disposed) continue;
+            ppeNBV += Number(a.cost || 0) - Number(a.accumulatedDep || 0);
+          }
+          for (const item of (b.inventory || [])) {
+            inventoryTotal += (item.qty || 0) * (item.avgCost || 0);
+          }
+        }
+
+        // ── Metadata ───────────────────────────────────────────────────────
+        const periodYear = (b && b.periodEnd)
+          ? b.periodEnd.substring(0, 4)
+          : String(new Date().getFullYear());
+
         return {
-          metadata: { generatedAt: new Date().toISOString() },
+          metadata: {
+            generatedAt: new Date().toISOString(),
+            businessName: (b && b.name) || '',
+            tin:          (b && b.tin)  || '',
+            period:       periodYear,
+          },
           taxType: 'CIT',
           robotHints: {
             returningCurrencyControl: 'radio',
@@ -3346,7 +3400,23 @@
             'DirectExpenses', 'IndirectExpenses', 'InvestmentIncome',
             'NonTaxableIncome', 'DisallowableExpenses', 'RelatedParty',
             'Disclosures', 'VAT', 'PAYE', 'WHT', 'PIT', 'CapitalAllowance'
-          ]
+          ],
+          amounts: {
+            revenue:                   Math.round(pl.totalRevenue),
+            nonCurrentAssets:          Math.round(ppeNBV),
+            currentAsset:              Math.round(inventoryTotal),
+            costOfSales:               Math.round(pl.totalCOGS),
+            otherIncome:               Math.round(pl.totalOtherIncome),
+            operatingExpenses:         Math.round(pl.totalExpense - depreciation),
+            currentLiabilities:        0,
+            longTermLiabilities:       0,
+            ownershipCapitalStructure: 0,
+            reserve:                   Math.round(pl.retainedProfitCF),
+            profitAdjustment:          Math.round(profitAdjustment),
+            balancingAdjustment:       0,
+            lossRelieved:              Math.round(lossBF),
+            capitalAllowance:          Math.round(capitalAllowance)
+          }
         };
       }
       const blob = new Blob([JSON.stringify(buildTaxProMaxCITPayload(), null, 2)], { type: 'application/json' });

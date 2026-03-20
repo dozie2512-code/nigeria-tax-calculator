@@ -8,6 +8,11 @@ This folder (`rpa/`) contains a **Playwright-based RPA runner** that automates C
 > Always run in **review mode** first, inspect the screenshots and log, and only switch to
 > **submit mode** when you are satisfied that every figure is correct.
 
+> 🔒 **CAPTCHA / MFA limitation:** The runner **cannot bypass CAPTCHAs or multi-factor
+> authentication (MFA)**. If TaxProMax presents a CAPTCHA or OTP screen during login,
+> the runner will pause and prompt you to complete it manually in the browser window.
+> See [Manual Login Pause](#manual-login-pause) below.
+
 ---
 
 ## Table of Contents
@@ -48,6 +53,7 @@ npm run install:browsers
 # or: npx playwright install chromium
 ```
 
+
 ---
 
 ## 3. Configuration
@@ -60,20 +66,55 @@ cp ../.env.example rpa/.env     # if running from the repo root
 cp ../.env.example .env         # if you are already inside rpa/
 ```
 
-Edit `rpa/.env` and fill in at minimum:
+Setting credentials is **optional**. If `TAXPROMAX_EMAIL` and `TAXPROMAX_PASSWORD` are both
+set, the runner logs in automatically. If either is missing, the runner opens the browser
+and pauses so you can log in manually (see [Manual Login Pause](#manual-login-pause)).
 
 ```dotenv
+# Optional — if absent the runner opens a browser for manual login
 TAXPROMAX_EMAIL=your_email@example.com
 TAXPROMAX_PASSWORD=your_password
 ```
 
 > 🔒 `rpa/.env` is listed in `rpa/.gitignore`. Never commit it.
 
+### Manual Login Pause
+
+If `TAXPROMAX_EMAIL` or `TAXPROMAX_PASSWORD` are not set, the runner will:
+
+1. Open a visible browser window and navigate to the TaxProMax login page.
+2. Print a prompt in the terminal:
+
+   ```
+   [rpa]  ℹ️  MANUAL LOGIN REQUIRED
+   [rpa]  The browser is open. Please:
+   [rpa]    1. Log in to TaxProMax in the browser window.
+   [rpa]    2. Complete any CAPTCHA or multi-factor authentication.
+   [rpa]    3. Return here and press Enter when you are logged in.
+   ```
+
+3. Wait for you to press **Enter** before continuing.
+
+> ⚠️ **CAPTCHA / MFA**: The runner **cannot** solve CAPTCHAs or enter OTP codes
+> automatically. Use manual login mode whenever the portal prompts for these.
+> Automated login with credentials also cannot bypass these challenges — if
+> the portal adds a CAPTCHA, switch to manual mode.
+
 ### 3b. Choose a selectors file
 
 The file `rpa/selectors.taxpromax.example.json` ships with **placeholder** selectors.
 You must replace every `"REPLACE_ME ..."` value with the real CSS selector for that
 field on TaxProMax before the form-filling steps will work.
+
+The file now includes selectors for the key SCH26 interactions:
+
+| Selector key | Purpose |
+|---|---|
+| `schedule.returningCurrencyRadio` | Radio button for selecting Naira (NGN) as returning currency |
+| `schedule.proceedButton` | The "Proceed" button on the schedule page |
+| `schedule.fields.*` | Numeric input fields (Revenue, COGS, Capital Allowance, etc.) |
+| `schedule.saveButton` | Save / Validate button |
+| `schedule.submitButton` | Final Submit button (submit mode only) |
 
 See **Section 4** for how to get those selectors.
 
@@ -130,11 +171,43 @@ After logging in, visit each page below and copy selectors for all form fields:
 | Page | What to capture |
 |---|---|
 | `/taxpayer/pending` | Row selector, Process button |
-| `/taxpayer/sch?id=...` | Each numeric input, status dropdown, Save/Submit buttons |
+| `/taxpayer/sch?id=...` | Returning-currency radio, each numeric input, status dropdown, Proceed / Save / Submit buttons |
 
 ---
 
 ## 5. Preparing a Filing Payload
+
+### Option A — Use the app's "Export TaxProMax (CIT) JSON" button (recommended)
+
+1. Open the **nigeria-tax-calculator** app and enter your accounting data.
+2. Go to **Reports → CIT Report**.
+3. Click **Export TaxProMax (CIT) JSON** — this downloads `TaxProMax_CIT.json`
+   with your computed CIT figures already populated.
+4. Copy the file into the `rpa/` folder:
+
+   ```bash
+   cp ~/Downloads/TaxProMax_CIT.json rpa/TaxProMax_CIT.json
+   ```
+
+5. Run the transformer to create `filing.json`:
+
+   ```bash
+   cd rpa
+   node transform.js                            # uses ./TaxProMax_CIT.json → ./filing.json
+   # or provide explicit paths:
+   node transform.js ~/Downloads/TaxProMax_CIT.json ./filing.json
+   # or using the npm script:
+   npm run transform
+   ```
+
+   The transformer reads the export and creates `filing.json` in the same directory.
+   If the export already contains computed amounts (new app format), they are copied
+   directly. If the export is a stub (no amounts), all fields are set to `0` for you
+   to fill in manually.
+
+6. Review `rpa/filing.json` and adjust any values if needed.
+
+### Option B — Edit the sample payload manually
 
 Edit `rpa/filing.sample.json` (or create `rpa/filing.json`) with your actual CIT figures:
 
@@ -184,12 +257,14 @@ npm run rpa:review
 ```
 
 The bot will:
-- Log in to TaxProMax
+- Log in to TaxProMax (automated or manual pause if credentials not set)
 - Navigate to Pending filings
 - Click Process
 - Open the CIT Schedule page
-- Fill all configured fields
+- Select the returning currency (radio button)
+- Fill all configured numeric fields
 - Click Save/Validate
+- Click Proceed
 - **Stop here — it will NOT click Submit**
 - Save screenshots + a JSON log to `rpa/artifacts/<timestamp>/`
 
@@ -218,6 +293,9 @@ TAXPROMAX_SCHEDULE_URL=https://taxpromax.firs.gov.ng/taxpayer/sch?id=21302371 no
 HEADLESS=true node run.js
 ```
 
+> ℹ️ Headless mode requires `TAXPROMAX_EMAIL` and `TAXPROMAX_PASSWORD` to be set.
+> Manual login mode (`HEADLESS=true` without credentials) is not supported.
+
 ---
 
 ## 7. Understanding the Output (Artifacts)
@@ -233,8 +311,9 @@ rpa/artifacts/2024-08-15_10-30-45/
   05-schedule-page.png       Schedule form before filling
   06-fields-filled.png       Schedule form after filling all fields
   07-after-save.png          After clicking Save/Validate
-  08-review-stop.png         (review mode) Final state before Submit
-  08-submitted.png           (submit mode) Confirmation page
+  08-after-proceed.png       After clicking Proceed
+  09-review-stop.png         (review mode) Final state before Submit
+  09-submitted.png           (submit mode) Confirmation page
   99-error.png               (if run failed) Error state
   run-log.json               Full step-by-step JSON log
 ```
@@ -250,6 +329,8 @@ rpa/artifacts/2024-08-15_10-30-45/
 | `RPA_MODE` | `review` / `submit` | `review` | Controls whether final Submit is clicked |
 | `HEADLESS` | `true` / `false` | `false` | `true` hides the browser window (required in CI) |
 | `SLOW_MO` | number (ms) | `80` | Pause between actions; increase to debug |
+| `TAXPROMAX_EMAIL` | string | _(none)_ | If blank, runner pauses for manual login |
+| `TAXPROMAX_PASSWORD` | string | _(none)_ | If blank, runner pauses for manual login |
 
 ---
 
@@ -283,22 +364,28 @@ Go to **Settings → Secrets and variables → Actions** and add:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Required env var not set` | Missing `.env` or `export` | Copy `.env.example` → `rpa/.env` and fill credentials |
+| `Manual login mode requires a visible browser` | `HEADLESS=true` with no credentials | Remove `HEADLESS=true` or set credentials in `.env` |
 | `Login appears to have failed` | Wrong credentials or portal down | Verify credentials in browser first |
 | `Timeout: element not found` | Selector is wrong or page not loaded | Update selectors; increase timeout or `SLOW_MO` |
 | `submitButton not configured` | Running submit mode without real selector | Add `sel.schedule.submitButton` to your selectors file |
 | Fields not filled | All `REPLACE_ME` placeholder selectors | Inspect the page in DevTools (see Section 4) |
 | Bot fills wrong row | TIN/period not matching | Confirm `tin` and `period` in `filing.json` match portal data |
+| CAPTCHA / OTP screen appears | TaxProMax MFA | Switch to manual login mode (omit credentials) and complete CAPTCHA yourself |
+| Runner hangs waiting for Enter | Manual login mode active | Complete login in browser then press Enter in the terminal |
+| `Input file not found: ./TaxProMax_CIT.json` | transform.js can't find export | Copy `TaxProMax_CIT.json` into `rpa/` or pass full path to `node transform.js` |
 
 ---
 
 ## 11. Safety & Disclaimer
 
+- **CAPTCHA and MFA cannot be bypassed.** The runner will open a browser and pause for
+  manual completion. Never store OTP codes or bypass tokens in code or environment files.
 - **This automation can break** if TaxProMax changes its UI (selector changes, URL changes,
   new CAPTCHA). Monitor for portal updates and re-inspect selectors when the bot starts
   failing.
 - **Always run in review mode first.** Check every screenshot before enabling submit mode.
-- **Keep credentials secret.** Never commit `rpa/.env` or `rpa/filing.json` to version control.
+- **Keep credentials secret.** Never commit `rpa/.env`, `rpa/filing.json`, or any
+  `*.auth.json` / `*.storageState.json` files to version control (all are in `.gitignore`).
 - **No liability.** This tool is provided as-is. The repo owners and contributors are not
   responsible for incorrect or missed filings caused by automation errors.
 - The bot is designed for **human-assisted workflows** — a human should review the

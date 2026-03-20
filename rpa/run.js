@@ -11,7 +11,7 @@
  *   npm run rpa
  *   RPA_MODE=submit node run.js
  *
- * Required environment variables (see .env.example):
+ * Optional credentials (if omitted the browser opens for manual login):
  *   TAXPROMAX_EMAIL       TaxProMax login e-mail / TIN
  *   TAXPROMAX_PASSWORD    TaxProMax password
  *
@@ -22,7 +22,7 @@
  *   TAXPROMAX_SCHEDULE_URL Specific schedule URL; skips clicking Process if set
  *   RPA_MODE              "review" | "submit"  (default: "review")
  *   SELECTORS_FILE        Path to selectors JSON (default: ./selectors.taxpromax.example.json)
- *   FILING_JSON           Path to filing payload  (default: ./filing.sample.json)
+ *   FILING_JSON           Path to filing payload  (default: ./TaxProMax_CIT.json → ./filing.sample.json)
  *   HEADLESS              "true" | "false"  (default: "false")
  *   SLOW_MO               Browser slowMo in ms (default: 80)
  */
@@ -30,6 +30,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 // Support loading a .env file if present (optional; dotenv is a devDependency)
@@ -48,17 +49,6 @@ function getEnv(key, fallback = '') {
   return process.env[key] ?? fallback;
 }
 
-function requireEnv(key) {
-  const val = process.env[key];
-  if (!val) {
-    console.error(`\n[rpa] ERROR: Required environment variable "${key}" is not set.`);
-    console.error('       Copy .env.example to rpa/.env and fill in your credentials.');
-    console.error('       See RPA.md for setup instructions.\n');
-    process.exit(1);
-  }
-  return val;
-}
-
 function loadJson(filePath) {
   const resolved = path.isAbsolute(filePath)
     ? filePath
@@ -73,6 +63,39 @@ function loadJson(filePath) {
     console.error(`[rpa] ERROR: Could not parse JSON: ${resolved}\n${e.message}`);
     process.exit(1);
   }
+}
+
+/**
+ * Resolve the filing payload path.
+ * Priority: FILING_JSON env → TaxProMax_CIT.json (app export) → filing.sample.json
+ */
+function resolveFilingPath() {
+  const envVal = process.env['FILING_JSON'];
+  if (envVal) return envVal;
+
+  const citPath = path.resolve(__dirname, './TaxProMax_CIT.json');
+  if (fs.existsSync(citPath)) {
+    console.log('[rpa] ℹ️  Using exported TaxProMax_CIT.json as filing payload.');
+    return citPath;
+  }
+
+  return './filing.sample.json';
+}
+
+/**
+ * Normalise either a native TaxProMax_CIT.json (with `amounts`) or a legacy
+ * filing.sample.json into the internal filing object used by the runner.
+ */
+function normaliseFilingPayload(raw) {
+  // Already in internal format
+  if (raw.amounts && typeof raw.amounts === 'object') return raw;
+
+  // TaxProMax export with no amounts yet — return a stub so the runner can still
+  // proceed (fields will be skipped as "no value in payload").
+  console.warn('[rpa] ⚠️  Filing payload has no `amounts` section.');
+  console.warn('[rpa]    Run `node transform.js` to build a filing.json with real values,');
+  console.warn('[rpa]    or set FILING_JSON=./filing.json in your .env.\n');
+  return { ...raw, amounts: {} };
 }
 
 function makeArtifactDir() {
@@ -93,12 +116,23 @@ async function snap(page, dir, name) {
   return p;
 }
 
+/** Pause until the user presses Enter in the terminal. */
+function waitForEnter(prompt) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(prompt, () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function run() {
   // ── Read & validate configuration ─────────────────────────────────────────
-  const email    = requireEnv('TAXPROMAX_EMAIL');
-  const password = requireEnv('TAXPROMAX_PASSWORD');
+  const email    = process.env['TAXPROMAX_EMAIL']    || '';
+  const password = process.env['TAXPROMAX_PASSWORD'] || '';
 
   const baseUrl       = getEnv('TAXPROMAX_BASE_URL',    'https://taxpromax.firs.gov.ng');
   const loginUrl      = getEnv('TAXPROMAX_LOGIN_URL',   `${baseUrl}/taxpayer/logincit`);
@@ -108,10 +142,17 @@ async function run() {
   const headless      = getEnv('HEADLESS',               'false') === 'true';
   const slowMo        = parseInt(getEnv('SLOW_MO', '80'), 10);
   const selectorsFile = getEnv('SELECTORS_FILE', './selectors.taxpromax.example.json');
-  const filingFile    = getEnv('FILING_JSON',    './filing.sample.json');
+  const filingFile    = resolveFilingPath();
 
   if (!['review', 'submit'].includes(rpaMode)) {
     console.error(`[rpa] ERROR: RPA_MODE must be "review" or "submit", got "${rpaMode}"`);
+    process.exit(1);
+  }
+
+  const manualLogin = !email || !password;
+  if (manualLogin && headless) {
+    console.error('[rpa] ERROR: Manual login mode requires a visible browser (HEADLESS=false).');
+    console.error('       Either set TAXPROMAX_EMAIL + TAXPROMAX_PASSWORD or run without HEADLESS=true.\n');
     process.exit(1);
   }
 
@@ -119,6 +160,7 @@ async function run() {
   console.log(`[rpa]  TaxProMax CIT RPA Runner`);
   console.log(`[rpa]  Mode     : ${rpaMode.toUpperCase()}`);
   console.log(`[rpa]  Headless : ${headless}`);
+  console.log(`[rpa]  Login    : ${manualLogin ? 'MANUAL (browser will open — log in yourself)' : 'automated'}`);
   console.log('[rpa] ═══════════════════════════════════════════════\n');
 
   if (rpaMode === 'submit') {
@@ -130,7 +172,7 @@ async function run() {
 
   // ── Load selectors + filing payload ───────────────────────────────────────
   const sel    = loadJson(selectorsFile);
-  const filing = loadJson(filingFile);
+  const filing = normaliseFilingPayload(loadJson(filingFile));
 
   // ── Artifact directory ─────────────────────────────────────────────────────
   const dir = makeArtifactDir();
@@ -178,30 +220,45 @@ async function run() {
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
     await snap(page, dir, '01-login-page');
 
-    step('Fill login credentials');
-    await page.locator(sel.login.emailField).waitFor({ state: 'visible' });
-    await page.locator(sel.login.emailField).fill(email);
-    await page.locator(sel.login.passwordField).fill(password);
+    if (manualLogin) {
+      // ── Manual login pause ──────────────────────────────────────────────
+      step('Manual login required');
+      console.log('\n[rpa] ══════════════════════════════════════════════════════');
+      console.log('[rpa]  ℹ️  MANUAL LOGIN REQUIRED');
+      console.log('[rpa]  The browser is open. Please:');
+      console.log('[rpa]    1. Log in to TaxProMax in the browser window.');
+      console.log('[rpa]    2. Complete any CAPTCHA or multi-factor authentication.');
+      console.log('[rpa]    3. Return here and press Enter when you are logged in.');
+      console.log('[rpa] ══════════════════════════════════════════════════════\n');
+      await waitForEnter('[rpa] Press Enter once you have completed login in the browser... ');
+      step('Manual login acknowledged by user', { url: page.url() });
+    } else {
+      // ── Automated login ─────────────────────────────────────────────────
+      step('Fill login credentials');
+      await page.locator(sel.login.emailField).waitFor({ state: 'visible' });
+      await page.locator(sel.login.emailField).fill(email);
+      await page.locator(sel.login.passwordField).fill(password);
 
-    step('Submit login form');
-    await Promise.all([
-      page.waitForLoadState('networkidle'),
-      page.locator(sel.login.submitButton).click(),
-    ]);
+      step('Submit login form');
+      await Promise.all([
+        page.waitForLoadState('networkidle'),
+        page.locator(sel.login.submitButton).click(),
+      ]);
 
-    // Detect failed login
-    const currentUrl = page.url();
-    const loginPaths = ['logincit', '/login', '/signin'];
-    if (loginPaths.some((p) => currentUrl.includes(p))) {
-      let errMsg = `Still on login page after submit (${currentUrl}).`;
-      if (sel.login.errorSelector) {
-        const errText = await page
-          .locator(sel.login.errorSelector)
-          .textContent()
-          .catch(() => null);
-        if (errText) errMsg = `Login failed: ${errText.trim()}`;
+      // Detect failed login
+      const currentUrl = page.url();
+      const loginPaths = ['logincit', '/login', '/signin'];
+      if (loginPaths.some((p) => currentUrl.includes(p))) {
+        let errMsg = `Still on login page after submit (${currentUrl}).`;
+        if (sel.login.errorSelector) {
+          const errText = await page
+            .locator(sel.login.errorSelector)
+            .textContent()
+            .catch(() => null);
+          if (errText) errMsg = `Login failed: ${errText.trim()}`;
+        }
+        throw new Error(errMsg);
       }
-      throw new Error(errMsg);
     }
 
     step('Login successful', { url: page.url() });
@@ -223,18 +280,20 @@ async function run() {
       let clickedRow = false;
 
       // If we have a row selector and a TIN, try to find the matching row first
-      if (rowSel && (filing.tin || filing.period)) {
+      if (rowSel && (filing.tin || filing.period || (filing.metadata && (filing.metadata.tin || filing.metadata.period)))) {
+        const tin    = filing.tin    || (filing.metadata && filing.metadata.tin)    || '';
+        const period = filing.period || (filing.metadata && filing.metadata.period) || '';
         const rows = page.locator(rowSel);
         const count = await rows.count();
         for (let i = 0; i < count; i++) {
           const row = rows.nth(i);
           const text = await row.textContent().catch(() => '');
-          const matchesTin    = filing.tin    && text.includes(filing.tin);
-          const matchesPeriod = filing.period && text.includes(filing.period);
+          const matchesTin    = tin    && text.includes(tin);
+          const matchesPeriod = period && text.includes(period);
           if (matchesTin || matchesPeriod) {
             await row.locator(btnSel).click();
             clickedRow = true;
-            step('Clicked Process on matched row', { tin: filing.tin, period: filing.period });
+            step('Clicked Process on matched row', { tin, period });
             break;
           }
         }
@@ -260,24 +319,45 @@ async function run() {
     step('On schedule page', { url: targetScheduleUrl });
     await snap(page, dir, '05-schedule-page');
 
-    // ── Step 5: Set Schedule Status (dropdown) ────────────────────────────
-    if (sel.schedule?.statusSelect && filing.scheduleStatus) {
-      try {
-        await page.selectOption(sel.schedule.statusSelect, filing.scheduleStatus);
-        step('Set schedule status', { value: filing.scheduleStatus });
-      } catch (err) {
-        logError('Set schedule status', err);
+    // ── Step 5: Select Returning Currency (radio) ─────────────────────────
+    if (sel.schedule?.returningCurrencyRadio) {
+      const radioCfg = sel.schedule.returningCurrencyRadio;
+      if (!String(radioCfg).startsWith('REPLACE_ME')) {
+        try {
+          await page.locator(radioCfg).waitFor({ state: 'visible', timeout: 5000 });
+          await page.locator(radioCfg).click();
+          step('Selected returning currency (radio)');
+        } catch (err) {
+          logError('Select returning currency radio', err);
+        }
+      } else {
+        step('Skip returning currency radio — selector not configured (REPLACE_ME)');
       }
     }
 
-    // ── Step 6: Fill all monetary / numeric fields ────────────────────────
+    // ── Step 6: Set Schedule Status (dropdown) ────────────────────────────
+    if (sel.schedule?.statusSelect && filing.scheduleStatus) {
+      const statusCfg = sel.schedule.statusSelect;
+      if (!String(statusCfg).startsWith('REPLACE_ME')) {
+        try {
+          await page.selectOption(statusCfg, filing.scheduleStatus);
+          step('Set schedule status', { value: filing.scheduleStatus });
+        } catch (err) {
+          logError('Set schedule status', err);
+        }
+      }
+    }
+
+    // ── Step 7: Fill all monetary / numeric fields ────────────────────────
     step('Filling CIT schedule fields');
     const fieldSelectors = sel.schedule?.fields || {};
     const amounts        = filing.amounts || {};
 
     for (const [fieldKey, selector] of Object.entries(fieldSelectors)) {
-      if (!selector) {
-        step(`Skip "${fieldKey}" — selector not configured`, { hint: 'Update selectors.taxpromax.example.json' });
+      // `_doc` is a documentation comment key in the selectors JSON — skip it
+      if (fieldKey === '_doc') continue;
+      if (!selector || String(selector).startsWith('REPLACE_ME')) {
+        step(`Skip "${fieldKey}" — selector not configured`, { hint: 'Update selectors file' });
         continue;
       }
       const value = amounts[fieldKey];
@@ -297,8 +377,8 @@ async function run() {
 
     await snap(page, dir, '06-fields-filled');
 
-    // ── Step 7: Click Save / Validate ─────────────────────────────────────
-    if (sel.schedule?.saveButton) {
+    // ── Step 8: Click Save / Validate ─────────────────────────────────────
+    if (sel.schedule?.saveButton && !String(sel.schedule.saveButton).startsWith('REPLACE_ME')) {
       step('Click Save/Validate');
       await page.locator(sel.schedule.saveButton).click();
       await page.waitForLoadState('networkidle');
@@ -307,9 +387,24 @@ async function run() {
       step('Skip Save — selector not configured');
     }
 
-    // ── Step 8: Review Mode — stop here ───────────────────────────────────
+    // ── Step 9: Click Proceed ─────────────────────────────────────────────
+    if (sel.schedule?.proceedButton && !String(sel.schedule.proceedButton).startsWith('REPLACE_ME')) {
+      try {
+        await page.locator(sel.schedule.proceedButton).waitFor({ state: 'visible', timeout: 5000 });
+        await page.locator(sel.schedule.proceedButton).click();
+        await page.waitForLoadState('networkidle');
+        await snap(page, dir, '08-after-proceed');
+        step('Clicked Proceed');
+      } catch (err) {
+        logError('Click Proceed button', err);
+      }
+    } else {
+      step('Skip Proceed — selector not configured');
+    }
+
+    // ── Step 10: Review Mode — stop here ───────────────────────────────────
     if (rpaMode === 'review') {
-      await snap(page, dir, '08-review-stop');
+      await snap(page, dir, '09-review-stop');
       step('REVIEW COMPLETE — stopped before final Submit (review mode)');
       console.log('\n[rpa] ══════════════════════════════════════════════════════');
       console.log('[rpa]  ✅ Review mode complete. Inspect artifacts below.');
@@ -317,21 +412,21 @@ async function run() {
       console.log('[rpa]  ℹ️  To submit, re-run with: RPA_MODE=submit node run.js');
       console.log('[rpa] ══════════════════════════════════════════════════════\n');
     } else {
-      // ── Step 9: Submit Mode ────────────────────────────────────────────
-      if (!sel.schedule?.submitButton) {
+      // ── Step 11: Submit Mode ───────────────────────────────────────────
+      if (!sel.schedule?.submitButton || String(sel.schedule.submitButton).startsWith('REPLACE_ME')) {
         throw new Error(
           'RPA_MODE=submit but sel.schedule.submitButton is not configured. ' +
-          'Update selectors.taxpromax.example.json with the correct Submit button selector.'
+          'Update your selectors file with the correct Submit button selector.'
         );
       }
 
       step('SUBMIT MODE — clicking final Submit button');
       await page.locator(sel.schedule.submitButton).click();
       await page.waitForLoadState('networkidle');
-      await snap(page, dir, '08-submitted');
+      await snap(page, dir, '09-submitted');
 
       // Capture confirmation / reference number
-      if (sel.schedule?.confirmationSelector) {
+      if (sel.schedule?.confirmationSelector && !String(sel.schedule.confirmationSelector).startsWith('REPLACE_ME')) {
         const confirmText = await page
           .locator(sel.schedule.confirmationSelector)
           .textContent()
