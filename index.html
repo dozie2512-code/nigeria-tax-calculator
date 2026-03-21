@@ -3334,11 +3334,22 @@
     document.getElementById('btnExportTaxProMaxCIT').addEventListener('click', () => {
       function buildTaxProMaxCITPayload() {
         const b = findBiz(selectedBizId);
+        const warnings = [];
+
+        // ── Period bounds ──────────────────────────────────────────────────
+        const periodYear = (b && b.periodEnd)
+          ? b.periodEnd.substring(0, 4)
+          : String(new Date().getFullYear());
+        const periodStart = (b && b.periodStart) || null;
+        const periodEnd   = (b && b.periodEnd)   || null;
+        if (!periodStart || !periodEnd) {
+          warnings.push('Business reporting period (periodStart / periodEnd) is not set; period-based asset filtering may be inaccurate.');
+        }
 
         // ── P&L figures ────────────────────────────────────────────────────
         const pl = computePLFigures(selectedBizId, selectedUserId);
         const depreciation = computeTotalDepreciation();
-        const capitalAllowance = computeTotalCapitalAllowance() + ((b && b.caCarryForward) || 0);
+        const capitalAllowanceTotal = computeTotalCapitalAllowance() + ((b && b.caCarryForward) || 0);
 
         // ── CIT-specific adjustments ───────────────────────────────────────
         const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][selectedBizId]) || [];
@@ -3377,17 +3388,84 @@
           }
         }
 
-        // ── Metadata ───────────────────────────────────────────────────────
-        const periodYear = (b && b.periodEnd)
-          ? b.periodEnd.substring(0, 4)
-          : String(new Date().getFullYear());
+        // ── Non-current assets additions/disposals summary ─────────────────
+        const ncaAdditions = [];
+        const ncaDisposals = [];
+        if (b) {
+          for (const a of (b.assets || [])) {
+            const assetCost = Number(a.cost || 0) + Number(a.openingCost || 0);
+            // Determine if this asset was acquired within the reporting period
+            const inAddPeriod = !a.isOpeningBalance &&
+              (!periodStart || !periodEnd || (a.purchaseDate >= periodStart && a.purchaseDate <= periodEnd));
+            if (inAddPeriod) {
+              ncaAdditions.push({
+                name:         a.name || '',
+                category:     a.category || '',
+                purchaseDate: a.purchaseDate || null,
+                cost:         Math.round(assetCost)
+              });
+            }
+            // Disposal summary for assets disposed within the reporting period
+            if (a.disposed && a.disposal && a.disposal.date) {
+              const inDispPeriod = (!periodStart || !periodEnd)
+                ? true
+                : (a.disposal.date >= periodStart && a.disposal.date <= periodEnd);
+              if (inDispPeriod) {
+                ncaDisposals.push({
+                  name:         a.name || '',
+                  category:     a.category || '',
+                  disposalDate: a.disposal.date,
+                  proceeds:     Math.round(Number(a.disposal.proceeds || 0)),
+                  twdv:         Math.round(Number(a.disposal.twdv   || 0)),
+                  gain:         Math.round(Number(a.disposal.gain   || 0))
+                });
+              }
+            }
+          }
+        } else {
+          warnings.push('No business selected; non-current assets summary is empty.');
+        }
+
+        // ── Capital allowance summary ───────────────────────────────────────
+        const caDetails = [];
+        if (b) {
+          for (const a of (b.assets || [])) {
+            if (a.disposed) continue;
+            const assetCost = Number(a.cost || 0) + Number(a.openingCost || 0);
+            const caRate    = Number(a.caPercent || b.caRateDefault || DEFAULTS.caRateDefault);
+            caDetails.push({
+              name:      a.name || '',
+              category:  a.category || '',
+              cost:      Math.round(assetCost),
+              caRate,
+              annualCA:  Math.round((caRate / 100) * assetCost)
+            });
+          }
+        }
+
+        // ── Fields not derivable from current data model (placeholders) ────
+        const currentLiabilities        = null;
+        const longTermLiabilities       = null;
+        const ownershipCapitalStructure = null;
+        warnings.push('currentLiabilities, longTermLiabilities, and ownershipCapitalStructure cannot be derived from the current data model — enter manually before filing.');
+
+        // ── Other validation warnings ──────────────────────────────────────
+        if (!b) {
+          warnings.push('No business selected; most fields will be 0 or empty.');
+        } else {
+          if (!b.tin) warnings.push('Business TIN is not set.');
+          if (pl.totalRevenue === 0) warnings.push('Revenue is 0; ensure transactions are recorded for the reporting period.');
+        }
 
         return {
           metadata: {
-            generatedAt: new Date().toISOString(),
+            generatedAt:  new Date().toISOString(),
             businessName: (b && b.name) || '',
             tin:          (b && b.tin)  || '',
             period:       periodYear,
+            periodStart,
+            periodEnd,
+            currency:     'NGN'
           },
           taxType: 'CIT',
           robotHints: {
@@ -3408,22 +3486,43 @@
             costOfSales:               Math.round(pl.totalCOGS),
             otherIncome:               Math.round(pl.totalOtherIncome),
             operatingExpenses:         Math.round(pl.totalExpense - depreciation),
-            currentLiabilities:        0,
-            longTermLiabilities:       0,
-            ownershipCapitalStructure: 0,
+            currentLiabilities,
+            longTermLiabilities,
+            ownershipCapitalStructure,
             reserve:                   Math.round(pl.retainedProfitCF),
             profitAdjustment:          Math.round(profitAdjustment),
             balancingAdjustment:       0,
             lossRelieved:              Math.round(lossBF),
-            capitalAllowance:          Math.round(capitalAllowance)
-          }
+            capitalAllowance:          Math.round(capitalAllowanceTotal)
+          },
+          nonCurrentAssetsSummary: {
+            additions:            ncaAdditions,
+            disposals:            ncaDisposals,
+            totalAdditions:       ncaAdditions.reduce((s, a) => s + a.cost, 0),
+            totalDisposalProceeds: ncaDisposals.reduce((s, d) => s + d.proceeds, 0)
+          },
+          capitalAllowanceSummary: {
+            total:       Math.round(capitalAllowanceTotal),
+            carryForward: Math.round(Number((b && b.caCarryForward) || 0)),
+            details:     caDetails
+          },
+          warnings
         };
       }
-      const blob = new Blob([JSON.stringify(buildTaxProMaxCITPayload(), null, 2)], { type: 'application/json' });
+
+      const payload = buildTaxProMaxCITPayload();
+      const safeName = (payload.metadata.businessName || 'business')
+        .replace(/[^a-zA-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+      const periodYear = payload.metadata.period || String(new Date().getFullYear());
+      const filename = `taxpromax-cit-${safeName}-${periodYear}.json`;
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'TaxProMax_CIT.json';
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
