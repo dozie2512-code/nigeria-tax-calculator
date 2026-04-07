@@ -130,7 +130,7 @@ After logging in, visit each page below and copy selectors for all form fields:
 | Page | What to capture |
 |---|---|
 | `/taxpayer/pending` | Row selector, Process button |
-| `/taxpayer/sch?id=...` | Each numeric input, status dropdown, Save/Submit buttons |
+| `/taxpayer/sch26?id=...` | Each numeric input, status dropdown, Save/Submit buttons |
 
 ---
 
@@ -209,7 +209,7 @@ npm run rpa:submit
 If you already know the schedule ID:
 
 ```bash
-TAXPROMAX_SCHEDULE_URL=https://taxpromax.firs.gov.ng/taxpayer/sch?id=21302371 node run.js
+TAXPROMAX_SCHEDULE_URL=https://taxpromax.firs.gov.ng/taxpayer/sch26?id=21302371 node run.js
 ```
 
 ### Headless mode (no browser window)

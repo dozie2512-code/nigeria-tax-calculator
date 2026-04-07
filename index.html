@@ -7618,9 +7618,112 @@
     
     html += `</tbody></table>`;
     html += `<p class="small-note" style="margin-top:12px;">Turnover threshold setting: ${fmt(threshold)} | Computed turnover: ${fmt(computedTurnover)} | CIT Rate: ${(citRate * 100).toFixed(0)}%</p>`;
-    
+
+    // ── TaxProMax RPA Export Panel ─────────────────────────────────────────
+    html += `<div style="margin-top:20px;padding:14px 16px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;">`;
+    html += `<h4 style="margin:0 0 6px 0;font-size:0.95rem;color:#1e40af;">🤖 TaxProMax RPA — Export &amp; Automate</h4>`;
+    html += `<p style="margin:0 0 10px 0;font-size:0.85rem;color:#1e3a8a;">Export this CIT computation as a <code>filing.json</code> for the Playwright RPA runner, `;
+    html += `then trigger the automation in <strong>review / validate-only</strong> mode.</p>`;
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;">`;
+    html += `<button class="small primary" onclick="exportRpaFilingJson('${bizId}')">⬇ Export filing.json for RPA</button>`;
+    html += `<a href="RPA.md" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;padding:5px 10px;font-size:0.8rem;border:1px solid #93c5fd;border-radius:6px;color:#1e40af;text-decoration:none;background:#fff;">📄 RPA Setup Guide</a>`;
+    html += `</div>`;
+    html += `<p style="margin:10px 0 0 0;font-size:0.78rem;color:#334155;">`;
+    html += `Run: <code style="background:#e0e7ff;padding:2px 5px;border-radius:3px;">cd rpa &amp;&amp; npm install &amp;&amp; RPA_MODE=review node run.js</code>`;
+    html += `</p>`;
+    html += `</div>`;
+
     return html;
   }
+
+  /**
+   * Exports CIT data as a filing.json payload for the TaxProMax RPA runner.
+   * Downloads the JSON file to the user's device.
+   * @param {string} bizId - Business ID
+   */
+  function exportRpaFilingJson(bizId) {
+    const b = state.businesses.find(x => x.id === bizId);
+    if (!b) { alert('Business not found'); return; }
+
+    const arr = (state.transactions[selectedUserId] && state.transactions[selectedUserId][bizId]) || [];
+
+    let revenue = 0, expenses = 0, otherIncome = 0, costOfSales = 0;
+    let currentAssets = 0, nonCurrentAssets = 0;
+    let currentLiabilities = 0, longTermLiabilities = 0;
+    let ownershipCapital = 0, reserve = 0;
+
+    for (const t of arr) {
+      const acct = findAccount(b, t.accountId);
+      const cat = acct?.category || t.accountCategory || '';
+      const name = (acct?.name || t.accountName || '').toLowerCase();
+      const amt = Number(t.amount || 0);
+      if (t.isOutstanding || t.isCITProvisionAuto) continue;
+
+      if (cat === 'Revenue') { revenue += amt; }
+      if (cat === 'Expense') {
+        if (name.includes('cost') || t.isCOGS) costOfSales += amt;
+        else expenses += amt;
+      }
+      if (cat === 'Asset') {
+        if (name.includes('current') && !name.includes('non')) currentAssets += amt;
+        else nonCurrentAssets += amt;
+      }
+      if (cat === 'Liability') {
+        if (name.includes('long') || name.includes('non-current')) longTermLiabilities += amt;
+        else currentLiabilities += amt;
+      }
+      if (cat === 'Capital') ownershipCapital += amt;
+      if (cat === 'Reserve') reserve += amt;
+    }
+    otherIncome = 0; // not separately tracked; left as 0
+
+    const capitalAllowance = computeTotalCapitalAllowance() + (b.caCarryForward || 0);
+    const lossBF = Number(b.lossBroughtForward || 0);
+    const depreciation = computeTotalDepreciation();
+
+    const periodStart = b.periodStart || '';
+    const periodEnd   = b.periodEnd   || '';
+    const period = periodEnd
+      ? new Date(periodEnd).getFullYear().toString()
+      : new Date().getFullYear().toString();
+
+    const payload = {
+      _doc: 'Exported from Nigeria Tax Calculator. Fill in real selectors before running the RPA.',
+      portal: 'TaxProMax',
+      taxType: 'CIT',
+      period,
+      tin: b.tin || '',
+      businessName: b.name || '',
+      scheduleStatus: 'Final',
+      amounts: {
+        revenue:                   Math.round(revenue),
+        nonCurrentAssets:          Math.round(nonCurrentAssets),
+        currentAsset:              Math.round(currentAssets),
+        costOfSales:               Math.round(costOfSales),
+        otherIncome:               Math.round(otherIncome),
+        operatingExpenses:         Math.round(expenses),
+        currentLiabilities:        Math.round(currentLiabilities),
+        longTermLiabilities:       Math.round(longTermLiabilities),
+        ownershipCapitalStructure: Math.round(ownershipCapital),
+        reserve:                   Math.round(reserve),
+        profitAdjustment:          Math.round(depreciation),
+        balancingAdjustment:       0,
+        lossRelieved:              Math.round(lossBF),
+        capitalAllowance:          Math.round(capitalAllowance),
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `filing-${(b.name || 'business').replace(/\s+/g, '-').toLowerCase()}-${period}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  window.exportRpaFilingJson = exportRpaFilingJson;
 
   /**
    * Generates a consolidated Filing Report for Tax Accountant users.
